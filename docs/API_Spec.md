@@ -3,7 +3,7 @@
 ## Backend API & Publish Workflow Specification
 
 **Status:** Implementation Specification
-**Scope:** Route Draft / Validation / Publish / Historical Query / Report Snapshot
+**Scope:** Route / SubRoute Draft / Validation / Publish / Historical Query / Report Snapshot
 
 ---
 
@@ -68,13 +68,25 @@ Response：
   "versionNo": 11,
   "validFrom": "...",
   "validTo": null,
-  "stops": [
+  "subRoutes": [
     {
-      "sequence": 1,
-      "stopIdentityId": 1001,
-      "stopVersionId": 2001,
-      "stopCode": "101",
-      "stopName": "A"
+      "subRouteId": 30701,
+      "subRouteName": "307",
+      "stopOfRoutes": [
+        {
+          "direction": 0,
+          "stops": [
+            {
+              "stopSequence": 1,
+              "stopId": 1001,
+              "stopVersionId": 2001,
+              "stopCode": "101",
+              "stopName": "A",
+              "stationId": 501
+            }
+          ]
+        }
+      ]
     }
   ]
 }
@@ -117,22 +129,32 @@ Response：
 
 # 5. Draft Mutation
 
+Draft 的站序操作以 SubRoute + Direction 為單位。
+
 例如新增 Stop：
 
 ```http
-POST /routes/{routeId}/drafts/{draftId}/stops
+POST /routes/{routeId}/drafts/{draftId}/subroutes/{subRouteId}/stop-of-routes
+```
+
+```json
+{
+  "direction": 0,
+  "stopSequence": 3,
+  "stopVersionId": 2005
+}
 ```
 
 刪除 Stop：
 
 ```http
-DELETE /routes/{routeId}/drafts/{draftId}/stops/{draftStopId}
+DELETE /routes/{routeId}/drafts/{draftId}/subroutes/{subRouteId}/stop-of-routes/{entryId}
 ```
 
 修改 Stop：
 
 ```http
-PATCH /routes/{routeId}/drafts/{draftId}/stops/{draftStopId}
+PATCH /routes/{routeId}/drafts/{draftId}/subroutes/{subRouteId}/stop-of-routes/{entryId}
 ```
 
 ### Important
@@ -212,6 +234,8 @@ Response：
 
 ```text
 STOP_NOT_FOUND
+SUBROUTE_NOT_FOUND
+INVALID_DIRECTION
 DUPLICATE_SEQUENCE
 INVALID_SEQUENCE
 INVALID_EFFECTIVE_TIME
@@ -292,9 +316,10 @@ BEGIN
  │
  ├─ Create RouteVersion
  │
- ├─ Create / reuse StopVersion
+ ├─ Create SubRouteVersion
  │
- ├─ Create RouteStopVersion
+ ├─ Create StopOfRouteVersion
+ │    （引用既有 StopVersion）
  │
  ├─ Update current_route_version_id
  │
@@ -340,7 +365,7 @@ new Stop Version
 同一：
 
 ```text
-stop_identity_id
+stop_id
 ```
 
 可以擁有多個 Stop Versions。
@@ -352,7 +377,7 @@ stop_identity_id
 C 被刪除：
 
 ```text
-stop_identity_id = 1003
+stop_id = 1003
 ```
 
 不能拿 1003 給 E。
@@ -360,7 +385,7 @@ stop_identity_id = 1003
 E 必須：
 
 ```text
-stop_identity_id = NEW_ID
+stop_id = NEW_ID
 ```
 
 即使：
@@ -453,7 +478,8 @@ Request：
 ```json
 {
   "snapshotAt": "2026-09-29T10:00:00Z",
-  "routes": [307, 308, 309]
+  "routes": [307, 308, 309],
+  "stationGroups": [71, 72]
 }
 ```
 
@@ -465,9 +491,14 @@ BEGIN
 resolve Route Version
 for each requested Route
 
+resolve StationGroup Version
+for each requested StationGroup
+
 create report_snapshot
 
 insert report_route_snapshot
+
+insert report_station_group_snapshot
 
 COMMIT
 ```
@@ -557,7 +588,9 @@ Report Snapshot
  ↓
 Route Version
  ↓
-Route Stop Version
+SubRoute Version
+ ↓
+StopOfRoute Version
  ↓
 Stop Version
  ↓
@@ -584,8 +617,8 @@ Current Route
 
 ```text
 Trip
-→ route_version_id
-→ route_stop_version
+→ route_version_id + subroute_id + direction
+→ stop_of_route_version
 → stop_version
 ```
 
@@ -661,8 +694,10 @@ Message Broker
 Reporting Consumer
  ↓
 DIM_ROUTE_VERSION
+DIM_SUBROUTE
 DIM_STOP
-DIM_ROUTE_STOP
+DIM_STATION
+DIM_STATION_GROUP
 FACT_TRIP
 ```
 
@@ -837,7 +872,7 @@ Given：
 
 ```text
 C:
-identity=1003
+stop_id=1003
 code=103
 ```
 
@@ -850,7 +885,7 @@ code=103
 Then:
 
 ```text
-E.identity != 1003
+E.stop_id != 1003
 ```
 
 ---
@@ -923,7 +958,7 @@ Then rerunning R001 must still resolve:
 
 ## Test 7 — Atomic Publish
 
-Force failure while creating Route Stop Version.
+Force failure while creating StopOfRoute Version.
 
 Expected:
 
@@ -945,7 +980,8 @@ Outbox Event NOT committed
 [ ] 是否有 revision check？
 [ ] 是否有 transaction boundary？
 [ ] 是否可能產生 overlapping valid interval？
-[ ] 是否可能重用 stop_identity_id？
+[ ] 是否可能重用 stop_id / station_id / station_group_id？
+[ ] SubRoute / Direction 是否完整保存？
 [ ] 是否更新 current pointer？
 [ ] 是否建立 Outbox Event？
 [ ] 是否支援 retry/idempotency？

@@ -4,7 +4,7 @@
 
 **Status:** Proposed Standard
 **Audience:** Backend / Database / Architecture / BI / Data Engineering
-**Scope:** Route、Stop、Trip、Report 的歷史版本與一致性管理
+**Scope:** Route、SubRoute、StopOfRoute、Stop、Station、StationGroup、Trip、Report 的歷史版本與一致性管理
 
 ---
 
@@ -51,8 +51,16 @@ Business Code
 route_id
 route_version_id
 
-stop_identity_id
+subroute_id
+
+stop_id
 stop_version_id
+
+station_id
+station_version_id
+
+station_group_id
+station_group_version_id
 
 stop_code
 ```
@@ -60,10 +68,24 @@ stop_code
 其中：
 
 * `route_id`：Route 的穩定 identity
-* `route_version_id`：Route 在某個版本的完整狀態
-* `stop_identity_id`：Stop 的永久 identity
+* `route_version_id`：Route aggregate 在某個版本的完整狀態（含 SubRoute、StopOfRoute）
+* `subroute_id`：SubRoute 的穩定 identity，隸屬於 Route
+* `stop_id`：Stop（站牌）的永久 identity
 * `stop_version_id`：Stop 在某個版本的狀態
+* `station_id`：Station（站位）的永久 identity
+* `station_version_id`：Station 在某個版本的狀態
+* `station_group_id`：StationGroup（組站位）的永久 identity
+* `station_group_version_id`：StationGroup 在某個版本的狀態
 * `stop_code`：業務使用的 Stop 編號，可依業務規則重新分配
+
+Identity 一律不版本化；被歷史事實引用的「狀態」才版本化。
+
+命名規則：
+
+```text
+*_id          immutable identity
+*_version_id  某版本的狀態
+```
 
 ---
 
@@ -77,8 +99,11 @@ Published Version 一旦建立，不得修改其歷史內容。
 
 ```text
 RouteVersion
-RouteStopVersion
+SubRouteVersion
+StopOfRouteVersion
 StopVersion
+StationVersion
+StationGroupVersion
 ```
 
 ### MUST NOT
@@ -86,10 +111,13 @@ StopVersion
 禁止透過 UPDATE 修改已發布 Version 的業務內容，例如：
 
 ```text
-RouteVersion 的 Stop 組成
+RouteVersion 的 SubRoute 組成
+SubRouteVersion 的名稱
+StopOfRouteVersion 的 direction / sequence
 StopVersion 的名稱
 StopVersion 的座標
-RouteStopVersion 的 sequence
+StationVersion 的名稱
+StationGroupVersion 的內容
 ```
 
 如果需要修改：
@@ -140,11 +168,37 @@ current_route_version_id
 
 > Current State 是一個 pointer，不是歷史資料本身。
 
+## 4.2 SubRoute
+
+`subroute` 表示 SubRoute（子路線）的 identity，例如本線、區間車、延駛、繞駛版本。
+
+概念欄位：
+
+```text
+subroute_id
+route_id
+subroute_code
+created_at
+```
+
+SubRoute 只有 identity，沒有獨立的版本表。
+
+SubRoute 在某個版本的名稱與狀態，保存於 `SubRouteVersion`，作為 `RouteVersion` 的一部分（見第 5 章）。
+
 ---
 
 # 5. Route Version
 
-`route_version` 保存某一時點 Route 的完整版本。
+`route_version` 保存某一時點 Route aggregate 的完整版本。
+
+RouteVersion 涵蓋整個 aggregate：
+
+```text
+RouteVersion
+├── SubRoute 組成（此版本包含哪些 SubRoute）
+├── 每個 SubRoute 的 StopOfRoute 站序（依 Direction 分開）
+└── 每個站序點引用的 StopVersion
+```
 
 概念欄位：
 
@@ -158,10 +212,34 @@ created_at
 published_at
 ```
 
+SubRoute 在此版本的狀態：
+
+```text
+subroute_version_id
+route_version_id
+subroute_id
+subroute_name
+```
+
+StopOfRoute 站序在此版本的狀態：
+
+```text
+stop_of_route_version_id
+subroute_version_id
+stop_version_id
+direction
+stop_sequence
+```
+
+其中：
+
+* `direction`：0 = 去程，1 = 返程
+* `stop_sequence`：該方向內的站序
+
 例如：
 
 ```text
-Route 307
+Route 307 / SubRoute 307A（本線）/ Direction 0
 
 Version 1
 A → B → C → D
@@ -178,28 +256,81 @@ A → B' → E → D
 
 所有 Version 都必須保留。
 
+### MUST
+
+SubRoute 與 StopOfRoute 只能作為 RouteVersion 的一部分建立新版本；
+不得脫離 RouteVersion 單獨版本化。
+
 ---
 
-# 6. Stop Identity
+# 6. Stop / Station / StationGroup Identity
 
-`stop` 表示 Stop 的永久 identity。
+站體分為三層：
+
+```text
+Stop（站牌）
+  一個站牌點位、特定路線、特定方向；
+  同一點位有多條路線各自的站牌桿時，即有多筆 Stop。
+
+Station（站位）
+  道路同側、附近同一集群站牌聚合而成的抽象點位。
+
+StationGroup（組站位）
+  不分路線、不分方向，供票證 OD 旅次分析使用。
+```
+
+## 6.1 Stop Identity
+
+`stop` 表示站牌的永久 identity。
 
 概念欄位：
 
 ```text
-stop_identity_id
+stop_id
 created_at
 ```
 
+## 6.2 Station Identity
+
+`station` 表示站位的永久 identity。
+
+概念欄位：
+
+```text
+station_id
+created_at
+```
+
+Stop 與 Station 的隸屬關係記錄在 `StopVersion.station_id`。
+
+## 6.3 StationGroup Identity
+
+`station_group` 表示組站位的永久 identity。
+
+概念欄位：
+
+```text
+station_group_id
+created_at
+```
+
+Station 與 StationGroup 的隸屬關係記錄在 `StationVersion.station_group_id`。
+
 ### MUST
 
-`stop_identity_id` 不得重用。
+三層 identity 皆不得重用：
+
+```text
+stop_id
+station_id
+station_group_id
+```
 
 如果：
 
 ```text
 Stop C
-stop_identity_id = 1003
+stop_id = 1003
 ```
 
 被撤除，`1003` 永遠代表 C。
@@ -214,23 +345,29 @@ stop_code = 103
 
 ```text
 Stop E
-stop_identity_id = 1005
+stop_id = 1005
 stop_code = 103
 ```
 
 ---
 
-# 7. Stop Version
+# 7. Stop / Station / StationGroup Version
 
-`stop_version` 描述 Stop 在某個時間區間內的狀態。
+三層站體各自有 version，記錄該時間區間內的狀態。
+
+## 7.1 StopVersion
+
+`stop_version` 描述站牌在某個時間區間內的狀態。
 
 概念欄位：
 
 ```text
 stop_version_id
-stop_identity_id
+stop_id
+station_id
 stop_code
 stop_name
+direction
 latitude
 longitude
 valid_from
@@ -238,10 +375,17 @@ valid_to
 created_at
 ```
 
+其中：
+
+* `station_id`：此站牌隸屬的站位
+* `direction`：站牌方向（去程 / 返程）
+
+Stop 改隸屬 Station 時，建立新的 StopVersion，不得 UPDATE 舊版本。
+
 例如：
 
 ```text
-stop_identity_id = 1002
+stop_id = 1002
 
 Version 1
 stop_code = 102
@@ -260,27 +404,69 @@ valid_to   = NULL
 
 > B 的 identity 沒有改變；只是 Stop Version 改變。
 
+## 7.2 StationVersion
+
+`station_version` 描述站位在某個時間區間內的狀態。
+
+概念欄位：
+
+```text
+station_version_id
+station_id
+station_group_id
+station_name
+latitude
+longitude
+valid_from
+valid_to
+created_at
+```
+
+Station 改隸屬 StationGroup 時，建立新的 StationVersion。
+
+## 7.3 StationGroupVersion
+
+`station_group_version` 描述組站位在某個時間區間內的狀態。
+
+概念欄位：
+
+```text
+station_group_version_id
+station_group_id
+station_group_name
+valid_from
+valid_to
+created_at
+```
+
+組站位成員組成由各 `StationVersion.station_group_id` 還原；
+不得 UPDATE 已發布的 StationGroupVersion。
+
 ---
 
-# 8. Route Stop Version
+# 8. StopOfRoute Version
 
-Route 與 Stop 的關係也必須版本化。
+SubRoute 與 Stop 的關係（實際停靠站序）也必須版本化，
+作為 RouteVersion 的一部分。
 
 概念：
 
 ```text
-route_stop_version
--------------------
-route_stop_version_id
-route_version_id
+stop_of_route_version
+---------------------
+stop_of_route_version_id
+subroute_version_id
 stop_version_id
-sequence_no
+direction
+stop_sequence
 ```
+
+同一 SubRoute 的去程與返程，是不同的 StopOfRoute 站序。
 
 例如：
 
 ```text
-Route 307 / V1
+Route 307 / SubRoute 307A / V1 / Direction 0
 
 sequence | stop
 ---------+-----
@@ -288,12 +474,21 @@ sequence | stop
 2        | B
 3        | C
 4        | D
+
+Route 307 / SubRoute 307A / V1 / Direction 1
+
+sequence | stop
+---------+-----
+1        | D
+2        | C
+3        | B
+4        | A
 ```
 
 V3：
 
 ```text
-Route 307 / V3
+Route 307 / SubRoute 307A / V3 / Direction 0
 
 sequence | stop
 ---------+-----
@@ -312,7 +507,7 @@ C 並沒有被「刪除歷史資料」。
 
 # 9. Complete Example
 
-假設：
+假設（以 307 本線 SubRoute 307A、Direction 0 為例）：
 
 ```text
 T1
@@ -344,6 +539,7 @@ V4 = A → B' → E → D
 ```
 
 這四個 Version 必須全部保留。
+（其他 SubRoute 與 Direction 1 的站序，同樣保存在各 RouteVersion 內。）
 
 ---
 
@@ -356,7 +552,7 @@ V4 = A → B' → E → D
 ```text
 Old C
 
-stop_identity_id = 1003
+stop_id = 1003
 stop_code = 103
 ```
 
@@ -365,7 +561,7 @@ C 被撤除後：
 ```text
 New E
 
-stop_identity_id = 1005
+stop_id = 1005
 stop_code = 103
 ```
 
@@ -378,13 +574,23 @@ stop_code = 103
 
 同時存在於歷史資料中。
 
+同一原則適用於三層站體 identity：
+
+```text
+stop_id
+station_id
+station_group_id
+```
+
+任一層 identity「撤除後再出現」，都必須建立新的 identity。
+
 ### MUST NOT
 
 禁止透過：
 
 ```text
 UPDATE stop
-SET stop_identity_id = ...
+SET stop_id = ...
 ```
 
 讓舊 Stop Identity 轉變成新 Stop。
@@ -476,8 +682,13 @@ valid_from = 2026-10-01 00:00
 ```text
 route_id
 route_version_id
+subroute_id
+direction
 occurred_at
 ```
+
+其中 `subroute_id` 與 `direction` 標明交易發生在哪個分支、哪個方向；
+其當時狀態由 `route_version_id` 內的 SubRouteVersion / StopOfRouteVersion 還原。
 
 例如：
 
@@ -485,6 +696,8 @@ occurred_at
 Trip T001
 route_id = 307
 route_version_id = V1
+subroute_id = 307A
+direction = 0
 occurred_at = 2026-02-15
 ```
 
@@ -548,6 +761,16 @@ report_route_snapshot
 report_id
 route_id
 route_version_id
+```
+
+OD 類報表若依賴組站位，也必須 snapshot：
+
+```text
+report_station_group_snapshot
+-----------------------------
+report_id
+station_group_id
+station_group_version_id
 ```
 
 例如：
@@ -747,9 +970,10 @@ validate Version
 
 create RouteVersion
 
-create StopVersion(s)
+create SubRouteVersion(s)
 
-create RouteStopVersion(s)
+create StopOfRouteVersion(s)
+（站序引用既有 StopVersion；站體版本另有自己的版本化流程）
 
 close previous validity interval
 
@@ -768,7 +992,7 @@ COMMIT
 
 ```text
 RouteVersion 已建立
-但 RouteStopVersion 尚未完成
+但 StopOfRouteVersion 尚未完成
 ```
 
 的半成品 Published Version。
@@ -845,8 +1069,10 @@ Reporting Layer 負責：
 
 ```text
 DIM_ROUTE_VERSION
+DIM_SUBROUTE
 DIM_STOP
-DIM_ROUTE_STOP
+DIM_STATION
+DIM_STATION_GROUP
 
 FACT_TRIP
 ```
@@ -855,7 +1081,10 @@ Fact 可以直接保存：
 
 ```text
 route_version_key
+subroute_key
 stop_key
+station_key
+station_group_key
 ```
 
 而不是每次報表都重新執行 temporal resolution。
@@ -869,7 +1098,7 @@ stop_key
 ```text
 DIM_STOP
 
-stop_key | stop_identity | code | name
+stop_key | stop_id | code | name
 ---------+---------------+------+---------
 501      | 1002          | 102  | B站
 502      | 1002          | 102  | B中央站
@@ -887,6 +1116,14 @@ C ≠ E
 
 ```text
 C.stop_code = E.stop_code = 103
+```
+
+站體三層各有 historical dimension：
+
+```text
+DIM_STOP           站牌（含 direction、所屬 station）
+DIM_STATION        站位（含所屬 station group）
+DIM_STATION_GROUP  組站位（OD 分析用）
 ```
 
 ---
@@ -931,7 +1168,7 @@ Route Publish 與 Event 必須具有一致性。
 BEGIN
 
 create RouteVersion
-create RouteStopVersion
+create SubRouteVersion / StopOfRouteVersion
 update current pointer
 
 insert Outbox Event
@@ -1027,7 +1264,7 @@ trip.stop_code = 103
 應保存：
 
 ```text
-stop_identity_id
+stop_id
 stop_version_id / stop_key
 ```
 
@@ -1073,6 +1310,26 @@ COMMIT
 
 ---
 
+## 29.7 站牌與站位混用
+
+```text
+Stop（站牌）與 Station（站位）互相取代，或只保存其中一層
+```
+
+❌ 站牌、站位、組站位是不同 granularity，歷史資料必須分層保存。
+
+---
+
+## 29.8 丟失 SubRoute / Direction
+
+```text
+trip 只存 route_id + route_version_id
+```
+
+❌ 無法區分本線 / 區間車、去程 / 返程的歷史事實。
+
+---
+
 # 30. Recommended End-to-End Flow
 
 完整 Route Change：
@@ -1095,14 +1352,17 @@ COMMIT
                      ▼
           Create Immutable Version
                      │
-             ┌───────┴────────┐
-             ▼                ▼
-       Route Version      Stop Version
-             │
-             ▼
-      Route Stop Version
-             │
-             ▼
+                     ▼
+              Route Version
+                     │
+                     ▼
+           SubRoute Version(s)
+                     │
+                     ▼
+        StopOfRoute Version(s)
+        （引用既有 StopVersion）
+                     │
+                     ▼
        Update Current Pointer
              │
              ▼
@@ -1153,34 +1413,217 @@ Determine Snapshot Type
 
 ---
 
-# 32. Production Invariants
+# 32. GTFS Export
+
+## 32.1 基本原則
+
+GTFS feed 本身就是 snapshot：一份 feed 代表某時間點的發布狀態。
+
+> External ID 綁 identity；版本綁在 feed 匯出時刻。
+
+```text
+ID    ← identity（跨 feed 穩定）
+屬性  ← 匯出當下 valid 的 Version
+時間  ← feed 本身釘住
+```
+
+## 32.2 Mapping
+
+欄位對照（GTFS ←→ 內部模型 ←→ TDX）。
+
+### stops.txt — 站牌（location_type = 0）
+
+```text
+GTFS 欄位       內部來源                              TDX 對應
+--------------  ------------------------------------  ---------------------------
+stop_id         stop_id（identity）                   StopUID
+stop_code       StopVersion.stop_code                 StopID
+stop_name       StopVersion.stop_name                 StopName（Zh / En）
+stop_lat        StopVersion.latitude                  StopPosition.PositionLat
+stop_lon        StopVersion.longitude                 StopPosition.PositionLon
+location_type   0（站牌）                             Stop 實體
+parent_station  station_id                            Station.StationUID
+```
+
+### stops.txt — 站位（location_type = 1）
+
+```text
+GTFS 欄位       內部來源                              TDX 對應
+--------------  ------------------------------------  ---------------------------
+stop_id         station_id（identity）                StationUID
+stop_name       StationVersion.station_name           StationName
+stop_lat        StationVersion.latitude               StationPosition.PositionLat
+stop_lon        StationVersion.longitude              StationPosition.PositionLon
+location_type   1（站位）                             Station 實體
+```
+
+### routes.txt
+
+```text
+GTFS 欄位          內部來源                          TDX 對應
+-----------------  --------------------------------  ------------------------------------
+route_id           route_id（或 subroute_id）         RouteUID（或 SubRouteUID）
+agency_id          operator                           Operators[].OperatorID
+route_short_name   route_code                         RouteName.Zh
+route_long_name    起訖站                              DepartureStopName → DestinationStopName
+route_type         3（公車）                           BusRouteType
+```
+
+### trips.txt
+
+```text
+GTFS 欄位        內部來源                            TDX 對應
+---------------  ----------------------------------  ------------------------------
+route_id         同 routes.txt                       RouteUID / SubRouteUID
+service_id       班表服務日                          Timetables[].ServiceDay
+trip_id          trip_id                             Timetables[].Trips[]
+trip_headsign    SubRouteName / 起訖站               SubRouteName
+direction_id     direction                           Direction（0 去程、1 返程）
+```
+
+### stop_times.txt
+
+```text
+GTFS 欄位        內部來源                            TDX 對應
+---------------  ----------------------------------  ------------------------------
+trip_id          trip_id                             Trips[]
+stop_id          StopOfRouteVersion → stop_id        StopTimes[].StopUID
+stop_sequence    StopOfRouteVersion.stop_sequence    StopTimes[].StopSequence
+arrival_time     班表時刻                            StopTimes[].ArrivalTime
+departure_time   班表時刻                            StopTimes[].DepartureTime
+```
+
+### 其他檔案
+
+```text
+GTFS 檔案             內部來源                            TDX 對應
+--------------------  ----------------------------------  ------------------------------
+calendar.txt          班表服務日                          Timetables[].ServiceDay
+calendar_dates.txt    停駛 / 加開例外                     ServiceDay 例外
+feed_info.txt         gtfs_export（export_id / 時間）     VersionID / UpdateTime
+agency.txt            operator                            Operators
+shapes.txt            軌跡圖資（內部另存）                  Shape（Geometry，含 Direction）
+```
+
+### Route granularity
+
+預設一個 Route 一個 GTFS route，
+SubRoute 變體以 trips + stop_times patterns 表達；
+若業務要求每個 SubRoute 顯示為獨立路線，
+則 `routes.route_id` 改綁 `subroute_id`，規則不變（仍綁 identity）。
+
+### MUST NOT
+
+不得用 `stop_version_id` 作為 GTFS `stop_id`。
+
+原因：每次 Stop 改名（新 StopVersion）外部 ID 就跟著變，
+下游看到「舊站刪除 + 新站建立」，歷史連續性全斷，
+違反 GTFS stable ID best practice。
+
+## 32.3 歷史 Feed 可重現
+
+正式匯出必須記錄版本綁定：
+
+```text
+gtfs_export
+-----------
+export_id
+exported_at
+stop_id  → stop_version_id
+route_id → route_version_id
+```
+
+與 report_snapshot 同精神（INV-09 / INV-10 套用）：
+
+> 重新產生歷史 feed 時，必須使用 export 當時的版本綁定，
+> 不得以 current state 重新推導。
+
+## 32.4 搬遷 vs 改名
+
+```text
+屬性修正（改名、座標微調）
+  → 新 StopVersion
+  → GTFS stop_id 不變
+
+實體搬遷／換桿
+  → 新 stop identity
+  → GTFS 發新 stop_id
+```
+
+符合 GTFS「移位過大應發新 ID」慣例。
+
+## 32.5 StationGroup
+
+GTFS 沒有組站位等級。
+
+StationGroup 僅供內部 OD 分析，不匯出；
+不得以非標準 parent chain 硬塞進 GTFS。
+
+TDX 同樣：靜態公車 API 只有 Stop（站牌）/ Station（站位），
+組站位僅出現在票證 OD 主題式資料，無標準靜態欄位可對應。
+
+## 32.6 TDX 匯入注意事項
+
+自 TDX 匯入（反向 mapping）時：
+
+```text
+TDX Direction 編碼與內部一致（0 去程、1 返程），直接映射。
+```
+
+公路客運 `SubRouteID` 編碼原則：
+
+```text
+前四碼    路線代號
+第五碼    正副路線（0 主線；A、B... 副線）
+第六碼    去返程（1 去程；2 返程）
+```
+
+匯入時 MUST 拆解為 `subroute` + `direction`，
+不得把整串 SubRouteID 直接當單一 identity。
+
+同一站點因業者不同會有多個 `StopID`（公路客運特性）：
+`stop_code` 相同不等於同一 `stop_id`，
+mapping 一律以 `StopUID` 為準。
+
+顯示用路線站序（DisplayStopOfRoute）是線性化顯示資料，
+不等於實際跑法；匯入站序 MUST 使用 StopOfRoute，
+不得使用 DisplayStopOfRoute。
+
+---
+
+# 33. Production Invariants
 
 以下規則應視為系統 invariant：
 
 ```text
 INV-01
-Published RouteVersion MUST be immutable.
+Published RouteVersion MUST be immutable,
+including its SubRouteVersion and StopOfRouteVersion content.
 
 INV-02
-Published StopVersion MUST be immutable.
+Published StopVersion, StationVersion and
+StationGroupVersion MUST be immutable.
 
 INV-03
-RouteStopVersion MUST be immutable.
+StopOfRouteVersion MUST be immutable.
 
 INV-04
-stop_identity_id MUST NEVER be reused.
+stop_id, station_id and
+station_group_id MUST NEVER be reused.
 
 INV-05
 route_id MUST represent stable Route identity.
 
 INV-06
-route_version_id MUST identify one immutable Route state.
+route_version_id MUST identify one immutable
+Route aggregate state.
 
 INV-07
 A Route MUST NOT have overlapping published valid intervals.
 
 INV-08
-A historical Transaction MUST persist its Route Version reference.
+A historical Transaction MUST persist its Route Version,
+SubRoute and Direction reference.
 
 INV-09
 A formal Report MUST persist its Snapshot.
@@ -1205,11 +1648,25 @@ not as the historical source of truth.
 INV-15
 Business Code such as stop_code MUST NOT be treated
 as immutable identity.
+
+INV-16
+SubRoute and StopOfRoute MUST only be versioned
+as part of a RouteVersion, never independently.
+
+INV-17
+Stop-to-Station and Station-to-StationGroup membership
+MUST live in the child's version
+(StopVersion / StationVersion).
+
+INV-18
+GTFS export IDs MUST bind identity (*_id), never version IDs;
+each exported feed MUST log its version bindings
+for reproducibility.
 ```
 
 ---
 
-# 33. Reference Data Model
+# 34. Reference Data Model
 
 ```text
 ROUTE
@@ -1218,6 +1675,14 @@ route_id PK
 route_code
 current_route_version_id
 revision
+created_at
+
+
+SUBROUTE
+--------
+subroute_id PK
+route_id FK
+subroute_code
 created_at
 
 
@@ -1232,18 +1697,37 @@ created_at
 published_at
 
 
+SUBROUTE_VERSION
+----------------
+subroute_version_id PK
+route_version_id FK
+subroute_id FK
+subroute_name
+
+
+STOP_OF_ROUTE_VERSION
+---------------------
+stop_of_route_version_id PK
+subroute_version_id FK
+stop_version_id FK
+direction
+stop_sequence
+
+
 STOP
 ----
-stop_identity_id PK
+stop_id PK
 created_at
 
 
 STOP_VERSION
 ------------
 stop_version_id PK
-stop_identity_id FK
+stop_id FK
+station_id FK
 stop_code
 stop_name
+direction
 latitude
 longitude
 valid_from
@@ -1251,12 +1735,39 @@ valid_to
 created_at
 
 
-ROUTE_STOP_VERSION
-------------------
-route_stop_version_id PK
-route_version_id FK
-stop_version_id FK
-sequence_no
+STATION
+-------
+station_id PK
+created_at
+
+
+STATION_VERSION
+---------------
+station_version_id PK
+station_id FK
+station_group_id FK
+station_name
+latitude
+longitude
+valid_from
+valid_to
+created_at
+
+
+STATION_GROUP
+-------------
+station_group_id PK
+created_at
+
+
+STATION_GROUP_VERSION
+---------------------
+station_group_version_id PK
+station_group_id FK
+station_group_name
+valid_from
+valid_to
+created_at
 
 
 TRIP
@@ -1264,6 +1775,8 @@ TRIP
 trip_id PK
 route_id
 route_version_id
+subroute_id
+direction
 occurred_at
 ...
 
@@ -1285,6 +1798,23 @@ route_version_id
 ...
 
 
+REPORT_STATION_GROUP_SNAPSHOT
+-----------------------------
+report_id FK
+station_group_id
+station_group_version_id
+...
+
+
+GTFS_EXPORT
+-----------
+export_id PK
+exported_at
+version bindings（stop / route → version）
+status
+created_at
+
+
 OUTBOX_EVENT
 ------------
 event_id PK
@@ -1298,41 +1828,37 @@ published_at
 
 ---
 
-# 34. Terminology
+# 35. Terminology
 
 本文件統一使用：
 
 ```text
 Route
-Stop
+SubRoute
+StopOfRoute
+Stop（站牌）
+Station（站位）
+StationGroup（組站位）
 Route Version
 Stop Version
-Route Stop Version
 Trip
 Report Snapshot
 ```
 
-不要在此模型中以 `Station` 作為資料模型名稱。
-
-如果既有系統仍使用：
+站體三層語意固定：
 
 ```text
-station_id
-station_name
+Stop          站牌：特定點位、特定路線、特定方向
+Station       站位：同側附近站牌的聚合點位
+StationGroup  組站位：不分路線方向，OD 分析用
 ```
 
-可以在 migration 階段逐步轉換，但新設計應統一使用：
-
-```text
-stop_identity_id
-stop_version_id
-stop_code
-stop_name
-```
+`Station` 在本模型是正式實體（站位），
+不得與 `Stop`（站牌）互換使用。
 
 ---
 
-# 35. One-line Architecture Principle
+# 36. One-line Architecture Principle
 
 整個設計可以濃縮成：
 
