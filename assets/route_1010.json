@@ -1,0 +1,188 @@
+{
+  "data": {
+    "route": {
+      "stations": {
+        "edges": [
+          {
+            "goBack": 1,
+            "ivrNo": 80,
+            "orderNo": 1,
+            "sid": 25077,
+            "node": {
+              "id": "3018",
+              "lat": 24.19766616821289,
+              "lon": 120.65266418457031,
+              "name": "水湳轉運中心"
+            }
+          },
+          {
+            "goBack": 2,
+            "ivrNo": 6768,
+            "orderNo": 1,
+            "sid": 20299,
+            "node": {
+              "id": "2530",
+              "lat": 24.17154884338379,
+              "lon": 120.66039276123047,
+              "name": "捷運文華高中站(文心路)"
+            }
+          },
+          {
+            "goBack": 1,
+            "ivrNo": 6715,
+            "orderNo": 2,
+            "sid": 12219,
+            "node": {
+              "id": "79",
+              "lat": 24.1939640045166,
+              "lon": 120.65023040771484,
+              "name": "會展中心(展覽館)"
+            }
+          },
+          {
+            "goBack": 1,
+            "ivrNo": 6714,
+            "orderNo": 3,
+            "sid": 24636,
+            "node": {
+              "id": "7",
+              "lat": 24.194873809814453,
+              "lon": 120.65249633789062,
+              "name": "會展中心(會議中心)"
+            }
+          },
+          {
+            "goBack": 1,
+            "ivrNo": 32,
+            "orderNo": 4,
+            "sid": 19404,
+            "node": {
+              "id": "2453",
+              "lat": 24.192832946777344,
+              "lon": 120.65533447265625,
+              "name": "綠美圖(中科路)"
+            }
+          },
+          {
+            "goBack": 2,
+            "ivrNo": 7120,
+            "orderNo": 6,
+            "sid": 17831,
+            "node": {
+              "id": "11075",
+              "lat": 24.17864990234375,
+              "lon": 120.65200805664062,
+              "name": "凱旋大鵬路口"
+            }
+          },
+          {
+            "goBack": 1,
+            "ivrNo": 7115,
+            "orderNo": 6,
+            "sid": 23303,
+            "node": {
+              "id": "7188",
+              "lat": 24.182899475097656,
+              "lon": 120.65792846679688,
+              "name": "臺中流行影音中心"
+            }
+          },
+          {
+            "goBack": 2,
+            "ivrNo": 6877,
+            "orderNo": 8,
+            "sid": 23974,
+            "node": {
+              "id": "7300",
+              "lat": 24.186113357543945,
+              "lon": 120.65199279785156,
+              "name": "凱旋敦化路口"
+            }
+          },
+          {
+            "goBack": 1,
+            "ivrNo": 6768,
+            "orderNo": 8,
+            "sid": 20299,
+            "node": {
+              "id": "2530",
+              "lat": 24.17154884338379,
+              "lon": 120.66039276123047,
+              "name": "捷運文華高中站(文心路)"
+            }
+          },
+          {
+            "goBack": 2,
+            "ivrNo": 6715,
+            "orderNo": 10,
+            "sid": 24635,
+            "node": {
+              "id": "79",
+              "lat": 24.1939640045166,
+              "lon": 120.65023040771484,
+              "name": "會展中心(展覽館)"
+            }
+          },
+          {
+            "goBack": 2,
+            "ivrNo": 6714,
+            "orderNo": 11,
+            "sid": 24636,
+            "node": {
+              "id": "7",
+              "lat": 24.194873809814453,
+              "lon": 120.65249633789062,
+              "name": "會展中心(會議中心)"
+            }
+          },
+          {
+            "goBack": 2,
+            "ivrNo": 32,
+            "orderNo": 12,
+            "sid": 19404,
+            "node": {
+              "id": "2453",
+              "lat": 24.192832946777344,
+              "lon": 120.65533447265625,
+              "name": "綠美圖(中科路)"
+            }
+          },
+          {
+            "goBack": 2,
+            "ivrNo": 80,
+            "orderNo": 13,
+            "sid": 25077,
+            "node": {
+              "id": "3018",
+              "lat": 24.19766616821289,
+              "lon": 120.65266418457031,
+              "name": "水湳轉運中心"
+            }
+          }
+        ]
+      },
+      "routePoint": {
+        "go": "yaurCo~k_VoB`@cAmD`MaHr@`CdAdFb@|A\\vAb@`BlAvEpAvELn@FTDPBJ@JBH@D?@DNBFNGvAg@oIsZvAm@bFgEjIcIoAcCxBeA`B_@zCWvKSjIU`@?|@EtEMxMWrf@yDtAEj@iAhAo@bAYjBe@lBk@rIaC|@Up@OVKDHBDDXRfA",
+        "back": "i_prCwom_VJj@R~@x@vDd@nBv@pBrAbDzBrEcFl@sBB}AP}R`BkCHqAJC|DA`GDhE}t@AcVNgCDgCXcAv@oAfBuBhAwNdHaImZhScPq@m@Yo@Ek@SJSHOFSHYLWH{BfA_EpBgFbCsAp@h@xA`@|AuJdE"
+      },
+      "providers": {
+        "edges": [
+          {
+            "node": {
+              "id": "15",
+              "name": "中台灣客運",
+              "opType": 0
+            }
+          },
+          {
+            "node": {
+              "id": "3",
+              "name": "統聯客運",
+              "opType": 0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

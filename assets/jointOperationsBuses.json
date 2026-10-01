@@ -1,0 +1,371 @@
+{
+    "data": {
+        "jointOperationsBuses": [
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 3
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 18
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 23
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 50
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 56
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 59
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 61
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 63
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 73
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 75
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 77
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 79
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 81
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 85
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 159
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 301
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 303
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 308
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 326
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 3510
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 500
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 5901
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 751
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 1
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 20
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 25
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 37
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 95
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 151
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 152
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 155
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 162
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 281
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 282
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 291
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 302
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 658
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 701
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 1151
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 914
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 1551
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 943
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 945
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 916
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 2821
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 6581
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 951
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 1522
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 909
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 3021
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 651
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 98
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 981
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 7000
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 2811
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 888
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 953
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 3081
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 6750
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 4041
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 4040
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 4020
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 9580
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 920
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 811
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 3541
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 1010
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 241
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 5601
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 1521
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 6511
+            },
+            {
+                "busProvider": "CTbus",
+                "providerId": 15,
+                "routeId": 983
+            },
+            {
+                "busProvider": "Ubus",
+                "providerId": 3,
+                "routeId": 4030
+            }
+        ]
+    }
+}

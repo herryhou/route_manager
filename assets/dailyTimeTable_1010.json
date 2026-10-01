@@ -1,0 +1,140 @@
+{
+    "data": {
+        "dailyTimeTable": {
+            "edges": [
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843409",
+                        "goBack": 1,
+                        "scheduleTime": "09:30",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843408",
+                        "goBack": 1,
+                        "scheduleTime": "10:10",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843410",
+                        "goBack": 1,
+                        "scheduleTime": "10:50",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843411",
+                        "goBack": 1,
+                        "scheduleTime": "11:30",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843412",
+                        "goBack": 1,
+                        "scheduleTime": "13:00",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843419",
+                        "goBack": 1,
+                        "scheduleTime": "13:40",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843418",
+                        "goBack": 1,
+                        "scheduleTime": "14:20",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843417",
+                        "goBack": 1,
+                        "scheduleTime": "15:00",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843416",
+                        "goBack": 1,
+                        "scheduleTime": "16:00",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843415",
+                        "goBack": 1,
+                        "scheduleTime": "16:40",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843414",
+                        "goBack": 1,
+                        "scheduleTime": "17:20",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                },
+                {
+                    "node": {
+                        "xno": 1010,
+                        "id": "403843413",
+                        "goBack": 1,
+                        "scheduleTime": "18:00",
+                        "carType": "lfv_2",
+                        "carId": "FAB-337",
+                        "providerId": "3"
+                    }
+                }
+            ]
+        }
+    }
+}
