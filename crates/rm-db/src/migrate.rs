@@ -7,6 +7,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0002_identity",
         include_str!("../migrations/0002_identity.sql"),
     ),
+    (
+        "0003_segment",
+        include_str!("../migrations/0003_segment.sql"),
+    ),
 ];
 
 /// Apply pending migrations in order. Safe to call repeatedly.
@@ -48,6 +52,6 @@ mod tests {
     #[test]
     fn migrations_are_ordered_and_named() {
         let names: Vec<&str> = super::MIGRATIONS.iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, ["0001_init", "0002_identity"]);
+        assert_eq!(names, ["0001_init", "0002_identity", "0003_segment"]);
     }
 }

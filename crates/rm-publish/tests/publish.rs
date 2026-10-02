@@ -168,7 +168,7 @@ fn cyclic_route_same_stop_twice_keeps_both_rows() {
         [batch],
     )
     .unwrap();
-    rm_identity::run(&mut conn, batch).unwrap();
+    rm_identity::run(&conn, batch).unwrap();
     let s = run(&mut conn, batch).unwrap();
     assert_eq!(s.published, 2);
     assert_eq!(s.stop_of_route_rows, 5);

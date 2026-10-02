@@ -282,8 +282,7 @@ pub fn parse_dir(source: &Path) -> Result<Parsed> {
                 .unwrap_or_default(),
         })
         .collect();
-    p.headers
-        .sort_by(|a, b| xno_sort_key(&a.xno).cmp(&xno_sort_key(&b.xno)));
+    p.headers.sort_by_key(|r| xno_sort_key(&r.xno));
     p.files.push(FileAudit {
         kind: "route_header",
         name: "routes.json".into(),
@@ -307,7 +306,7 @@ pub fn parse_dir(source: &Path) -> Result<Parsed> {
             Some((xno, e.path()))
         })
         .collect();
-    raw_paths.sort_by(|a, b| xno_sort_key(&a.0).cmp(&xno_sort_key(&b.0)));
+    raw_paths.sort_by_key(|r| xno_sort_key(&r.0));
 
     for (xno, path) in raw_paths {
         let (text, bytes) = read_file(&path)?;

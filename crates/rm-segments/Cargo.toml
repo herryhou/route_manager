@@ -1,0 +1,21 @@
+[package]
+name = "rm-segments"
+description = "Decode polylines, project stops to chainage, cut per-stop-pair geometry drafts"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+rm-core.workspace = true
+rm-db.workspace = true
+rm-identity.workspace = true
+rm-ingest.workspace = true
+rusqlite.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+rm-ingest = { path = "../rm-ingest", features = ["testfix"] }
+rm-publish = { path = "../rm-publish" }
+tempfile = "3"

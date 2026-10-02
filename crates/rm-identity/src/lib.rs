@@ -47,7 +47,7 @@ pub fn run(conn: &Connection, batch_id: i64) -> Result<Summary> {
             headers.push(row?);
         }
     }
-    headers.sort_by(|a, b| xno_key(&a.0).cmp(&xno_key(&b.0)));
+    headers.sort_by_key(|h| xno_key(&h.0));
 
     // provider name directory
     let mut provider_names: HashMap<String, String> = HashMap::new();

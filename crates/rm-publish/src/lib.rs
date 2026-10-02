@@ -46,7 +46,7 @@ pub fn run(conn: &mut Connection, batch_id: i64) -> Result<Summary> {
             headers.push(row?);
         }
     }
-    headers.sort_by(|a, b| xno_key(&a.0).cmp(&xno_key(&b.0)));
+    headers.sort_by_key(|h| xno_key(&h.0));
 
     for (xno, _code, description) in &headers {
         match publish_route(conn, batch_id, xno, description, &valid_from, &now) {
