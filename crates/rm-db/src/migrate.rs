@@ -1,7 +1,13 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
-const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("../migrations/0001_init.sql"))];
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init", include_str!("../migrations/0001_init.sql")),
+    (
+        "0002_identity",
+        include_str!("../migrations/0002_identity.sql"),
+    ),
+];
 
 /// Apply pending migrations in order. Safe to call repeatedly.
 pub fn migrate(conn: &Connection) -> Result<()> {
@@ -40,7 +46,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn migration_list_starts_at_0001() {
-        assert_eq!(super::MIGRATIONS[0].0, "0001_init");
+    fn migrations_are_ordered_and_named() {
+        let names: Vec<&str> = super::MIGRATIONS.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, ["0001_init", "0002_identity"]);
     }
 }

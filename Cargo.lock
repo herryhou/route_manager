@@ -584,6 +584,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "rm-identity"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rm-core",
+ "rm-db",
+ "rm-ingest",
+ "rusqlite",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "rm-ingest"
 version = "0.1.0"
 dependencies = [
