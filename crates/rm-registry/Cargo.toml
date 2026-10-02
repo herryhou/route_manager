@@ -1,0 +1,22 @@
+[package]
+name = "rm-registry"
+description = "Directed segment registry: stop pairs cut at way runs, blake3 identity"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+rm-core.workspace = true
+rm-db.workspace = true
+rusqlite.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+rm-ingest = { path = "../rm-ingest", features = ["testfix"] }
+rm-identity = { path = "../rm-identity" }
+rm-publish = { path = "../rm-publish" }
+rm-segments = { path = "../rm-segments" }
+rm-osm-match = { path = "../rm-osm-match" }
+tempfile = "3"

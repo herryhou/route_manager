@@ -883,6 +883,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rm-registry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rm-core",
+ "rm-db",
+ "rm-identity",
+ "rm-ingest",
+ "rm-osm-match",
+ "rm-publish",
+ "rm-segments",
+ "rusqlite",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "rm-segments"
 version = "0.1.0"
 dependencies = [
