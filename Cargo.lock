@@ -616,6 +616,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "rm-publish"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rm-core",
+ "rm-db",
+ "rm-identity",
+ "rm-ingest",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "rusqlite"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,6 +1,8 @@
 //! rm-ingest: parse raw Taichung captures into src_* staging (one batch).
 
 mod parse;
+#[cfg(feature = "testfix")]
+pub mod testfix;
 
 use std::path::Path;
 

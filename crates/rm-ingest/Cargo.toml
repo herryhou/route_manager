@@ -16,5 +16,8 @@ tracing-subscriber.workspace = true
 clap.workspace = true
 sha2 = "0.10"
 
+[features]
+testfix = []
+
 [dev-dependencies]
 tempfile = "3"

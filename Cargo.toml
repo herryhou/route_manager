@@ -9,6 +9,8 @@ version = "0.1.0"
 [workspace.dependencies]
 rm-core = { path = "crates/rm-core" }
 rm-db = { path = "crates/rm-db" }
+rm-identity = { path = "crates/rm-identity" }
+rm-ingest = { path = "crates/rm-ingest" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

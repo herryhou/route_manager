@@ -1,0 +1,21 @@
+[package]
+name = "rm-publish"
+description = "Route/SubRoute/StopOfRoute V1 atomic publish per route"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+rm-core.workspace = true
+rm-db.workspace = true
+rm-identity.workspace = true
+rusqlite.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+rm-ingest = { path = "../rm-ingest", features = ["testfix"] }
+rm-identity = { path = "../rm-identity" }
+tempfile = "3"
