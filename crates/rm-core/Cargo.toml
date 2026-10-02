@@ -1,0 +1,11 @@
+[package]
+name = "rm-core"
+description = "Shared domain types, Google polyline codec, geo helpers, hashing"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+blake3.workspace = true
+geo-types.workspace = true

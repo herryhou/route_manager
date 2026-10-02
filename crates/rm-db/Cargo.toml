@@ -1,0 +1,14 @@
+[package]
+name = "rm-db"
+description = "SQLite access: migrations, id allocator, import batches"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+rm-core.workspace = true
+rusqlite.workspace = true
+anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+tempfile = "3"
