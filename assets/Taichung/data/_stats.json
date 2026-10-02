@@ -1,0 +1,38 @@
+{
+  "routes": 392,
+  "stations_unique": 7424,
+  "stop_of_route_rows": 37294,
+  "stops_unique_sid": 14045,
+  "sid_reused_across_route_dir": 6830,
+  "stations_with_alt_names": 0,
+  "stations_on_most_routes": [
+    [
+      68,
+      "44",
+      "干城站"
+    ],
+    [
+      57,
+      "6226",
+      "臺中車站(民族路口)"
+    ],
+    [
+      57,
+      "464",
+      "彰化銀行(臺灣大道)"
+    ],
+    [
+      57,
+      "46",
+      "干城站"
+    ],
+    [
+      57,
+      "340",
+      "中友百貨"
+    ]
+  ],
+  "routes_without_polyline": 0,
+  "providers": 39,
+  "subroute_link_groups": 100
+}

@@ -1,0 +1,659 @@
+[
+    {
+        "goback": "1",
+        "lat": "22.87480",
+        "locationid": "9193",
+        "lon": "120.19397",
+        "routeid": "2101",
+        "stopid": "33260",
+        "stopname": "崎漏電信局"
+    },
+    {
+        "goback": "1",
+        "lat": "22.87398",
+        "locationid": "9194",
+        "lon": "120.19134",
+        "routeid": "2101",
+        "stopid": "33261",
+        "stopname": "崎漏茄萣農會"
+    },
+    {
+        "goback": "1",
+        "lat": "22.877756",
+        "locationid": "9195",
+        "lon": "120.189020",
+        "routeid": "2101",
+        "stopid": "33262",
+        "stopname": "崎漏"
+    },
+    {
+        "goback": "1",
+        "lat": "22.879493",
+        "locationid": "9196",
+        "lon": "120.188508",
+        "routeid": "2101",
+        "stopid": "33263",
+        "stopname": "北崎漏"
+    },
+    {
+        "goback": "1",
+        "lat": "22.889821",
+        "locationid": "9102",
+        "lon": "120.187084",
+        "routeid": "2101",
+        "stopid": "33264",
+        "stopname": "成功橋"
+    },
+    {
+        "goback": "1",
+        "lat": "22.89288",
+        "locationid": "9103",
+        "lon": "120.18636",
+        "routeid": "2101",
+        "stopid": "33265",
+        "stopname": "光萣"
+    },
+    {
+        "goback": "1",
+        "lat": "22.89556",
+        "locationid": "9104",
+        "lon": "120.18515",
+        "routeid": "2101",
+        "stopid": "33266",
+        "stopname": "下茄萣"
+    },
+    {
+        "goback": "1",
+        "lat": "22.898254",
+        "locationid": "9105",
+        "lon": "120.184730",
+        "routeid": "2101",
+        "stopid": "33267",
+        "stopname": "頂茄萣"
+    },
+    {
+        "goback": "1",
+        "lat": "22.90149",
+        "locationid": "9106",
+        "lon": "120.18407",
+        "routeid": "2101",
+        "stopid": "33268",
+        "stopname": "曾厝"
+    },
+    {
+        "goback": "1",
+        "lat": "22.90368",
+        "locationid": "9107",
+        "lon": "120.18375",
+        "routeid": "2101",
+        "stopid": "33269",
+        "stopname": "茄萣國小"
+    },
+    {
+        "goback": "1",
+        "lat": "22.90639",
+        "locationid": "9108",
+        "lon": "120.18375",
+        "routeid": "2101",
+        "stopid": "33270",
+        "stopname": "茄萣國中"
+    },
+    {
+        "goback": "1",
+        "lat": "22.90760",
+        "locationid": "9109",
+        "lon": "120.18403",
+        "routeid": "2101",
+        "stopid": "33271",
+        "stopname": "威武廟"
+    },
+    {
+        "goback": "1",
+        "lat": "22.90944",
+        "locationid": "9110",
+        "lon": "120.18443",
+        "routeid": "2101",
+        "stopid": "33272",
+        "stopname": "茄萣電信局"
+    },
+    {
+        "goback": "1",
+        "lat": "22.91117",
+        "locationid": "9111",
+        "lon": "120.18477",
+        "routeid": "2101",
+        "stopid": "33273",
+        "stopname": "茄萣農會"
+    },
+    {
+        "goback": "1",
+        "lat": "22.912780",
+        "locationid": "9112",
+        "lon": "120.185120",
+        "routeid": "2101",
+        "stopid": "33274",
+        "stopname": "白砂崙廟口"
+    },
+    {
+        "goback": "1",
+        "lat": "22.914142",
+        "locationid": "9113",
+        "lon": "120.185398",
+        "routeid": "2101",
+        "stopid": "33275",
+        "stopname": "白砂崙"
+    },
+    {
+        "goback": "1",
+        "lat": "22.916142",
+        "locationid": "9114",
+        "lon": "120.185288",
+        "routeid": "2101",
+        "stopid": "33276",
+        "stopname": "南萣橋南"
+    },
+    {
+        "goback": "1",
+        "lat": "22.92119",
+        "locationid": "9115",
+        "lon": "120.18456",
+        "routeid": "2101",
+        "stopid": "33277",
+        "stopname": "南萣橋北"
+    },
+    {
+        "goback": "1",
+        "lat": "22.92331",
+        "locationid": "9116",
+        "lon": "120.1849",
+        "routeid": "2101",
+        "stopid": "33278",
+        "stopname": "同安里"
+    },
+    {
+        "goback": "1",
+        "lat": "22.9252452564058",
+        "locationid": "9117",
+        "lon": "120.185467600822",
+        "routeid": "2101",
+        "stopid": "33279",
+        "stopname": "同安宮"
+    },
+    {
+        "goback": "1",
+        "lat": "22.92624",
+        "locationid": "9118",
+        "lon": "120.18586",
+        "routeid": "2101",
+        "stopid": "33280",
+        "stopname": "馬鎮宮"
+    },
+    {
+        "goback": "1",
+        "lat": "22.929722",
+        "locationid": "9119",
+        "lon": "120.184790",
+        "routeid": "2101",
+        "stopid": "33281",
+        "stopname": "興農公園"
+    },
+    {
+        "goback": "1",
+        "lat": "22.932614",
+        "locationid": "9120",
+        "lon": "120.182601",
+        "routeid": "2101",
+        "stopid": "33282",
+        "stopname": "寮仔"
+    },
+    {
+        "goback": "1",
+        "lat": "22.934935",
+        "locationid": "2069",
+        "lon": "120.18627",
+        "routeid": "2101",
+        "stopid": "33283",
+        "stopname": "南寧高中"
+    },
+    {
+        "goback": "1",
+        "lat": "22.932309",
+        "locationid": "2328",
+        "lon": "120.187790",
+        "routeid": "2101",
+        "stopid": "33284",
+        "stopname": "歡喜公園"
+    },
+    {
+        "goback": "1",
+        "lat": "22.93305",
+        "locationid": "9121",
+        "lon": "120.18045",
+        "routeid": "2101",
+        "stopid": "33285",
+        "stopname": "省躬國小"
+    },
+    {
+        "goback": "1",
+        "lat": "22.9365954",
+        "locationid": "2463",
+        "lon": "120.1811328",
+        "routeid": "2101",
+        "stopid": "33286",
+        "stopname": "省躬公園"
+    },
+    {
+        "goback": "1",
+        "lat": "22.938885",
+        "locationid": "1487",
+        "lon": "120.180422",
+        "routeid": "2101",
+        "stopid": "33287",
+        "stopname": "喜東里"
+    },
+    {
+        "goback": "1",
+        "lat": "22.93870",
+        "locationid": "9122",
+        "lon": "120.17853",
+        "routeid": "2101",
+        "stopid": "33288",
+        "stopname": "喜南里"
+    },
+    {
+        "goback": "1",
+        "lat": "22.940473",
+        "locationid": "9123",
+        "lon": "120.178137",
+        "routeid": "2101",
+        "stopid": "33289",
+        "stopname": "喜樹"
+    },
+    {
+        "goback": "1",
+        "lat": "22.94374",
+        "locationid": "9124",
+        "lon": "120.17985",
+        "routeid": "2101",
+        "stopid": "33290",
+        "stopname": "北喜樹"
+    },
+    {
+        "goback": "1",
+        "lat": "22.94653",
+        "locationid": "9125",
+        "lon": "120.17993",
+        "routeid": "2101",
+        "stopid": "33291",
+        "stopname": "勞工住宅"
+    },
+    {
+        "goback": "1",
+        "lat": "22.950578",
+        "locationid": "9126",
+        "lon": "120.184053",
+        "routeid": "2101",
+        "stopid": "33292",
+        "stopname": "風櫃門"
+    },
+    {
+        "goback": "1",
+        "lat": "22.957693",
+        "locationid": "9127",
+        "lon": "120.186803",
+        "routeid": "2101",
+        "stopid": "33293",
+        "stopname": "明興路"
+    },
+    {
+        "goback": "1",
+        "lat": "22.960666",
+        "locationid": "9128",
+        "lon": "120.188899",
+        "routeid": "2101",
+        "stopid": "33294",
+        "stopname": "南區區公所"
+    },
+    {
+        "goback": "1",
+        "lat": "22.96307",
+        "locationid": "9129",
+        "lon": "120.18951",
+        "routeid": "2101",
+        "stopid": "33295",
+        "stopname": "日新橋"
+    },
+    {
+        "goback": "1",
+        "lat": "22.966048",
+        "locationid": "9130",
+        "lon": "120.189966",
+        "routeid": "2101",
+        "stopid": "33296",
+        "stopname": "金華路一段"
+    },
+    {
+        "goback": "1",
+        "lat": "22.96793",
+        "locationid": "9131",
+        "lon": "120.19023",
+        "routeid": "2101",
+        "stopid": "33297",
+        "stopname": "新都路口"
+    },
+    {
+        "goback": "1",
+        "lat": "22.970708",
+        "locationid": "9132",
+        "lon": "120.190576",
+        "routeid": "2101",
+        "stopid": "33298",
+        "stopname": "鹽埕"
+    },
+    {
+        "goback": "1",
+        "lat": "22.971498",
+        "locationid": "9133",
+        "lon": "120.190639",
+        "routeid": "2101",
+        "stopid": "33299",
+        "stopname": "日新國小"
+    },
+    {
+        "goback": "1",
+        "lat": "22.97369",
+        "locationid": "9134",
+        "lon": "120.19086",
+        "routeid": "2101",
+        "stopid": "33300",
+        "stopname": "北鹽埕"
+    },
+    {
+        "goback": "1",
+        "lat": "22.97562",
+        "locationid": "9135",
+        "lon": "120.19162",
+        "routeid": "2101",
+        "stopid": "33301",
+        "stopname": "三官廟"
+    },
+    {
+        "goback": "1",
+        "lat": "22.97668",
+        "locationid": "9136",
+        "lon": "120.19319",
+        "routeid": "2101",
+        "stopid": "33302",
+        "stopname": "南稅三村"
+    },
+    {
+        "goback": "1",
+        "lat": "22.97755",
+        "locationid": "9137",
+        "lon": "120.19429",
+        "routeid": "2101",
+        "stopid": "33303",
+        "stopname": "新興路"
+    },
+    {
+        "goback": "1",
+        "lat": "22.97896",
+        "locationid": "9138",
+        "lon": "120.196524",
+        "routeid": "2101",
+        "stopid": "33304",
+        "stopname": "新興國小"
+    },
+    {
+        "goback": "1",
+        "lat": "22.982163",
+        "locationid": "9201",
+        "lon": "120.197687",
+        "routeid": "2101",
+        "stopid": "33305",
+        "stopname": "西門健康立體停車場"
+    },
+    {
+        "goback": "1",
+        "lat": "22.984198",
+        "locationid": "9202",
+        "lon": "120.197657",
+        "routeid": "2101",
+        "stopid": "33306",
+        "stopname": "西門路一段"
+    },
+    {
+        "goback": "1",
+        "lat": "22.987099",
+        "locationid": "9203",
+        "lon": "120.197635",
+        "routeid": "2101",
+        "stopid": "33307",
+        "stopname": "新光三越新天地"
+    },
+    {
+        "goback": "1",
+        "lat": "22.988807",
+        "locationid": "9281",
+        "lon": "120.197607",
+        "routeid": "2101",
+        "stopid": "33308",
+        "stopname": "小西門(西門路)"
+    },
+    {
+        "goback": "1",
+        "lat": "22.991126",
+        "locationid": "9205",
+        "lon": "120.198171",
+        "routeid": "2101",
+        "stopid": "33309",
+        "stopname": "西門、友愛街口"
+    },
+    {
+        "goback": "1",
+        "lat": "22.992435",
+        "locationid": "767",
+        "lon": "120.199828",
+        "routeid": "2101",
+        "stopid": "33310",
+        "stopname": "中正、西門路口"
+    },
+    {
+        "goback": "1",
+        "lat": "22.99202",
+        "locationid": "768",
+        "lon": "120.20172",
+        "routeid": "2101",
+        "stopid": "33311",
+        "stopname": "林百貨(中正路)"
+    },
+    {
+        "goback": "1",
+        "lat": "22.993081",
+        "locationid": "285",
+        "lon": "120.206051",
+        "routeid": "2101",
+        "stopid": "33312",
+        "stopname": "民生綠園"
+    },
+    {
+        "goback": "1",
+        "lat": "22.993883",
+        "locationid": "286",
+        "lon": "120.207228",
+        "routeid": "2101",
+        "stopid": "33313",
+        "stopname": "中山、民權路口"
+    },
+    {
+        "goback": "1",
+        "lat": "22.995278",
+        "locationid": "287",
+        "lon": "120.209369",
+        "routeid": "2101",
+        "stopid": "33314",
+        "stopname": "台南醫院"
+    },
+    {
+        "goback": "1",
+        "lat": "22.99641",
+        "locationid": "1094",
+        "lon": "120.21113",
+        "routeid": "2101",
+        "stopid": "33334",
+        "stopname": "臺南火車站(中山路D)"
+    },
+    {
+        "goback": "1",
+        "lat": "23.00069",
+        "locationid": "2202",
+        "lon": "120.21308",
+        "routeid": "2101",
+        "stopid": "33335",
+        "stopname": "臺南公園(北門路)"
+    },
+    {
+        "goback": "1",
+        "lat": "23.00115",
+        "locationid": "289",
+        "lon": "120.215735",
+        "routeid": "2101",
+        "stopid": "33336",
+        "stopname": "小東路"
+    },
+    {
+        "goback": "1",
+        "lat": "23.00092",
+        "locationid": "290",
+        "lon": "120.21794",
+        "routeid": "2101",
+        "stopid": "33337",
+        "stopname": "成功大學"
+    },
+    {
+        "goback": "1",
+        "lat": "23.000690",
+        "locationid": "291",
+        "lon": "120.221367",
+        "routeid": "2101",
+        "stopid": "33338",
+        "stopname": "成大醫院(小東路)"
+    },
+    {
+        "goback": "1",
+        "lat": "23.000383",
+        "locationid": "271",
+        "lon": "120.225273",
+        "routeid": "2101",
+        "stopid": "33520",
+        "stopname": "無障礙福利之家"
+    },
+    {
+        "goback": "1",
+        "lat": "22.999457",
+        "locationid": "292",
+        "lon": "120.228922",
+        "routeid": "2101",
+        "stopid": "33340",
+        "stopname": "光明街口"
+    },
+    {
+        "goback": "1",
+        "lat": "22.998580",
+        "locationid": "293",
+        "lon": "120.232210",
+        "routeid": "2101",
+        "stopid": "33341",
+        "stopname": "四份子"
+    },
+    {
+        "goback": "1",
+        "lat": "22.99893",
+        "locationid": "825",
+        "lon": "120.2348",
+        "routeid": "2101",
+        "stopid": "33342",
+        "stopname": "中華小東路口"
+    },
+    {
+        "goback": "1",
+        "lat": "23.00207",
+        "locationid": "826",
+        "lon": "120.23523",
+        "routeid": "2101",
+        "stopid": "33343",
+        "stopname": "兵仔市"
+    },
+    {
+        "goback": "1",
+        "lat": "23.00720",
+        "locationid": "1181",
+        "lon": "120.23488",
+        "routeid": "2101",
+        "stopid": "33344",
+        "stopname": "中華路、勝華街口"
+    },
+    {
+        "goback": "1",
+        "lat": "23.009036",
+        "locationid": "827",
+        "lon": "120.233735",
+        "routeid": "2101",
+        "stopid": "33345",
+        "stopname": "中華、中華二路口"
+    },
+    {
+        "goback": "1",
+        "lat": "23.01135",
+        "locationid": "828",
+        "lon": "120.23221",
+        "routeid": "2101",
+        "stopid": "33346",
+        "stopname": "中華、振興路口"
+    },
+    {
+        "goback": "1",
+        "lat": "23.01466",
+        "locationid": "5105",
+        "lon": "120.23468",
+        "routeid": "2101",
+        "stopid": "33347",
+        "stopname": "南工社區"
+    },
+    {
+        "goback": "1",
+        "lat": "23.018261",
+        "locationid": "2736",
+        "lon": "120.234163",
+        "routeid": "2101",
+        "stopid": "33348",
+        "stopname": "兒三廣十公園"
+    },
+    {
+        "goback": "1",
+        "lat": "23.021955",
+        "locationid": "2738",
+        "lon": "120.235621",
+        "routeid": "2101",
+        "stopid": "33349",
+        "stopname": "小橋公園、真愛社區"
+    },
+    {
+        "goback": "1",
+        "lat": "23.025087",
+        "locationid": "2521",
+        "lon": "120.238374",
+        "routeid": "2101",
+        "stopid": "33350",
+        "stopname": "臺南市立圖書館"
+    },
+    {
+        "goback": "1",
+        "lat": "23.026298",
+        "locationid": "2675",
+        "lon": "120.232112",
+        "routeid": "2101",
+        "stopid": "33351",
+        "stopname": "府城汽車客運公司"
+    }
+]

@@ -23,7 +23,7 @@ All calls are plain POSTs with `content-type: application/json`. No auth observe
 | `jointOperationsBuses` | 2 | — | routes run by multiple operators | `jointOperationsBuses.json` (73 rows) |
 | main-side-routes | 3 | — | main route → side routes mapping | `main-side-routes.json` (100 rows) |
 
-Sample files live next to this doc in `assets/`. Numbers above are counts in those samples, not API guarantees.
+Sample files live next to this doc in `assets/Taichung/`. Numbers above are counts in those samples, not API guarantees.
 
 ## Shared conventions
 
@@ -123,7 +123,7 @@ data.route
 │       ├── goBack        int          # 1 = outbound, 2 = return (see conventions)
 │       ├── orderNo       int          # stop sequence within that direction
 │       ├── ivrNo         int          # stop number for phone/IVR announcements
-│       ├── sid           int          # stop id, unique to this route+direction
+│       ├── sid           int          # physical pole/sign id — shared across routes (and sometimes directions); NOT route-scoped
 │       └── node          object       # the physical station
 │           ├── id        string       # GLOBAL station id — shared across routes
 │           ├── name      string       # stop name (zh)
@@ -221,7 +221,7 @@ Sample: `main-side-routes.json` — 100 mappings, e.g. `105 → [932, 933, 1051,
 ## Data quirks observed in samples
 
 - `routes.json` ids are strings (`"3"`); `xno`/`routeId` args are ints — convert at the boundary.
-- Same physical stop appears twice in `route` output (once per direction) with different `sid` but same `node.id` — dedupe on `node.id` when building a stop master list.
-- `node.id` and `sid` are different id spaces; `providers.id`/`providerId` is a third.
+- Same physical stop appears twice in `route` output (once per direction), same `node.id` — dedupe on `node.id` when building a stop master list.
+- `node.id` and `sid` are different id spaces; `providers.id`/`providerId` is a third. Bulk capture shows `sid` is a pole id reused across routes (6,107 of 14,045 sids serve >1 route) — see `data/README.md`.
 - `main-side-routes` has no GraphQL layer and its own Mongo ids.
 - Polylines in `routePoint` are opaque encoded strings; decode only if map rendering needed.

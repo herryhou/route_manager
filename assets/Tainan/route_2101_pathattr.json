@@ -1,0 +1,712 @@
+{
+    "lspatp": 8,
+    "result": true,
+    "size": 72,
+    "data": [
+        {
+            "stopInfo": "28分鐘",
+            "infoId": "1714",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33316",
+            "imgTag": "000",
+            "seq": "0"
+        },
+        {
+            "stopInfo": "31分鐘",
+            "infoId": "1863",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33317",
+            "imgTag": "000",
+            "seq": "1"
+        },
+        {
+            "stopInfo": "32分鐘",
+            "infoId": "1966",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33318",
+            "imgTag": "000",
+            "seq": "2"
+        },
+        {
+            "stopInfo": "35分鐘",
+            "infoId": "2108",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33319",
+            "imgTag": "000",
+            "seq": "3"
+        },
+        {
+            "stopInfo": "37分鐘",
+            "infoId": "2250",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33320",
+            "imgTag": "000",
+            "seq": "4"
+        },
+        {
+            "stopInfo": "39分鐘",
+            "infoId": "2365",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33321",
+            "imgTag": "000",
+            "seq": "5"
+        },
+        {
+            "stopInfo": "39分鐘",
+            "infoId": "2392",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33322",
+            "imgTag": "000",
+            "seq": "6"
+        },
+        {
+            "stopInfo": "40分鐘",
+            "infoId": "2443",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33323",
+            "imgTag": "000",
+            "seq": "7"
+        },
+        {
+            "stopInfo": "41分鐘",
+            "infoId": "2492",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33324",
+            "imgTag": "000",
+            "seq": "8"
+        },
+        {
+            "stopInfo": "43分鐘",
+            "infoId": "2608",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33325",
+            "imgTag": "000",
+            "seq": "9"
+        },
+        {
+            "stopInfo": "45分鐘",
+            "infoId": "2726",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33326",
+            "imgTag": "000",
+            "seq": "10"
+        },
+        {
+            "stopInfo": "46分鐘",
+            "infoId": "2763",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33327",
+            "imgTag": "000",
+            "seq": "11"
+        },
+        {
+            "stopInfo": "46分鐘",
+            "infoId": "2795",
+            "subRouteId": "210107",
+            "carNo": "",
+            "id": "33519",
+            "imgTag": "000",
+            "seq": "12"
+        },
+        {
+            "stopInfo": "即將進站",
+            "infoId": "39",
+            "subRouteId": "210103",
+            "carNo": "070-U9",
+            "id": "33329",
+            "imgTag": "100",
+            "seq": "13"
+        },
+        {
+            "stopInfo": "即將進站",
+            "infoId": "100",
+            "subRouteId": "210103",
+            "carNo": "",
+            "id": "33330",
+            "imgTag": "000",
+            "seq": "14"
+        },
+        {
+            "stopInfo": "3分鐘",
+            "infoId": "189",
+            "subRouteId": "210103",
+            "carNo": "",
+            "id": "33331",
+            "imgTag": "000",
+            "seq": "15"
+        },
+        {
+            "stopInfo": "4分鐘",
+            "infoId": "267",
+            "subRouteId": "210103",
+            "carNo": "",
+            "id": "33332",
+            "imgTag": "000",
+            "seq": "16"
+        },
+        {
+            "stopInfo": "8分鐘",
+            "infoId": "517",
+            "subRouteId": "210103",
+            "carNo": "",
+            "id": "33205",
+            "imgTag": "000",
+            "seq": "17"
+        },
+        {
+            "stopInfo": "10分鐘",
+            "infoId": "627",
+            "subRouteId": "210103",
+            "carNo": "",
+            "id": "33206",
+            "imgTag": "000",
+            "seq": "18"
+        },
+        {
+            "stopInfo": "11分鐘",
+            "infoId": "696",
+            "subRouteId": "210103",
+            "carNo": "",
+            "id": "33207",
+            "imgTag": "000",
+            "seq": "19"
+        },
+        {
+            "stopInfo": "12分鐘",
+            "infoId": "738",
+            "subRouteId": "210103",
+            "carNo": "",
+            "id": "33208",
+            "imgTag": "000",
+            "seq": "20"
+        },
+        {
+            "stopInfo": "14分鐘",
+            "infoId": "855",
+            "subRouteId": "210103",
+            "carNo": "",
+            "id": "33209",
+            "imgTag": "000",
+            "seq": "21"
+        },
+        {
+            "stopInfo": "即將進站",
+            "infoId": "93",
+            "subRouteId": "210101",
+            "carNo": "401-U9",
+            "id": "33210",
+            "imgTag": "100",
+            "seq": "22"
+        },
+        {
+            "stopInfo": "3分鐘",
+            "infoId": "211",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33211",
+            "imgTag": "000",
+            "seq": "23"
+        },
+        {
+            "stopInfo": "5分鐘",
+            "infoId": "312",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33212",
+            "imgTag": "000",
+            "seq": "24"
+        },
+        {
+            "stopInfo": "6分鐘",
+            "infoId": "405",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33213",
+            "imgTag": "000",
+            "seq": "25"
+        },
+        {
+            "stopInfo": "9分鐘",
+            "infoId": "563",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33214",
+            "imgTag": "000",
+            "seq": "26"
+        },
+        {
+            "stopInfo": "即將進站",
+            "infoId": "31",
+            "subRouteId": "210101",
+            "carNo": "437-U9",
+            "id": "33215",
+            "imgTag": "100",
+            "seq": "27"
+        },
+        {
+            "stopInfo": "3分鐘",
+            "infoId": "231",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33216",
+            "imgTag": "000",
+            "seq": "28"
+        },
+        {
+            "stopInfo": "4分鐘",
+            "infoId": "296",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33217",
+            "imgTag": "000",
+            "seq": "29"
+        },
+        {
+            "stopInfo": "5分鐘",
+            "infoId": "308",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33218",
+            "imgTag": "000",
+            "seq": "30"
+        },
+        {
+            "stopInfo": "5分鐘",
+            "infoId": "341",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33219",
+            "imgTag": "000",
+            "seq": "31"
+        },
+        {
+            "stopInfo": "7分鐘",
+            "infoId": "444",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33220",
+            "imgTag": "000",
+            "seq": "32"
+        },
+        {
+            "stopInfo": "8分鐘",
+            "infoId": "491",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33221",
+            "imgTag": "000",
+            "seq": "33"
+        },
+        {
+            "stopInfo": "8分鐘",
+            "infoId": "504",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33222",
+            "imgTag": "000",
+            "seq": "34"
+        },
+        {
+            "stopInfo": "8分鐘",
+            "infoId": "526",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33223",
+            "imgTag": "000",
+            "seq": "35"
+        },
+        {
+            "stopInfo": "10分鐘",
+            "infoId": "600",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33224",
+            "imgTag": "000",
+            "seq": "36"
+        },
+        {
+            "stopInfo": "10分鐘",
+            "infoId": "644",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33225",
+            "imgTag": "000",
+            "seq": "37"
+        },
+        {
+            "stopInfo": "12分鐘",
+            "infoId": "734",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33226",
+            "imgTag": "000",
+            "seq": "38"
+        },
+        {
+            "stopInfo": "13分鐘",
+            "infoId": "787",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33227",
+            "imgTag": "000",
+            "seq": "39"
+        },
+        {
+            "stopInfo": "14分鐘",
+            "infoId": "849",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33228",
+            "imgTag": "000",
+            "seq": "40"
+        },
+        {
+            "stopInfo": "15分鐘",
+            "infoId": "938",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33229",
+            "imgTag": "000",
+            "seq": "41"
+        },
+        {
+            "stopInfo": "16分鐘",
+            "infoId": "961",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33230",
+            "imgTag": "000",
+            "seq": "42"
+        },
+        {
+            "stopInfo": "17分鐘",
+            "infoId": "1020",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33231",
+            "imgTag": "000",
+            "seq": "43"
+        },
+        {
+            "stopInfo": "17分鐘",
+            "infoId": "1037",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33232",
+            "imgTag": "000",
+            "seq": "44"
+        },
+        {
+            "stopInfo": "17分鐘",
+            "infoId": "1073",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33233",
+            "imgTag": "000",
+            "seq": "45"
+        },
+        {
+            "stopInfo": "19分鐘",
+            "infoId": "1153",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33234",
+            "imgTag": "000",
+            "seq": "46"
+        },
+        {
+            "stopInfo": "20分鐘",
+            "infoId": "1233",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33235",
+            "imgTag": "000",
+            "seq": "47"
+        },
+        {
+            "stopInfo": "75分鐘",
+            "infoId": "4552",
+            "subRouteId": "210105",
+            "carNo": "",
+            "id": "33236",
+            "imgTag": "000",
+            "seq": "48"
+        },
+        {
+            "stopInfo": "78分鐘",
+            "infoId": "4699",
+            "subRouteId": "210105",
+            "carNo": "",
+            "id": "33237",
+            "imgTag": "000",
+            "seq": "49"
+        },
+        {
+            "stopInfo": "21分鐘",
+            "infoId": "1313",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33238",
+            "imgTag": "000",
+            "seq": "50"
+        },
+        {
+            "stopInfo": "22分鐘",
+            "infoId": "1358",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33239",
+            "imgTag": "000",
+            "seq": "51"
+        },
+        {
+            "stopInfo": "22分鐘",
+            "infoId": "1379",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33240",
+            "imgTag": "000",
+            "seq": "52"
+        },
+        {
+            "stopInfo": "23分鐘",
+            "infoId": "1399",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33241",
+            "imgTag": "000",
+            "seq": "53"
+        },
+        {
+            "stopInfo": "23分鐘",
+            "infoId": "1412",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33242",
+            "imgTag": "000",
+            "seq": "54"
+        },
+        {
+            "stopInfo": "24分鐘",
+            "infoId": "1468",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33243",
+            "imgTag": "000",
+            "seq": "55"
+        },
+        {
+            "stopInfo": "25分鐘",
+            "infoId": "1535",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33244",
+            "imgTag": "000",
+            "seq": "56"
+        },
+        {
+            "stopInfo": "26分鐘",
+            "infoId": "1570",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33245",
+            "imgTag": "000",
+            "seq": "57"
+        },
+        {
+            "stopInfo": "26分鐘",
+            "infoId": "1600",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33246",
+            "imgTag": "000",
+            "seq": "58"
+        },
+        {
+            "stopInfo": "26分鐘",
+            "infoId": "1619",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33247",
+            "imgTag": "000",
+            "seq": "59"
+        },
+        {
+            "stopInfo": "27分鐘",
+            "infoId": "1632",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33248",
+            "imgTag": "000",
+            "seq": "60"
+        },
+        {
+            "stopInfo": "27分鐘",
+            "infoId": "1651",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33249",
+            "imgTag": "000",
+            "seq": "61"
+        },
+        {
+            "stopInfo": "28分鐘",
+            "infoId": "1687",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33250",
+            "imgTag": "000",
+            "seq": "62"
+        },
+        {
+            "stopInfo": "28分鐘",
+            "infoId": "1737",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33251",
+            "imgTag": "000",
+            "seq": "63"
+        },
+        {
+            "stopInfo": "29分鐘",
+            "infoId": "1779",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33252",
+            "imgTag": "000",
+            "seq": "64"
+        },
+        {
+            "stopInfo": "30分鐘",
+            "infoId": "1851",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33253",
+            "imgTag": "000",
+            "seq": "65"
+        },
+        {
+            "stopInfo": "31分鐘",
+            "infoId": "1919",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33254",
+            "imgTag": "000",
+            "seq": "66"
+        },
+        {
+            "stopInfo": "32分鐘",
+            "infoId": "1968",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33255",
+            "imgTag": "000",
+            "seq": "67"
+        },
+        {
+            "stopInfo": "即將進站",
+            "infoId": "11",
+            "subRouteId": "210101",
+            "carNo": "071-U9",
+            "id": "33256",
+            "imgTag": "100",
+            "seq": "68"
+        },
+        {
+            "stopInfo": "即將進站",
+            "infoId": "26",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33257",
+            "imgTag": "000",
+            "seq": "69"
+        },
+        {
+            "stopInfo": "即將進站",
+            "infoId": "109",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33258",
+            "imgTag": "000",
+            "seq": "70"
+        },
+        {
+            "stopInfo": "即將進站",
+            "infoId": "138",
+            "subRouteId": "210101",
+            "carNo": "",
+            "id": "33259",
+            "imgTag": "000",
+            "seq": "71"
+        }
+    ],
+    "busData": [
+        {
+            "busId": "11584",
+            "carType": "1",
+            "carNo": "070-U9",
+            "stopId": "33519",
+            "lon": "120.224475",
+            "imgTag": "100",
+            "seats": "-1",
+            "lat": "23.000745",
+            "InOut": "0",
+            "locId": "210103_33519",
+            "seq": "12"
+        },
+        {
+            "busId": "11432",
+            "carType": "1",
+            "carNo": "401-U9",
+            "stopId": "33209",
+            "lon": "120.201445",
+            "imgTag": "100",
+            "seats": "-1",
+            "lat": "22.992320",
+            "InOut": "0",
+            "locId": "210101_33209",
+            "seq": "21"
+        },
+        {
+            "busId": "11585",
+            "carType": "1",
+            "carNo": "071-U9",
+            "stopId": "33255",
+            "lon": "120.186372",
+            "imgTag": "100",
+            "seats": "-1",
+            "lat": "22.886532",
+            "InOut": "0",
+            "locId": "210101_33255",
+            "seq": "67"
+        },
+        {
+            "busId": "11479",
+            "carType": "1",
+            "carNo": "437-U9",
+            "stopId": "33214",
+            "lon": "120.197572",
+            "imgTag": "100",
+            "seats": "-1",
+            "lat": "22.984188",
+            "InOut": "0",
+            "locId": "210101_33214",
+            "seq": "26"
+        }
+    ],
+    "carSize": 1063,
+    "time": 1790837534936,
+    "cacheTime": 1076864
+}

@@ -1,0 +1,222 @@
+[
+    {
+        "EName": "LONgtian Train Statio",
+        "JPName": "隆田駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "170",
+        "lat": "23.192667",
+        "lon": "120.318898",
+        "name": "隆田火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Balin Train Statio",
+        "JPName": "拔林駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "171",
+        "lat": "23.141319",
+        "lon": "120.274643",
+        "name": "拔林火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Shanhua Train Statio",
+        "JPName": "善化駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "172",
+        "lat": "23.133324",
+        "lon": "120.306551",
+        "name": "善化火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Sinshih Train Statio",
+        "JPName": "新市駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "173",
+        "lat": "23.067704",
+        "lon": "120.290558",
+        "name": "新市火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Yongkang Train Statio",
+        "JPName": "永康駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "174",
+        "lat": "23.038338",
+        "lon": "120.253524",
+        "name": "永康火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Tainan Train Statio",
+        "JPName": "台南駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "175",
+        "lat": "22.997203",
+        "lon": "120.212418",
+        "name": "臺南火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Baoan Train Statio",
+        "JPName": "保安駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "176",
+        "lat": "22.93294",
+        "lon": "120.231594",
+        "name": "保安火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Jhongjhou Train Statio",
+        "JPName": "中洲駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "177",
+        "lat": "22.904026",
+        "lon": "120.252898",
+        "name": "中洲火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Daciao Train Statio",
+        "JPName": "大橋駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "226",
+        "lat": "23.019399",
+        "lon": "120.22442",
+        "name": "大橋火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Rende Train Station",
+        "JPName": "仁德駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "281",
+        "lat": "22.923389",
+        "lon": "120.240441",
+        "name": "仁德火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Nanke Train Statio",
+        "JPName": "南科駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "282",
+        "lat": "23.100596",
+        "lon": "120.307701",
+        "name": "南科火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Houbi Train Station",
+        "JPName": "後壁駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "166",
+        "lat": "23.366222",
+        "lon": "120.360389",
+        "name": "後壁火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Sinying Train Statio",
+        "JPName": "新營駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "167",
+        "lat": "23.306732",
+        "lon": "120.323055",
+        "name": "新營火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Liuying Train Station",
+        "JPName": "柳營駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "168",
+        "lat": "23.277111",
+        "lon": "120.322778",
+        "name": "柳營火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Nanjing Train Station",
+        "JPName": "南靖駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "8560",
+        "lat": "23.4132",
+        "lon": "120.38589",
+        "name": "南靖火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Linfongying Train Statio",
+        "JPName": "林鳳營駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "169",
+        "lat": "23.243586",
+        "lon": "120.319299",
+        "name": "林鳳營火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Shalun Train Statio",
+        "JPName": "沙崙(沙崙線)駅",
+        "cross1": "",
+        "cross2": "",
+        "id": "284",
+        "lat": "22.924232",
+        "lon": "120.286193",
+        "name": "沙崙(沙崙線)火車站",
+        "type": "stop"
+    },
+    {
+        "EName": "Tainan Train Station(Jhongshan Rd. D)",
+        "JPName": "台南駅(中山路D)",
+        "cross1": "",
+        "cross2": "",
+        "id": "5728",
+        "lat": "22.99641",
+        "lon": "120.21113",
+        "name": "臺南火車站(中山路D)",
+        "type": "stop"
+    },
+    {
+        "EName": "Tainan Train Station(Jhongshan Rd. C)",
+        "JPName": "台南駅(中山路C)",
+        "cross1": "",
+        "cross2": "",
+        "id": "5793",
+        "lat": "22.996611",
+        "lon": "120.211216",
+        "name": "臺南火車站(中山路C)",
+        "type": "stop"
+    },
+    {
+        "EName": "Tainan Train Station(Chenggong Rd. B)",
+        "JPName": "台南駅(成功路B)",
+        "cross1": "",
+        "cross2": "",
+        "id": "22201",
+        "lat": "22.99741",
+        "lon": "120.21034",
+        "name": "臺南火車站(成功路B)",
+        "type": "stop"
+    }
+]

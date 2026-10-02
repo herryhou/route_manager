@@ -1,0 +1,1130 @@
+{
+    "result": true,
+    "stopData": [
+        {
+            "id": 33316,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "1",
+                    "paid": "210103"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                },
+                {
+                    "img": "1",
+                    "paid": "210107"
+                }
+            ]
+        },
+        {
+            "id": 33317,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33318,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33319,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33320,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33321,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33322,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33323,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33324,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33325,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33326,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33327,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33519,
+            "padata": [
+                {
+                    "img": "0",
+                    "paid": "210101"
+                },
+                {
+                    "img": "0",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33329,
+            "padata": [
+                {
+                    "img": "1",
+                    "paid": "210101"
+                },
+                {
+                    "img": "1",
+                    "paid": "210105"
+                }
+            ]
+        },
+        {
+            "id": 33236,
+            "padata": [
+                {
+                    "img": "2",
+                    "paid": "210101"
+                },
+                {
+                    "img": "2",
+                    "paid": "210103"
+                }
+            ]
+        },
+        {
+            "id": 33237,
+            "padata": [
+                {
+                    "img": "2",
+                    "paid": "210101"
+                },
+                {
+                    "img": "2",
+                    "paid": "210103"
+                }
+            ]
+        },
+        {
+            "id": 33259,
+            "padata": [
+                {
+                    "img": "3",
+                    "paid": "210101"
+                },
+                {
+                    "img": "3",
+                    "paid": "210103"
+                },
+                {
+                    "img": "3",
+                    "paid": "210105"
+                },
+                {
+                    "img": "3",
+                    "paid": "210107"
+                }
+            ]
+        }
+    ],
+    "size": 72,
+    "data": [
+        {
+            "stopSeq": 1,
+            "locationId": 2675,
+            "name": "府城汽車客運公司",
+            "lon": "120.232112",
+            "busImage": "",
+            "busNo": "-1",
+            "id": 33316,
+            "stopStatus": "28分鐘",
+            "lat": "23.026298",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 2,
+            "locationId": 2520,
+            "name": "臺南市立圖書館",
+            "lon": "120.238045",
+            "busImage": "",
+            "busNo": "",
+            "id": 33317,
+            "stopStatus": "31分鐘",
+            "lat": "23.025060",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 3,
+            "locationId": 2737,
+            "name": "小橋公園、真愛社區",
+            "lon": "120.235148",
+            "busImage": "",
+            "busNo": "",
+            "id": 33318,
+            "stopStatus": "32分鐘",
+            "lat": "23.021818",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 4,
+            "locationId": 2735,
+            "name": "兒三廣十公園",
+            "lon": "120.234037",
+            "busImage": "",
+            "busNo": "",
+            "id": 33319,
+            "stopStatus": "35分鐘",
+            "lat": "23.018280",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 5,
+            "locationId": 5128,
+            "name": "南工社區",
+            "lon": "120.23486",
+            "busImage": "",
+            "busNo": "",
+            "id": 33320,
+            "stopStatus": "37分鐘",
+            "lat": "23.01496",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 6,
+            "locationId": 800,
+            "name": "中華、振興路口",
+            "lon": "120.23224",
+            "busImage": "",
+            "busNo": "",
+            "id": 33321,
+            "stopStatus": "39分鐘",
+            "lat": "23.01105",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 7,
+            "locationId": 801,
+            "name": "中華、中華二路口",
+            "lon": "120.233633",
+            "busImage": "",
+            "busNo": "",
+            "id": 33322,
+            "stopStatus": "39分鐘",
+            "lat": "23.008799",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 8,
+            "locationId": 1180,
+            "name": "中華路、勝華街口",
+            "lon": "120.23479",
+            "busImage": "",
+            "busNo": "",
+            "id": 33323,
+            "stopStatus": "40分鐘",
+            "lat": "23.00684",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 9,
+            "locationId": 802,
+            "name": "兵仔市",
+            "lon": "120.23514",
+            "busImage": "",
+            "busNo": "",
+            "id": 33324,
+            "stopStatus": "41分鐘",
+            "lat": "23.00397",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 10,
+            "locationId": 829,
+            "name": "中華小東路口",
+            "lon": "120.2347",
+            "busImage": "",
+            "busNo": "",
+            "id": 33325,
+            "stopStatus": "43分鐘",
+            "lat": "22.99894",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 11,
+            "locationId": 207,
+            "name": "四份子",
+            "lon": "120.232572",
+            "busImage": "",
+            "busNo": "",
+            "id": 33326,
+            "stopStatus": "45分鐘",
+            "lat": "22.998729",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 12,
+            "locationId": 208,
+            "name": "光明街口",
+            "lon": "120.229120",
+            "busImage": "",
+            "busNo": "",
+            "id": 33327,
+            "stopStatus": "46分鐘",
+            "lat": "22.999633",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 13,
+            "locationId": 266,
+            "name": "無障礙福利之家",
+            "lon": "120.225302",
+            "busImage": "",
+            "busNo": "",
+            "id": 33519,
+            "stopStatus": "46分鐘",
+            "lat": "23.000554",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 14,
+            "locationId": 209,
+            "name": "成大醫院(小東路)",
+            "lon": "120.22142",
+            "busImage": "",
+            "busNo": "11584",
+            "id": 33329,
+            "stopStatus": "即將進站",
+            "lat": "23.00089",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 15,
+            "locationId": 210,
+            "name": "成功大學",
+            "lon": "120.218117",
+            "busImage": "",
+            "busNo": "",
+            "id": 33330,
+            "stopStatus": "即將進站",
+            "lat": "23.001090",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 16,
+            "locationId": 211,
+            "name": "小東路",
+            "lon": "120.216002",
+            "busImage": "",
+            "busNo": "",
+            "id": 33331,
+            "stopStatus": "3分鐘",
+            "lat": "23.001301",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 17,
+            "locationId": 2249,
+            "name": "臺南公園(北門路)",
+            "lon": "120.212942",
+            "busImage": "",
+            "busNo": "",
+            "id": 33332,
+            "stopStatus": "4分鐘",
+            "lat": "23.000993",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 18,
+            "locationId": 1093,
+            "name": "臺南火車站(中山路C)",
+            "lon": "120.211216",
+            "busImage": "",
+            "busNo": "",
+            "id": 33205,
+            "stopStatus": "8分鐘",
+            "lat": "22.996611",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 19,
+            "locationId": 213,
+            "name": "台南醫院",
+            "lon": "120.209135",
+            "busImage": "",
+            "busNo": "",
+            "id": 33206,
+            "stopStatus": "10分鐘",
+            "lat": "22.995295",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 20,
+            "locationId": 214,
+            "name": "中山、民權路口",
+            "lon": "120.207089",
+            "busImage": "",
+            "busNo": "",
+            "id": 33207,
+            "stopStatus": "11分鐘",
+            "lat": "22.993929",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 21,
+            "locationId": 288,
+            "name": "民生綠園",
+            "lon": "120.206257",
+            "busImage": "",
+            "busNo": "",
+            "id": 33208,
+            "stopStatus": "12分鐘",
+            "lat": "22.993376",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 22,
+            "locationId": 701,
+            "name": "林百貨(中正路)",
+            "lon": "120.202236",
+            "busImage": "",
+            "busNo": "",
+            "id": 33209,
+            "stopStatus": "14分鐘",
+            "lat": "22.992064",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 23,
+            "locationId": 702,
+            "name": "中正、西門路口",
+            "lon": "120.199941",
+            "busImage": "",
+            "busNo": "11432",
+            "id": 33210,
+            "stopStatus": "即將進站",
+            "lat": "22.992571",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 24,
+            "locationId": 9280,
+            "name": "西門、友愛街口",
+            "lon": "120.198302",
+            "busImage": "",
+            "busNo": "",
+            "id": 33211,
+            "stopStatus": "3分鐘",
+            "lat": "22.992086",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 25,
+            "locationId": 9204,
+            "name": "小西門(西門路)",
+            "lon": "120.197435",
+            "busImage": "",
+            "busNo": "",
+            "id": 33212,
+            "stopStatus": "5分鐘",
+            "lat": "22.988846",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 26,
+            "locationId": 9282,
+            "name": "新光三越新天地",
+            "lon": "120.197483",
+            "busImage": "",
+            "busNo": "",
+            "id": 33213,
+            "stopStatus": "6分鐘",
+            "lat": "22.987184",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 27,
+            "locationId": 9283,
+            "name": "西門路一段",
+            "lon": "120.197516",
+            "busImage": "",
+            "busNo": "",
+            "id": 33214,
+            "stopStatus": "9分鐘",
+            "lat": "22.984448",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 28,
+            "locationId": 9284,
+            "name": "西門健康立體停車場",
+            "lon": "120.197562",
+            "busImage": "",
+            "busNo": "11479",
+            "id": 33215,
+            "stopStatus": "即將進站",
+            "lat": "22.982371",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 29,
+            "locationId": 9139,
+            "name": "新興國小",
+            "lon": "120.19604",
+            "busImage": "",
+            "busNo": "",
+            "id": 33216,
+            "stopStatus": "3分鐘",
+            "lat": "22.97887",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 30,
+            "locationId": 9140,
+            "name": "新興路",
+            "lon": "120.19412",
+            "busImage": "",
+            "busNo": "",
+            "id": 33217,
+            "stopStatus": "4分鐘",
+            "lat": "22.97753",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 31,
+            "locationId": 9141,
+            "name": "南稅三村",
+            "lon": "120.19299",
+            "busImage": "",
+            "busNo": "",
+            "id": 33218,
+            "stopStatus": "5分鐘",
+            "lat": "22.97672",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 32,
+            "locationId": 9142,
+            "name": "三官廟",
+            "lon": "120.191553",
+            "busImage": "",
+            "busNo": "",
+            "id": 33219,
+            "stopStatus": "5分鐘",
+            "lat": "22.975742",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 33,
+            "locationId": 9143,
+            "name": "北鹽埕",
+            "lon": "120.190683",
+            "busImage": "",
+            "busNo": "",
+            "id": 33220,
+            "stopStatus": "7分鐘",
+            "lat": "22.973632",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 34,
+            "locationId": 9144,
+            "name": "日新國小",
+            "lon": "120.19057",
+            "busImage": "",
+            "busNo": "",
+            "id": 33221,
+            "stopStatus": "8分鐘",
+            "lat": "22.97179",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 35,
+            "locationId": 9145,
+            "name": "鹽埕",
+            "lon": "120.190530",
+            "busImage": "",
+            "busNo": "",
+            "id": 33222,
+            "stopStatus": "8分鐘",
+            "lat": "22.970988",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 36,
+            "locationId": 9146,
+            "name": "新都路口",
+            "lon": "120.19017",
+            "busImage": "",
+            "busNo": "",
+            "id": 33223,
+            "stopStatus": "8分鐘",
+            "lat": "22.96788",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 37,
+            "locationId": 9147,
+            "name": "金華路一段",
+            "lon": "120.18987",
+            "busImage": "",
+            "busNo": "",
+            "id": 33224,
+            "stopStatus": "10分鐘",
+            "lat": "22.96589",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 38,
+            "locationId": 9148,
+            "name": "日新橋",
+            "lon": "120.18938",
+            "busImage": "",
+            "busNo": "",
+            "id": 33225,
+            "stopStatus": "10分鐘",
+            "lat": "22.96273",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 39,
+            "locationId": 9149,
+            "name": "南區區公所",
+            "lon": "120.188365",
+            "busImage": "",
+            "busNo": "",
+            "id": 33226,
+            "stopStatus": "12分鐘",
+            "lat": "22.960260",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 40,
+            "locationId": 9150,
+            "name": "明興路",
+            "lon": "120.186799",
+            "busImage": "",
+            "busNo": "",
+            "id": 33227,
+            "stopStatus": "13分鐘",
+            "lat": "22.958120",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 41,
+            "locationId": 9151,
+            "name": "風櫃門",
+            "lon": "120.184683",
+            "busImage": "",
+            "busNo": "",
+            "id": 33228,
+            "stopStatus": "14分鐘",
+            "lat": "22.951127",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 42,
+            "locationId": 9152,
+            "name": "勞工住宅",
+            "lon": "120.17989",
+            "busImage": "",
+            "busNo": "",
+            "id": 33229,
+            "stopStatus": "15分鐘",
+            "lat": "22.94621",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 43,
+            "locationId": 9153,
+            "name": "北喜樹",
+            "lon": "120.17981",
+            "busImage": "",
+            "busNo": "",
+            "id": 33230,
+            "stopStatus": "16分鐘",
+            "lat": "22.94397",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 44,
+            "locationId": 9154,
+            "name": "喜樹",
+            "lon": "120.177978",
+            "busImage": "",
+            "busNo": "",
+            "id": 33231,
+            "stopStatus": "17分鐘",
+            "lat": "22.940349",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 45,
+            "locationId": 9155,
+            "name": "喜南里",
+            "lon": "120.17836",
+            "busImage": "",
+            "busNo": "",
+            "id": 33232,
+            "stopStatus": "17分鐘",
+            "lat": "22.93895",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 46,
+            "locationId": 1486,
+            "name": "喜東里",
+            "lon": "120.180717",
+            "busImage": "",
+            "busNo": "",
+            "id": 33233,
+            "stopStatus": "17分鐘",
+            "lat": "22.938825",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 47,
+            "locationId": 2462,
+            "name": "省躬公園",
+            "lon": "120.180997",
+            "busImage": "",
+            "busNo": "",
+            "id": 33234,
+            "stopStatus": "19分鐘",
+            "lat": "22.936556",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 48,
+            "locationId": 9156,
+            "name": "省躬國小",
+            "lon": "120.18030",
+            "busImage": "",
+            "busNo": "",
+            "id": 33235,
+            "stopStatus": "20分鐘",
+            "lat": "22.93305",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 49,
+            "locationId": 2327,
+            "name": "歡喜公園",
+            "lon": "120.187711",
+            "busImage": "",
+            "busNo": "-1",
+            "id": 33236,
+            "stopStatus": "75分鐘",
+            "lat": "22.932263",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 50,
+            "locationId": 2068,
+            "name": "南寧高中",
+            "lon": "120.18633",
+            "busImage": "",
+            "busNo": "",
+            "id": 33237,
+            "stopStatus": "78分鐘",
+            "lat": "22.935092",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 51,
+            "locationId": 9157,
+            "name": "寮仔",
+            "lon": "120.18237",
+            "busImage": "",
+            "busNo": "11479",
+            "id": 33238,
+            "stopStatus": "21分鐘",
+            "lat": "22.93275",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 52,
+            "locationId": 9158,
+            "name": "興農公園",
+            "lon": "120.18549",
+            "busImage": "",
+            "busNo": "",
+            "id": 33239,
+            "stopStatus": "22分鐘",
+            "lat": "22.92909",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 53,
+            "locationId": 9159,
+            "name": "馬鎮宮",
+            "lon": "120.186173",
+            "busImage": "",
+            "busNo": "",
+            "id": 33240,
+            "stopStatus": "22分鐘",
+            "lat": "22.926939",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 54,
+            "locationId": 9160,
+            "name": "同安宮",
+            "lon": "120.185110",
+            "busImage": "",
+            "busNo": "",
+            "id": 33241,
+            "stopStatus": "23分鐘",
+            "lat": "22.924591",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 55,
+            "locationId": 9161,
+            "name": "同安里",
+            "lon": "120.184880",
+            "busImage": "",
+            "busNo": "",
+            "id": 33242,
+            "stopStatus": "23分鐘",
+            "lat": "22.923691",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 56,
+            "locationId": 9162,
+            "name": "南萣橋北",
+            "lon": "120.18451",
+            "busImage": "",
+            "busNo": "",
+            "id": 33243,
+            "stopStatus": "24分鐘",
+            "lat": "22.92137",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 57,
+            "locationId": 9163,
+            "name": "南萣橋南",
+            "lon": "120.185261",
+            "busImage": "",
+            "busNo": "",
+            "id": 33244,
+            "stopStatus": "25分鐘",
+            "lat": "22.916035",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 58,
+            "locationId": 9165,
+            "name": "白砂崙廟口",
+            "lon": "120.185072",
+            "busImage": "",
+            "busNo": "",
+            "id": 33245,
+            "stopStatus": "26分鐘",
+            "lat": "22.912843",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 59,
+            "locationId": 9166,
+            "name": "茄萣農會",
+            "lon": "120.18477",
+            "busImage": "",
+            "busNo": "",
+            "id": 33246,
+            "stopStatus": "26分鐘",
+            "lat": "22.91125",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 60,
+            "locationId": 9167,
+            "name": "茄萣電信局",
+            "lon": "120.184346",
+            "busImage": "",
+            "busNo": "",
+            "id": 33247,
+            "stopStatus": "26分鐘",
+            "lat": "22.909350",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 61,
+            "locationId": 9168,
+            "name": "威武廟",
+            "lon": "120.18402",
+            "busImage": "",
+            "busNo": "",
+            "id": 33248,
+            "stopStatus": "27分鐘",
+            "lat": "22.90783",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 62,
+            "locationId": 9169,
+            "name": "茄萣國中",
+            "lon": "120.18369",
+            "busImage": "",
+            "busNo": "",
+            "id": 33249,
+            "stopStatus": "27分鐘",
+            "lat": "22.90646",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 63,
+            "locationId": 9170,
+            "name": "茄萣國小",
+            "lon": "120.18372",
+            "busImage": "",
+            "busNo": "",
+            "id": 33250,
+            "stopStatus": "28分鐘",
+            "lat": "22.9032",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 64,
+            "locationId": 9171,
+            "name": "曾厝",
+            "lon": "120.18407",
+            "busImage": "",
+            "busNo": "",
+            "id": 33251,
+            "stopStatus": "28分鐘",
+            "lat": "22.90079",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 65,
+            "locationId": 9172,
+            "name": "頂茄萣",
+            "lon": "120.18462",
+            "busImage": "",
+            "busNo": "",
+            "id": 33252,
+            "stopStatus": "29分鐘",
+            "lat": "22.89846",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 66,
+            "locationId": 9173,
+            "name": "下茄萣",
+            "lon": "120.18503",
+            "busImage": "",
+            "busNo": "",
+            "id": 33253,
+            "stopStatus": "30分鐘",
+            "lat": "22.89577",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 67,
+            "locationId": 9174,
+            "name": "光萣",
+            "lon": "120.18623",
+            "busImage": "",
+            "busNo": "",
+            "id": 33254,
+            "stopStatus": "31分鐘",
+            "lat": "22.89287",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 68,
+            "locationId": 9175,
+            "name": "成功橋",
+            "lon": "120.186965",
+            "busImage": "",
+            "busNo": "",
+            "id": 33255,
+            "stopStatus": "32分鐘",
+            "lat": "22.889962",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 69,
+            "locationId": 9181,
+            "name": "北崎漏",
+            "lon": "120.188324",
+            "busImage": "",
+            "busNo": "11585",
+            "id": 33256,
+            "stopStatus": "即將進站",
+            "lat": "22.879589",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 70,
+            "locationId": 9182,
+            "name": "崎漏",
+            "lon": "120.18894",
+            "busImage": "",
+            "busNo": "",
+            "id": 33257,
+            "stopStatus": "即將進站",
+            "lat": "22.87757",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 71,
+            "locationId": 9183,
+            "name": "崎漏茄萣農會",
+            "lon": "120.19147",
+            "busImage": "",
+            "busNo": "",
+            "id": 33258,
+            "stopStatus": "即將進站",
+            "lat": "22.87379",
+            "stop_type": "0"
+        },
+        {
+            "stopSeq": 72,
+            "locationId": 9184,
+            "name": "崎漏電信局",
+            "lon": "120.19386",
+            "busImage": "",
+            "busNo": "",
+            "id": 33259,
+            "stopStatus": "即將進站",
+            "lat": "22.87454",
+            "stop_type": "0"
+        }
+    ],
+    "name": "101路(原1路)",
+    "Go": "茄萣",
+    "Back": "成大醫院、府城客運",
+    "pathAttrs": [
+        {
+            "name": "往崎漏電信局",
+            "id": 210101
+        },
+        {
+            "name": "往崎漏電信局",
+            "id": 210103
+        },
+        {
+            "name": "往崎漏電信局[繞南寧高中]",
+            "id": 210105
+        },
+        {
+            "name": "往崎漏電信局[繞南寧高中]",
+            "id": 210107
+        }
+    ]
+}
