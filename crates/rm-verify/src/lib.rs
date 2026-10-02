@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Default)]
@@ -185,18 +185,23 @@ pub fn run(
             "station_group_version",
             "stop_of_route_version",
         ] {
-            let next: i64 = conn.query_row(
-                "SELECT next_value FROM id_sequence WHERE table_name = ?1",
-                [t],
-                |r| r.get(0),
-            )?;
             let max: i64 = conn.query_row(
                 &format!("SELECT COALESCE(MAX(rowid), 0) FROM {t}"),
                 [],
                 |r| r.get(0),
             )?;
-            if next <= max {
-                behind += 1;
+            // missing allocator row is fine only while the table is empty
+            let next: Option<i64> = conn
+                .query_row(
+                    "SELECT next_value FROM id_sequence WHERE table_name = ?1",
+                    [t],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match next {
+                Some(next) if next <= max => behind += 1,
+                None if max > 0 => behind += 1,
+                _ => {}
             }
         }
         checks.push(check(
@@ -394,8 +399,10 @@ pub fn run(
             conn,
             "SELECT COUNT(*) FROM seg_traversal t1
              JOIN seg_traversal t2 ON t2.segment_id = t1.segment_id
-             JOIN route r1 ON r1.route_id = t1.route_version_id
-             JOIN route r2 ON r2.route_id = t2.route_version_id
+             JOIN route_version rv1 ON rv1.route_version_id = t1.route_version_id
+             JOIN route r1 ON r1.route_id = rv1.route_id
+             JOIN route_version rv2 ON rv2.route_version_id = t2.route_version_id
+             JOIN route r2 ON r2.route_id = rv2.route_id
              WHERE r1.ext_uid = 'tcg:1' AND r2.ext_uid = 'tcg:9221'",
             &[],
         )?;

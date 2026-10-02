@@ -90,3 +90,69 @@ fn sequence_gap_is_caught() {
         "{report:#?}"
     );
 }
+
+#[test]
+fn shared_pair_joins_through_route_version() {
+    // route ids deliberately MISALIGNED from route_version ids: joining
+    // route.route_id = seg_traversal.route_version_id misattributes routes
+    let conn = rm_db::open_in_memory().unwrap();
+    conn.execute_batch(
+        "INSERT INTO route (route_id, route_code, ext_uid, revision, created_at, updated_at)
+            VALUES (1, '1', 'tcg:1', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+                   (2, '9221', 'tcg:9221', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+         INSERT INTO route_version
+            (route_version_id, route_id, version_no, status, valid_from, created_at)
+            VALUES (5, 1, 1, 'PUBLISHED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+                   (6, 2, 1, 'PUBLISHED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+         UPDATE route SET current_route_version_id = 5 WHERE route_id = 1;
+         UPDATE route SET current_route_version_id = 6 WHERE route_id = 2;
+         INSERT INTO subroute (subroute_id, route_id, subroute_code, created_at) VALUES
+            (5, 1, '1', '2026-01-01T00:00:00Z'), (6, 2, '9221', '2026-01-01T00:00:00Z');
+         INSERT INTO subroute_version
+            (subroute_version_id, route_version_id, subroute_id, subroute_name, created_at)
+            VALUES (5, 5, 5, 'A - B', '2026-01-01T00:00:00Z'),
+                   (6, 6, 6, 'C - D', '2026-01-01T00:00:00Z');
+         INSERT INTO station (station_id, ext_uid, created_at) VALUES
+            (1, 'tcg:node:1', '2026-01-01T00:00:00Z'),
+            (2, 'tcg:node:2', '2026-01-01T00:00:00Z');
+         INSERT INTO stop (stop_id, ext_uid, created_at) VALUES
+            (1, 'tcg:1:0:1', '2026-01-01T00:00:00Z');
+         INSERT INTO stop_version
+            (stop_version_id, stop_id, station_id, stop_code, stop_name, direction,
+             latitude, longitude, valid_from, created_at)
+            VALUES (1, 1, 1, '1', 'X', 0, 24.14, 120.68, '2026-01-01T00:00:00Z',
+                    '2026-01-01T00:00:00Z');
+         INSERT INTO seg_segment
+            (segment_id, start_station_id, end_station_id, encoded_polyline, length_m, way_count)
+            VALUES ('s1', 1, 2, '_p~iF~ps|U', 100.0, 1);
+         INSERT INTO stop_of_route_version
+            (stop_of_route_version_id, subroute_version_id, stop_version_id, direction,
+             stop_sequence, source_order_no, created_at)
+            VALUES (1, 5, 1, 0, 1, 1, '2026-01-01T00:00:00Z'),
+                   (2, 5, 1, 0, 2, 2, '2026-01-01T00:00:00Z'),
+                   (3, 6, 1, 0, 1, 1, '2026-01-01T00:00:00Z'),
+                   (4, 6, 1, 0, 2, 2, '2026-01-01T00:00:00Z');
+         INSERT INTO seg_traversal
+            (route_version_id, subroute_version_id, direction,
+             from_stop_of_route_version_id, to_stop_of_route_version_id, segment_id)
+            VALUES (5, 5, 0, 1, 2, 's1'), (6, 6, 0, 3, 4, 's1');",
+    )
+    .unwrap();
+    let qa = tempfile::tempdir().unwrap();
+
+    let report = rm_verify::run(&conn, 1, &Expectations::default(), qa.path()).unwrap();
+
+    let pair = report
+        .checks
+        .iter()
+        .find(|c| c.id == "seg:shared-pair")
+        .expect("shared-pair check present");
+    assert!(
+        pair.pass,
+        "misaligned ids must not hide the shared corridor: {pair:?}"
+    );
+    assert!(
+        pair.detail.contains('1'),
+        "expected 1 shared segment: {pair:?}"
+    );
+}
