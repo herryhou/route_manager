@@ -1,0 +1,22 @@
+[package]
+name = "rm-verify"
+description = "Invariant checks, count cross-checks, QA exports"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+rm-core.workspace = true
+rm-db.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+rm-ingest = { path = "../rm-ingest", features = ["testfix"] }
+rm-identity = { path = "../rm-identity" }
+rm-publish = { path = "../rm-publish" }
+tempfile = "3"
