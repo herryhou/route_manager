@@ -52,7 +52,7 @@ CREATE TABLE seg_match_way (
 
 -- rm-osm-match: per route+direction matching quality
 CREATE TABLE seg_match_stat (
-    route_version_id  INTEGER PRIMARY KEY,
+    route_version_id  INTEGER NOT NULL,
     direction         INTEGER NOT NULL,
     stops             INTEGER NOT NULL,
     path_length_m     REAL NOT NULL,
@@ -61,7 +61,8 @@ CREATE TABLE seg_match_stat (
     snap_dist_p95     REAL,
     snap_dist_max     REAL,
     outliers          INTEGER NOT NULL,
-    gap_repairs       INTEGER NOT NULL
+    gap_repairs       INTEGER NOT NULL,
+    PRIMARY KEY (route_version_id, direction)
 );
 
 -- rm-registry: directed segment identity

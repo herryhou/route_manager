@@ -831,6 +831,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rm-osm-match"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rayon",
+ "rm-core",
+ "rm-db",
+ "rm-identity",
+ "rm-ingest",
+ "rm-publish",
+ "rm-segments",
+ "rusqlite",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "rm-osm-prepare"
 version = "0.1.0"
 dependencies = [
