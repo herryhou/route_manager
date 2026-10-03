@@ -1,6 +1,7 @@
 //! Route table.
 
 pub mod assets;
+pub mod routes;
 pub mod stats;
 
 use axum::routing::get;
@@ -20,4 +21,6 @@ pub fn router() -> Router<AppState> {
         .route("/vendor/leaflet.js", get(assets::serve))
         .route("/vendor/leaflet.css", get(assets::serve))
         .route("/api/stats", get(stats::stats))
+        .route("/api/routes", get(routes::list))
+        .route("/api/routes/{id}", get(routes::detail))
 }

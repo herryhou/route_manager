@@ -71,6 +71,64 @@ async fn stats_reports_fixture_counts() {
 }
 
 #[tokio::test]
+async fn routes_list_and_detail() {
+    let (_dir, db) = fixture_db();
+    let app = router_with(AppState::new(db));
+
+    let v = get_json(&app, "/api/routes").await;
+    let routes = v["routes"].as_array().unwrap();
+    assert_eq!(routes.len(), 2);
+
+    let r1 = routes
+        .iter()
+        .find(|r| r["route_code"] == serde_json::json!("1"))
+        .expect("route 1");
+    assert_eq!(r1["subroute_name"], serde_json::json!("A - B"));
+    assert_eq!(r1["providers"], serde_json::json!(["台中客運"]));
+    assert_eq!(r1["side_routes"], serde_json::json!(["2"]));
+    let dirs = r1["directions"].as_array().unwrap();
+    assert_eq!(dirs.len(), 2, "route 1 has dir 0 + dir 1: {r1}");
+    let d0 = dirs.iter().find(|d| d["direction"] == 0).unwrap();
+    assert_eq!(d0["stops"].as_i64().unwrap(), 2);
+    assert!(d0["matched_ratio"].is_null(), "no match stats in fixture");
+
+    let r2 = routes
+        .iter()
+        .find(|r| r["route_code"] == serde_json::json!("2"))
+        .expect("route 2");
+    assert_eq!(r2["subroute_name"], serde_json::json!("C - D"));
+    assert_eq!(r2["providers"], serde_json::json!([]));
+    assert_eq!(r2["directions"].as_array().unwrap().len(), 1, "dir 0 only");
+
+    // search narrows by code
+    let v = get_json(&app, "/api/routes?q=2").await;
+    let routes = v["routes"].as_array().unwrap();
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0]["route_code"], serde_json::json!("2"));
+
+    // detail
+    let id1 = r1["route_id"].as_i64().unwrap();
+    let d = get_json(&app, &format!("/api/routes/{id1}")).await;
+    assert_eq!(d["route_code"], serde_json::json!("1"));
+    assert_eq!(d["xno"], serde_json::json!("1"));
+    assert_eq!(d["version_no"].as_i64().unwrap(), 1);
+    assert_eq!(d["status"], serde_json::json!("PUBLISHED"));
+    assert!(d["subroutes"].as_array().unwrap().len() >= 1);
+
+    // unknown id → 404
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/routes/999")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn unknown_api_path_is_404_json() {
     let res = app()
         .oneshot(

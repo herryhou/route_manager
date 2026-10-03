@@ -1,0 +1,37 @@
+//! `GET /api/routes` and `GET /api/routes/{id}`.
+
+use axum::extract::{Path, Query, State};
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::Deserialize;
+use serde_json::Value;
+
+use crate::error::not_found;
+use crate::state::{AppState, run_db};
+
+#[derive(Deserialize)]
+pub struct ListParams {
+    #[serde(default)]
+    q: String,
+    limit: Option<i64>,
+}
+
+pub async fn list(
+    Query(p): Query<ListParams>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, crate::error::ApiError> {
+    let limit = p.limit.unwrap_or(500).clamp(1, 5000);
+    let v = run_db(state, move |conn| crate::queries::routes::list(conn, &p.q, limit)).await?;
+    Ok(Json(v))
+}
+
+pub async fn detail(
+    Path(route_id): Path<i64>,
+    State(state): State<AppState>,
+) -> Result<Response, crate::error::ApiError> {
+    let v = run_db(state, move |conn| crate::queries::routes::detail(conn, route_id)).await?;
+    match v {
+        Some(v) => Ok(Json(v).into_response()),
+        None => Ok(not_found("route")),
+    }
+}

@@ -1,5 +1,6 @@
-// Bootstrap: map + top-bar stats chips. Sidebar/panels wire in later steps.
+// Bootstrap: map + stats chips + route sidebar. Detail interactions wire in later steps.
 import * as api from './api.js';
+import { renderRouteList, filterRoutes, showDetail, kv } from './panels.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -25,9 +26,44 @@ function fmtMatch(m) {
   return `${m.directions_with_stats}/${m.directions_total}`;
 }
 
-async function boot() {
+let allRoutes = [];
+let selectedKey = null;
+
+function refreshList(q) {
+  renderRouteList(filterRoutes(allRoutes, q), {
+    selectedKey,
+    onSelect: (r) => selectRoute(r),
+  });
+}
+
+async function selectRoute(r) {
+  selectedKey = `${r.route_id}`;
+  refreshList(document.getElementById('route-search').value);
   try {
-    const s = await api.stats();
+    const d = await api.routeDetail(r.route_id);
+    showDetail(`
+      <h2>Route ${d.route_code}</h2>
+      ${kv([
+        ['name', d.subroute_name],
+        ['providers', d.providers.join(', ')],
+        ['version', `v${d.version_no} · ${d.status}`],
+        ['valid from', d.valid_from],
+        ['side routes', d.side_routes.join(', ')],
+        ['main routes', d.main_routes.join(', ')],
+      ])}
+      <p class="muted">map drawing lands in the next step</p>
+    `);
+  } catch (e) {
+    status(`route detail failed: ${e.message}`);
+  }
+}
+
+async function boot() {
+  const search = document.getElementById('route-search');
+  search.addEventListener('input', () => refreshList(search.value));
+
+  try {
+    const [s, rv] = await Promise.all([api.stats(), api.routes()]);
     const c = s.counts ?? {};
     setChip('chip-routes', c.routes ?? '—');
     setChip('chip-stops', c.stops ?? '—');
@@ -38,8 +74,10 @@ async function boot() {
     if (s.batch) {
       status(`batch ${s.batch.batch_id} · captured ${s.batch.captured_at} · ${s.batch.status}`);
     }
+    allRoutes = rv.routes ?? [];
+    refreshList('');
   } catch (e) {
-    status(`stats failed: ${e.message}`);
+    status(`boot failed: ${e.message}`);
   }
 }
 
