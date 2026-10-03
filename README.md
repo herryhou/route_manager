@@ -58,6 +58,15 @@ disagree by more than 45° are flagged — warn-only (`report.json` warnings
 + `qa/bearing_report.json`), never failing the run. Spreads near 180°
 are annotated `opposite_pair` (a pole serving both directions).
 
+To browse the result in a map-centric web UI (read-only, safe alongside the
+pipeline):
+
+```sh
+cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
+```
+
+See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
+
 ## Data model notes
 
 - Station identity = API `node.id` (`station.ext_uid = tcg:node:{id}`);

@@ -40,3 +40,24 @@ Finally **verify** (`rm-verify`) re-checks ~26 invariants and counts against kno
 The local OSM extract has holes at the edges of the city: 204 of 761 directions couldn't be matched to streets and are reported (not hidden) as skipped pairs. Fix is a bigger extract, not code. Timetables, GTFS export, and a second-import diff are deliberately out of scope for this version — the schema leaves room for them.
 
 See `README.md` for build/run instructions and command flags.
+
+## Browsing the result: rm-web
+
+`rm-web` is a read-only web viewer over the database the pipeline produces — no pipeline step is changed by using it.
+
+```sh
+cargo run -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
+```
+
+Then open the address in a browser. Flags: `--db` (default `data/taichung.db`), `--addr` (default `127.0.0.1:8787`), `--tiles URL` (override the basemap tile server; default is OpenStreetMap's, which needs internet — every other layer is offline).
+
+What you can do:
+
+- **Route browsing** — search the sidebar, click a route: its path (from the segment geometry) and stops draw on the map, with a stop list and direction toggle (去程/返程) in the panel.
+- **Stop drill-down** — click any stop: its station, station group (rings on the map), and every route serving it at stop / station / group level.
+- **QA review** — the *outliers* chip lists the worst stop placements (OUTLIER/NO_PATH or snap > 50 m); each route has a snap-distance profile chart; direction dots in the route list are colored by match quality.
+- **Segment registry** — enable *segments*: canonical corridors colored by how many routes share them (zoom ≥ 13); click one for its ways and traversing routes.
+- **OSM overlay** — with a route selected, *OSM ways* draws the matched street ways (entry/exit-trimmed) under the route.
+- **Raw compare** — *Raw compare* draws the raw staging polyline and raw stop squares against the canonical view.
+
+The server opens the database with SQLite read-only flags and never runs migrations, so it can run while the pipeline writes. Views are shareable via URL hash (`#route=1&dir=0`, `#stop=123`, `#segment=<id>`).

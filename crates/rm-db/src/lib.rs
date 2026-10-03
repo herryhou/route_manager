@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 mod allocator;
 mod batch;
@@ -26,6 +26,18 @@ pub fn open(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path).with_context(|| format!("open {}", path.display()))?;
     apply_pragmas(&conn)?;
     migrate(&conn)?;
+    Ok(conn)
+}
+
+/// Open an existing DB read-only (viewer mode): no pragmas that write,
+/// no migrations. WAL readers coexist with a pipeline writer.
+pub fn open_readonly(path: &Path) -> Result<Connection> {
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| format!("open readonly {}", path.display()))?;
+    conn.busy_timeout(std::time::Duration::from_secs(30))?;
     Ok(conn)
 }
 
@@ -71,6 +83,36 @@ mod tests {
         assert_eq!(mint(&conn, "stop").unwrap(), 1);
         assert_eq!(mint(&conn, "stop").unwrap(), 2);
         assert_eq!(mint(&conn, "station").unwrap(), 1); // per-table sequence
+    }
+
+    #[test]
+    fn open_readonly_reads_but_cannot_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("ro.db");
+        let conn = open(&db).unwrap();
+        conn.execute(
+            "INSERT INTO id_sequence (table_name, next_value) VALUES ('t', 41)",
+            [],
+        )
+        .unwrap();
+
+        let ro = open_readonly(&db).unwrap();
+        let n: i64 = ro
+            .query_row(
+                "SELECT next_value FROM id_sequence WHERE table_name = 't'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 41);
+        assert!(
+            ro.execute(
+                "INSERT INTO id_sequence (table_name, next_value) VALUES ('u', 1)",
+                []
+            )
+            .is_err(),
+            "read-only connection must reject writes"
+        );
     }
 
     #[test]

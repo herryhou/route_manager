@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <link rel="icon" href="data:,">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rm-web — Taichung route explorer</title>
+<link rel="stylesheet" href="/vendor/leaflet.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header id="topbar">
+  <span id="title">rm-web</span>
+  <span class="chip" id="chip-routes" title="Routes">routes <b>—</b></span>
+  <span class="chip" id="chip-stops" title="Current stop versions">stops <b>—</b></span>
+  <span class="chip" id="chip-stations" title="Current station versions">stations <b>—</b></span>
+  <span class="chip" id="chip-segments" title="Canonical segments">segments <b>—</b></span>
+  <span class="chip" id="chip-match" title="Directions with match stats / total directions">matched <b>—</b></span>
+  <span class="chip chip-click" id="chip-outliers" title="Outlier stops — click to list">outliers <b>—</b></span>
+</header>
+<div id="main">
+  <aside id="sidebar">
+    <input id="route-search" type="search" placeholder="Search route code or name…" autocomplete="off">
+    <div id="route-list"></div>
+    <div id="layer-controls">
+      <h3>Layers</h3>
+      <label><input type="checkbox" id="layer-stops"> Stops / stations</label>
+      <label><input type="checkbox" id="layer-segments"> Segments</label>
+      <label><input type="checkbox" id="layer-osm"> OSM ways <small>(needs route)</small></label>
+      <label><input type="checkbox" id="layer-raw"> Raw compare <small>(needs route)</small></label>
+      <div id="legend"></div>
+    </div>
+  </aside>
+  <div id="map"></div>
+  <section id="detail" hidden></section>
+</div>
+<footer id="statusbar">
+  <span id="status-msg"></span>
+  <span id="tile-note">basemap tiles require internet — data layers are local</span>
+</footer>
+<script src="/vendor/leaflet.js"></script>
+<script>window.RM_TILES = "__TILES__";</script>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
