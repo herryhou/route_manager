@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
 import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, outlierPanel, segmentPanel } from './panels.js';
-import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments } from './layers.js';
+import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawWays, clearWays } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -51,6 +51,8 @@ async function selectRoute(r, dir = 0) {
     ]);
     if (selectedRoute?.route_id !== route_id || selectedRoute.dir !== dir) return; // stale
     drawRoute(p, s, { onStopClick: (stop) => selectStop(stop.stop_version_id, stop) });
+    if (document.getElementById('layer-osm').checked) loadWays(route_id, dir);
+    else clearWays();
     fitRoute(p, s);
     routeStopsPanel(d, dir, s, {
       onDirection: (nd) => selectRoute(r, nd),
@@ -60,6 +62,16 @@ async function selectRoute(r, dir = 0) {
     location.hash = `#route=${route_id}&dir=${dir}`;
   } catch (e) {
     status(`route load failed: ${e.message}`);
+  }
+}
+
+async function loadWays(routeId, dir) {
+  try {
+    const fc = await api.routeWays(routeId, dir);
+    if (selectedRoute?.route_id !== routeId || selectedRoute.dir !== dir) return; // stale
+    drawWays(fc);
+  } catch (e) {
+    status(`ways load failed: ${e.message}`);
   }
 }
 
@@ -142,6 +154,10 @@ async function boot() {
   segToggle.addEventListener('change', () => {
     if (segToggle.checked) refreshSegments();
     else clearSegments();
+  });
+  document.getElementById('layer-osm').addEventListener('change', (e) => {
+    if (e.target.checked && selectedRoute) loadWays(selectedRoute.route_id, selectedRoute.dir);
+    else clearWays();
   });
   map.on('moveend', () => {
     clearTimeout(segmentsTimer);

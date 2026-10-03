@@ -51,3 +51,11 @@ pub async fn stops(
     let v = run_db(state, move |conn| crate::queries::routes::stops(conn, route_id, dir)).await?;
     Ok(Json(v))
 }
+
+pub async fn ways(
+    Path((route_id, dir)): Path<(i64, i64)>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, crate::error::ApiError> {
+    let v = run_db(state, move |conn| crate::queries::routes::ways(conn, route_id, dir)).await?;
+    Ok(Json(v))
+}

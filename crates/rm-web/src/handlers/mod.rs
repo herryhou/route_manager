@@ -28,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/routes/{id}", get(routes::detail))
         .route("/api/routes/{id}/directions/{dir}/path", get(routes::path))
         .route("/api/routes/{id}/directions/{dir}/stops", get(routes::stops))
+        .route("/api/routes/{id}/directions/{dir}/ways", get(routes::ways))
         .route("/api/stops/{id}", get(stops::detail))
         .route("/api/stations/{id}", get(stops::station_detail))
         .route("/api/qa/outliers", get(qa::outliers))

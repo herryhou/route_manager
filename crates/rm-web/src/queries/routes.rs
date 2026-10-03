@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use rm_core::polyline;
+use rm_core::LatLng;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
@@ -326,4 +327,70 @@ pub fn stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> 
     })?;
     let stops: Vec<Value> = it.collect::<Result<_, _>>()?;
     Ok(json!({ "stops": stops }))
+}
+
+/// `GET /api/routes/{id}/directions/{dir}/ways` — matched OSM way runs,
+/// each way's node run sliced to its [entry, exit] window.
+pub fn ways(conn: &Connection, route_id: i64, dir: i64) -> Result<Value> {
+    let mut stmt = conn.prepare(
+        "SELECT mw.ordinal, mw.osm_way_id, mw.entry_node_id, mw.exit_node_id,
+                mw.cum_start_m, mw.cum_end_m, w.name
+         FROM seg_match_way mw
+         JOIN subroute_version sv ON sv.subroute_version_id = mw.subroute_version_id
+         JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         JOIN osm_way w ON w.osm_way_id = mw.osm_way_id
+         WHERE rv.route_id = ?1 AND mw.direction = ?2
+         ORDER BY mw.ordinal",
+    )?;
+    let runs: Vec<(i64, i64, i64, i64, f64, f64, Option<String>)> = stmt
+        .query_map(rusqlite::params![route_id, dir], |r| {
+            Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+            ))
+        })?
+        .collect::<Result<_, _>>()?;
+
+    let mut features = Vec::new();
+    for (ordinal, way_id, entry, exit, cum_start, cum_end, name) in runs {
+        // ordered node run for the way
+        let mut nstmt = conn.prepare(
+            "SELECT n.osm_node_id, n.lat, n.lon
+             FROM osm_way_node wn JOIN osm_node n ON n.osm_node_id = wn.osm_node_id
+             WHERE wn.osm_way_id = ?1
+             ORDER BY wn.ordinal",
+        )?;
+        let nodes: Vec<(i64, f64, f64)> = nstmt
+            .query_map([way_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<Result<_, _>>()?;
+
+        let (lo, hi) = match (
+            nodes.iter().position(|(id, _, _)| *id == entry),
+            nodes.iter().position(|(id, _, _)| *id == exit),
+        ) {
+            (Some(a), Some(b)) => (a.min(b), a.max(b)),
+            _ => (0, nodes.len().saturating_sub(1)), // fall back to full run
+        };
+        let pts: Vec<LatLng> = nodes[lo..=hi]
+            .iter()
+            .map(|(_, lat, lon)| LatLng { lat: *lat, lon: *lon })
+            .collect();
+        if pts.len() < 2 {
+            continue;
+        }
+        features.push(geojson::feature(
+            geojson::line_string(&pts),
+            json!({
+                "ordinal": ordinal,
+                "osm_way_id": way_id,
+                "name": name,
+                "entry_node_id": entry,
+                "exit_node_id": exit,
+                "entry_coords": [pts.first().unwrap().lon, pts.first().unwrap().lat],
+                "exit_coords": [pts.last().unwrap().lon, pts.last().unwrap().lat],
+                "cum_start_m": cum_start,
+                "cum_end_m": cum_end,
+            }),
+        ));
+    }
+    Ok(json!({ "type": "FeatureCollection", "features": features }))
 }

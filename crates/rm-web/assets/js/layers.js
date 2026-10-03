@@ -8,11 +8,15 @@ export function initLayers(map) {
   layers.routeStops = L.layerGroup().addTo(map);
   layers.highlight = L.layerGroup().addTo(map);
   layers.segments = L.layerGroup().addTo(map);
+  layers.osm = L.layerGroup().addTo(map);
+  layers.raw = L.layerGroup().addTo(map);
 }
 
 export function clearRoute() {
   layers.routePath.clearLayers();
   layers.routeStops.clearLayers();
+  layers.osm.clearLayers();
+  layers.raw.clearLayers();
 }
 
 export function clearHighlight() {
@@ -104,4 +108,18 @@ export function drawSegments(fc, { onSegmentClick }) {
 
 export function clearSegments() {
   layers.segments.clearLayers();
+}
+
+/// Matched OSM ways overlay for the selected route+direction (dashed green).
+export function drawWays(fc) {
+  layers.osm.clearLayers();
+  L.geoJSON(fc, {
+    style: { color: '#2e7d32', weight: 3, dashArray: '4 6', opacity: 0.85 },
+  })
+    .bindTooltip((l) => `way ${l.feature.properties.osm_way_id} · ${l.feature.properties.name ?? ''}`)
+    .addTo(layers.osm);
+}
+
+export function clearWays() {
+  layers.osm.clearLayers();
 }

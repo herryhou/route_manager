@@ -417,3 +417,47 @@ async fn segments_bbox_and_detail() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn route_ways_overlay_trims_to_entry_exit() {
+    let (_dir, db) = fixture_db_with_segments();
+    let app = router_with(AppState::new(db));
+
+    let v = get_json(&app, "/api/routes").await;
+    let r1 = v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route_code"] == serde_json::json!("1"))
+        .unwrap();
+    let id1 = r1["route_id"].as_i64().unwrap();
+
+    let v = get_json(&app, &format!("/api/routes/{id1}/directions/0/ways")).await;
+    assert_eq!(v["type"], serde_json::json!("FeatureCollection"), "{v}");
+    let feats = v["features"].as_array().unwrap();
+    assert!(!feats.is_empty(), "route 1 matched the road: {v}");
+    for f in feats {
+        assert_eq!(f["geometry"]["type"], serde_json::json!("LineString"));
+        let cs = f["geometry"]["coordinates"].as_array().unwrap();
+        assert!(cs.len() >= 2, "{f}");
+        // all vertices on the road (lon 120.6857 ± ε, lat 24.1405..24.1412)
+        for c in cs {
+            let lon = c[0].as_f64().unwrap();
+            let lat = c[1].as_f64().unwrap();
+            assert!((120.6855..120.6860).contains(&lon), "lon {lon}: {cs:?}");
+            assert!((24.1400..24.1415).contains(&lat), "lat {lat}: {cs:?}");
+        }
+        let p = &f["properties"];
+        assert_eq!(p["osm_way_id"].as_i64().unwrap(), 100);
+        assert!(p["entry_node_id"].is_i64() && p["exit_node_id"].is_i64(), "{p}");
+        // trimmed: first vertex IS the entry node, last IS the exit node
+        assert_eq!(p["entry_coords"].as_array().unwrap().len(), 2, "{p}");
+        assert_eq!(cs[0], p["entry_coords"], "{f}");
+        assert_eq!(cs[cs.len() - 1], p["exit_coords"], "{f}");
+    }
+
+    // dir 1 also overlays (fixture matcher writes runs for every direction)
+    let v = get_json(&app, &format!("/api/routes/{id1}/directions/1/ways")).await;
+    assert_eq!(v["type"], serde_json::json!("FeatureCollection"), "{v}");
+}
+
