@@ -233,6 +233,26 @@ export function stopPopupEl(d, { onDetails, onPickRoute }) {
   return wrap;
 }
 
+/// Compact station popup (viewport station marker click).
+export function stationPopupEl(d, { onPickRoute }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'stop-popup';
+  const bearing = d.bearing
+    ? `${Math.round(d.bearing.bearing_deg)}° · spread ${Math.round(d.bearing.max_spread_deg)}° · ${d.bearing.member_count} members`
+    : '—';
+  wrap.innerHTML = `
+    <div class="popup-title">${d.station.station_name}</div>
+    <div class="muted">bearing ${bearing}</div>
+    <div class="muted">group ${d.group.station_group_name}</div>
+    <div class="muted">stops (${(d.stops ?? []).length}): ${(d.stops ?? []).map((s) => s.stop_code).join(' ')}</div>
+    <div class="popup-routes muted">routes (${(d.routes ?? []).length})</div>
+  `;
+  const chips = document.createElement('div');
+  chips.append(routeChips(d.routes ?? [], onPickRoute));
+  wrap.append(chips);
+  return wrap;
+}
+
 /// Stop drill-down panel: stop → station → group + serving routes.
 export function stopPanel(d, { onPickRoute }) {
   showDetail(`

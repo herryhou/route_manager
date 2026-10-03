@@ -163,7 +163,7 @@ export function clearRaw() {
 }
 
 /// Viewport stops/stations: small dots + rings, zoom-gated by app.js.
-export function drawStopsLayer(fc, { onStopClick }) {
+export function drawStopsLayer(fc, { onStopClick, onStationClick }) {
   layers.stopsLayer.clearLayers();
   for (const f of fc.features ?? []) {
     const [lon, lat] = f.geometry.coordinates;
@@ -179,6 +179,7 @@ export function drawStopsLayer(fc, { onStopClick }) {
     }
     m.bindTooltip(tip, { direction: 'top' });
     if (!isStation) m.on('click', () => onStopClick(p.id, m));
+    else if (onStationClick) m.on('click', () => onStationClick(p.id, m));
     m.addTo(layers.stopsLayer);
     if (bearingsOn && p.bearing != null) drawBearing(lat, lon, p.bearing, layers.stopsLayer);
   }

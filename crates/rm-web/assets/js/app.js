@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, stopPopupEl, outlierPanel, segmentPanel } from './panels.js';
+import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel } from './panels.js';
 import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawWays, clearWays, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -108,6 +108,20 @@ async function openStopPopup(stopVersionId, marker) {
   }
 }
 
+/// Compact popup on a viewport station marker.
+async function openStationPopup(stationId, marker) {
+  try {
+    const d = await api.stationDetail(stationId);
+    const el = stationPopupEl(d, {
+      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
+    });
+    marker.unbindPopup();
+    marker.bindPopup(el, { maxWidth: 300 }).openPopup();
+  } catch (e) {
+    status(`station load failed: ${e.message}`);
+  }
+}
+
 async function selectStop(stopVersionId) {
   try {
     const d = await api.stopDetail(stopVersionId);
@@ -157,7 +171,10 @@ async function refreshStopsLayer() {
     .join(',');
   try {
     const v = await api.stopsBbox(bbox, kind);
-    drawStopsLayer(v, { onStopClick: (svid, marker) => openStopPopup(svid, marker) });
+    drawStopsLayer(v, {
+      onStopClick: (svid, marker) => openStopPopup(svid, marker),
+      onStationClick: (stid, marker) => openStationPopup(stid, marker),
+    });
     if (v.truncated) status(`${kind} layer truncated — zoom in`);
   } catch (e) {
     status(`stops layer load failed: ${e.message}`);
