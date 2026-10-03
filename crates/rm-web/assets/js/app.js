@@ -95,6 +95,7 @@ async function selectStop(stopVersionId) {
     const d = await api.stopDetail(stopVersionId);
     highlightGroup(d.group_members);
     stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0) });
+    map.panTo([d.stop.lat, d.stop.lon]);
     location.hash = `#stop=${stopVersionId}`;
   } catch (e) {
     status(`stop load failed: ${e.message}`);
