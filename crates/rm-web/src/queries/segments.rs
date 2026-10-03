@@ -49,12 +49,7 @@ pub fn list(
     let rows: Vec<(String, String, f64, i64, i64)> = it.collect::<Result<_, _>>()?;
 
     let mut features = Vec::new();
-    let mut truncated = false;
     for (id, enc, length_m, way_count, route_count) in rows {
-        if features.len() as i64 >= limit {
-            truncated = true;
-            break;
-        }
         if route_count < min_routes {
             continue;
         }
@@ -78,7 +73,13 @@ pub fn list(
             }),
         ));
     }
+    // sort the full candidate set BEFORE truncating so the limit keeps the
+    // most-shared corridors, not an arbitrary scan-order prefix
     features.sort_by_key(|f| -f["properties"]["route_count"].as_i64().unwrap_or(0));
+    let truncated = features.len() as i64 > limit;
+    if truncated {
+        features.truncate(limit as usize);
+    }
     Ok(json!({
         "type": "FeatureCollection",
         "features": features,

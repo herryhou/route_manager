@@ -419,12 +419,17 @@ pub fn raw(conn: &Connection, route_id: i64, dir: i64) -> Result<Option<Value>> 
         |r| r.get(0),
     )?;
 
-    let encoded: Option<String> = conn.query_row(
+    // missing staging row (e.g. a later batch dropped this route) → no path
+    let encoded: Option<String> = match conn.query_row(
         "SELECT encoded FROM src_route_point
          WHERE batch_id = ?1 AND xno = ?2 AND direction = ?3",
         rusqlite::params![batch_id, xno, dir],
         |r| r.get(0),
-    )?;
+    ) {
+        Ok(enc) => Some(enc),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => return Err(e.into()),
+    };
     let path = match encoded {
         Some(enc) => match polyline::decode(&enc) {
             Ok(pts) if pts.len() >= 2 => Some(geojson::feature(

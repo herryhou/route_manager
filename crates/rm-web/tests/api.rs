@@ -550,3 +550,48 @@ async fn stops_viewport_and_search() {
     assert!(results[0]["stop_name"].as_str().unwrap().contains("干城"));
     assert!(results[0]["stop_version_id"].is_i64());
 }
+
+#[tokio::test]
+async fn raw_endpoint_survives_missing_staging_row() {
+    let (_dir, db) = fixture_db_with_segments();
+    // second-import shape: published route, but no src_route_point row in the
+    // latest batch for this direction
+    let conn = rm_db::open(&db).unwrap();
+    conn.execute("DELETE FROM src_route_point WHERE xno = '1' AND direction = 0", [])
+        .unwrap();
+    drop(conn);
+
+    let app = router_with(AppState::new(db));
+    let v = get_json(&app, "/api/routes/1/directions/0/raw").await;
+    assert!(v["path"].is_null(), "missing row → path null, not 500: {v}");
+    assert!(!v["stops"].as_array().unwrap().is_empty(), "staging stops remain: {v}");
+}
+
+#[tokio::test]
+async fn segments_limit_keeps_top_corridors() {
+    let (_dir, db) = fixture_db_with_segments();
+    let conn = rm_db::open(&db).unwrap();
+    // make the LAST-inserted segment (route 2's, so it trails route 1's in
+    // scan order) carry two routes: point route 1's traversal at it
+    conn.execute_batch(
+        "UPDATE seg_traversal SET segment_id =
+            (SELECT segment_id FROM seg_segment ORDER BY rowid DESC LIMIT 1)
+         WHERE subroute_version_id IN (
+            SELECT ssv.subroute_version_id FROM subroute_version ssv
+            JOIN route_version rv ON rv.route_version_id = ssv.route_version_id
+            JOIN route r ON r.route_id = rv.route_id
+            WHERE r.route_code = '1');",
+    )
+    .unwrap();
+    drop(conn);
+
+    let app = router_with(AppState::new(db));
+    // 3 candidates, limit 1: the shared corridor (route_count 2, scanned
+    // last) must win over the first-scanned single-route segments
+    let v = get_json(&app, "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420&limit=1").await;
+    let feats = v["features"].as_array().unwrap();
+    assert_eq!(feats.len(), 1, "{v}");
+    assert_eq!(feats[0]["properties"]["route_count"].as_i64().unwrap(), 2,
+        "top corridor kept under limit: {v}");
+    assert_eq!(v["truncated"], serde_json::json!(true), "{v}");
+}
