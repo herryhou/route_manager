@@ -1,8 +1,11 @@
 //! Route list/detail queries.
 
 use anyhow::Result;
+use rm_core::polyline;
 use rusqlite::Connection;
 use serde_json::{json, Value};
+
+use crate::geojson;
 
 fn split_list(s: Option<String>) -> Vec<String> {
     s.map(|v| v.split(',').map(str::to_string).collect())
@@ -226,4 +229,101 @@ pub fn detail(conn: &Connection, route_id: i64) -> Result<Option<Value>> {
         "main_routes": main,
         "directions": dirs,
     })))
+}
+
+/// `GET /api/routes/{id}/directions/{dir}/path` — canonical geometry
+/// as one LineString feature per seg_geometry_draft piece.
+pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
+    let mut stmt = conn.prepare(
+        "SELECT gd.ordinal, gd.encoded_polyline, gd.length_m, gd.geometry_method,
+                gd.from_stop_of_route_version_id, gd.to_stop_of_route_version_id
+         FROM seg_geometry_draft gd
+         JOIN subroute_version sv ON sv.subroute_version_id = gd.subroute_version_id
+         JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         WHERE rv.route_id = ?1 AND gd.direction = ?2
+         ORDER BY gd.ordinal",
+    )?;
+    let it = stmt.query_map(rusqlite::params![route_id, direction], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, f64>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, i64>(4)?,
+            r.get::<_, i64>(5)?,
+        ))
+    })?;
+
+    let mut features = Vec::new();
+    for row in it {
+        let (ordinal, encoded, length_m, method, from_sorv, to_sorv) = row?;
+        let pts = polyline::decode(&encoded)?;
+        if pts.len() < 2 {
+            continue; // degenerate piece — nothing to draw
+        }
+        let (from_seq, to_seq) = sorv_sequences(conn, from_sorv, to_sorv)?;
+        features.push(geojson::feature(
+            geojson::line_string(&pts),
+            json!({
+                "ordinal": ordinal,
+                "length_m": length_m,
+                "geometry_method": method,
+                "from_seq": from_seq,
+                "to_seq": to_seq,
+            }),
+        ));
+    }
+    Ok(geojson::feature_collection(features))
+}
+
+fn sorv_sequences(conn: &Connection, from: i64, to: i64) -> Result<(i64, i64)> {
+    Ok(conn.query_row(
+        "SELECT (SELECT stop_sequence FROM stop_of_route_version
+                  WHERE stop_of_route_version_id = ?1),
+               (SELECT stop_sequence FROM stop_of_route_version
+                  WHERE stop_of_route_version_id = ?2)",
+        [from, to],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?)
+}
+
+/// `GET /api/routes/{id}/directions/{dir}/stops` — ordered stops + projection QA.
+pub fn stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
+    let mut stmt = conn.prepare(
+        "SELECT sorv.stop_sequence, sorv.source_order_no,
+                sv2.stop_version_id, sv2.stop_code, sv2.stop_name,
+                sv2.latitude, sv2.longitude, sv2.station_id,
+                p.chainage_m, p.snap_dist_m, p.method, p.monotonic_clamped,
+                p.projected_lat, p.projected_lon
+         FROM stop_of_route_version sorv
+         JOIN subroute_version sv ON sv.subroute_version_id = sorv.subroute_version_id
+         JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         JOIN stop_version sv2 ON sv2.stop_version_id = sorv.stop_version_id
+         LEFT JOIN path_stop_projection p
+           ON p.stop_of_route_version_id = sorv.stop_of_route_version_id
+         WHERE rv.route_id = ?1 AND sorv.direction = ?2
+         ORDER BY sorv.stop_sequence",
+    )?;
+    let it = stmt.query_map(rusqlite::params![route_id, direction], |r| {
+        Ok(json!({
+            "stop_sequence": r.get::<_, i64>(0)?,
+            "source_order_no": r.get::<_, Option<i64>>(1)?,
+            "stop_version_id": r.get::<_, i64>(2)?,
+            "stop_code": r.get::<_, String>(3)?,
+            "stop_name": r.get::<_, String>(4)?,
+            "lat": r.get::<_, f64>(5)?,
+            "lon": r.get::<_, f64>(6)?,
+            "station_id": r.get::<_, i64>(7)?,
+            "chainage_m": r.get::<_, Option<f64>>(8)?,
+            "snap_dist_m": r.get::<_, Option<f64>>(9)?,
+            "method": r.get::<_, Option<String>>(10)?,
+            "monotonic_clamped": r.get::<_, Option<i64>>(11)?,
+            "projected": match (r.get::<_, Option<f64>>(12)?, r.get::<_, Option<f64>>(13)?) {
+                (Some(lat), Some(lon)) => json!([lon, lat]),
+                _ => Value::Null,
+            },
+        }))
+    })?;
+    let stops: Vec<Value> = it.collect::<Result<_, _>>()?;
+    Ok(json!({ "stops": stops }))
 }

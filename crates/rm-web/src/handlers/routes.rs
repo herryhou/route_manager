@@ -35,3 +35,19 @@ pub async fn detail(
         None => Ok(not_found("route")),
     }
 }
+
+pub async fn path(
+    Path((route_id, dir)): Path<(i64, i64)>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, crate::error::ApiError> {
+    let v = run_db(state, move |conn| crate::queries::routes::path(conn, route_id, dir)).await?;
+    Ok(Json(v))
+}
+
+pub async fn stops(
+    Path((route_id, dir)): Path<(i64, i64)>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, crate::error::ApiError> {
+    let v = run_db(state, move |conn| crate::queries::routes::stops(conn, route_id, dir)).await?;
+    Ok(Json(v))
+}

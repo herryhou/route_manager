@@ -10,7 +10,7 @@ fn app() -> axum::Router {
     router_with(AppState::new(std::path::PathBuf::from("/nonexistent.db")))
 }
 
-/// Fixture pipeline (ingest → identity → publish) on a temp-file DB;
+/// Fixture pipeline (ingest → identity → publish → segments) on a temp-file DB;
 /// returns the dir (keep alive) and the DB path the server can open read-only.
 fn fixture_db() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
@@ -20,6 +20,7 @@ fn fixture_db() -> (tempfile::TempDir, std::path::PathBuf) {
     let s = rm_ingest::run(&conn, &dir.path().join("src")).unwrap();
     rm_identity::run(&conn, s.batch_id).unwrap();
     rm_publish::run(&mut conn, s.batch_id).unwrap();
+    rm_segments::run(&conn, s.batch_id, 50.0).unwrap();
     (dir, db)
 }
 
@@ -120,6 +121,80 @@ async fn routes_list_and_detail() {
         .oneshot(
             Request::builder()
                 .uri("/api/routes/999")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn route_path_stops_and_drilldown() {
+    let (_dir, db) = fixture_db();
+    let app = router_with(AppState::new(db));
+
+    let v = get_json(&app, "/api/routes").await;
+    let r1 = v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route_code"] == serde_json::json!("1"))
+        .unwrap();
+    let id1 = r1["route_id"].as_i64().unwrap();
+
+    // path: GeoJSON FeatureCollection, [lon, lat] order (Taiwan: lon ~120, lat ~24)
+    let p = get_json(&app, &format!("/api/routes/{id1}/directions/0/path")).await;
+    assert_eq!(p["type"], serde_json::json!("FeatureCollection"));
+    let feats = p["features"].as_array().unwrap();
+    assert!(!feats.is_empty(), "route 1 has a routePoint polyline: {p}");
+    for f in feats {
+        let cs = f["geometry"]["coordinates"].as_array().unwrap();
+        assert!(cs.len() >= 2, "LineString needs ≥2 points: {f}");
+        let lon = cs[0][0].as_f64().unwrap();
+        let lat = cs[0][1].as_f64().unwrap();
+        assert!((119.0..122.0).contains(&lon), "lon first, got {cs:?}");
+        assert!((23.0..25.0).contains(&lat), "lat second, got {cs:?}");
+        assert!(f["properties"]["length_m"].is_f64());
+        assert!(f["properties"]["geometry_method"].is_string());
+    }
+
+    // stops: ordered, with projection QA fields
+    let s = get_json(&app, &format!("/api/routes/{id1}/directions/0/stops")).await;
+    let stops = s["stops"].as_array().unwrap();
+    assert_eq!(stops.len(), 2);
+    assert_eq!(stops[0]["stop_sequence"].as_i64().unwrap(), 1);
+    assert_eq!(stops[0]["stop_name"], serde_json::json!("干城站"));
+    let s0 = &stops[0];
+    assert!(s0["chainage_m"].is_f64(), "projection present: {s0}");
+    assert!(s0["method"].is_string());
+    assert!(s0["projected"].as_array().is_some_and(|a| a.len() == 2));
+
+    // stop drill-down: station + group + serving routes + group members
+    let sv_id = stops[0]["stop_version_id"].as_i64().unwrap();
+    let d = get_json(&app, &format!("/api/stops/{sv_id}")).await;
+    assert_eq!(d["stop"]["stop_name"], serde_json::json!("干城站"));
+    assert!(d["station"]["station_id"].is_i64());
+    assert_eq!(d["group"]["station_group_name"], serde_json::json!("干城站"));
+    let members = d["group_members"].as_array().unwrap();
+    assert_eq!(members.len(), 2, "nodes 44+46 same name → one group: {d}");
+    assert!(
+        !d["routes_by_stop"].as_array().unwrap().is_empty(),
+        "route 1 serves this stop"
+    );
+
+    // station detail
+    let st_id = d["station"]["station_id"].as_i64().unwrap();
+    let st = get_json(&app, &format!("/api/stations/{st_id}")).await;
+    assert_eq!(st["station"]["station_id"].as_i64().unwrap(), st_id);
+    assert!(!st["stops"].as_array().unwrap().is_empty());
+    assert!(!st["routes"].as_array().unwrap().is_empty());
+
+    // unknown stop id → 404
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/stops/99999")
                 .body(Body::empty())
                 .unwrap(),
         )

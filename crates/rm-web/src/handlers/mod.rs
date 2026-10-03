@@ -3,6 +3,7 @@
 pub mod assets;
 pub mod routes;
 pub mod stats;
+pub mod stops;
 
 use axum::routing::get;
 use axum::Router;
@@ -23,4 +24,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/stats", get(stats::stats))
         .route("/api/routes", get(routes::list))
         .route("/api/routes/{id}", get(routes::detail))
+        .route("/api/routes/{id}/directions/{dir}/path", get(routes::path))
+        .route("/api/routes/{id}/directions/{dir}/stops", get(routes::stops))
+        .route("/api/stops/{id}", get(stops::detail))
+        .route("/api/stations/{id}", get(stops::station_detail))
 }

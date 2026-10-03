@@ -2,6 +2,7 @@
 
 pub mod db;
 pub mod error;
+pub mod geojson;
 pub mod handlers;
 pub mod queries;
 pub mod state;
