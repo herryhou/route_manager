@@ -49,17 +49,17 @@ export function drawRoute(pathFc, stopsJson, { onStopClick }) {
       fillOpacity: 1,
     });
     m.bindTooltip(`${s.stop_sequence}. ${s.stop_name}`, { direction: 'top' });
-    m.on('click', () => onStopClick(s));
+    m.on('click', () => onStopClick(s, m));
     m.addTo(layers.routeStops);
 
-    if (s.projected && s.method === 'PROJECTED') {
-      L.circleMarker([s.projected[1], s.projected[0]], {
-        radius: 14,
-        color: METHOD_COLORS.PROJECTED,
-        weight: 2,
-        fillOpacity: 0.2,
-      }).addTo(layers.routeStops);
-    }
+    // if (s.projected && s.method === 'PROJECTED') {
+    //   L.circleMarker([s.projected[1], s.projected[0]], {
+    //     radius: 14,
+    //     color: METHOD_COLORS.PROJECTED,
+    //     weight: 2,
+    //     fillOpacity: 0.2,
+    //   }).addTo(layers.routeStops);
+    // }
 
     if (bearingsOn && s.bearing != null) {
       drawBearing(s.lat, s.lon, s.bearing, layers.routeStops);
@@ -178,7 +178,7 @@ export function drawStopsLayer(fc, { onStopClick }) {
       if (isStation && p.spread != null) tip += ` · spread ${Math.round(p.spread)}°`;
     }
     m.bindTooltip(tip, { direction: 'top' });
-    if (!isStation) m.on('click', () => onStopClick(p.id));
+    if (!isStation) m.on('click', () => onStopClick(p.id, m));
     m.addTo(layers.stopsLayer);
     if (bearingsOn && p.bearing != null) drawBearing(lat, lon, p.bearing, layers.stopsLayer);
   }
@@ -207,7 +207,7 @@ export function drawBearing(lat, lon, deg, layer) {
         viewBox="0 0 10 10"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <path d="M5 0.5 L9.5 9 L5 7 L0.5 9 Z"></path>
+        <path d="M3.5 0.5 L6.5 11 L3.5 9 L0.5 11 Z"></path>
       </svg>
     </div>
   `;

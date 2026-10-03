@@ -210,6 +210,29 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
   });
 }
 
+/// Compact stop popup (map marker click): summary + stop-serving routes + link to full panel.
+export function stopPopupEl(d, { onDetails, onPickRoute }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'stop-popup';
+  const bearing = d.bearing
+    ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}`
+    : '—';
+  wrap.innerHTML = `
+    <div class="popup-title">${d.stop.stop_name} <small class="muted">#${d.stop.stop_code}</small></div>
+    <div class="muted">bearing ${bearing}</div>
+    <div class="muted">station ${d.station.station_name}</div>
+    <div class="popup-routes muted">routes (${(d.routes_by_stop ?? []).length})</div>
+  `;
+  const chips = document.createElement('div');
+  chips.append(routeChips(d.routes_by_stop ?? [], onPickRoute));
+  const btn = document.createElement('button');
+  btn.className = 'popup-details';
+  btn.textContent = 'more details…';
+  btn.addEventListener('click', onDetails);
+  wrap.append(chips, btn);
+  return wrap;
+}
+
 /// Stop drill-down panel: stop → station → group + serving routes.
 export function stopPanel(d, { onPickRoute }) {
   showDetail(`

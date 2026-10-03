@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, outlierPanel, segmentPanel } from './panels.js';
+import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, stopPopupEl, outlierPanel, segmentPanel } from './panels.js';
 import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawWays, clearWays, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -51,7 +51,7 @@ async function selectRoute(r, dir = 0) {
       api.routeStops(route_id, dir),
     ]);
     if (selectedRoute?.route_id !== route_id || selectedRoute.dir !== dir) return; // stale
-    const onStopClick = (stop) => selectStop(stop.stop_version_id, stop);
+    const onStopClick = (stop, marker) => openStopPopup(stop.stop_version_id, marker);
     lastRouteDraw = { p, s, onStopClick };
     drawRoute(p, s, { onStopClick });
     if (document.getElementById('layer-osm').checked) loadWays(route_id, dir);
@@ -90,12 +90,32 @@ async function loadRaw(routeId, dir) {
   }
 }
 
+/// Compact popup on the clicked marker; "more details" opens the side panel.
+async function openStopPopup(stopVersionId, marker) {
+  try {
+    const d = await api.stopDetail(stopVersionId);
+    const el = stopPopupEl(d, {
+      onDetails: () => {
+        map.closePopup();
+        selectStop(stopVersionId);
+      },
+      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
+    });
+    marker.unbindPopup();
+    marker.bindPopup(el, { maxWidth: 300 }).openPopup();
+  } catch (e) {
+    status(`stop load failed: ${e.message}`);
+  }
+}
+
 async function selectStop(stopVersionId) {
   try {
     const d = await api.stopDetail(stopVersionId);
     highlightGroup(d.group_members);
     stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0) });
-    map.panTo([d.stop.lat, d.stop.lon]);
+    map.panTo([d.stop.lat, d.stop.lon], {
+      animate: true,
+    });
     location.hash = `#stop=${stopVersionId}`;
   } catch (e) {
     status(`stop load failed: ${e.message}`);
@@ -109,7 +129,7 @@ async function openOutliers() {
       onPick: (o) => {
         flashStop(o.lat, o.lon);
         //map.setView([o.lat, o.lon], Math.max(map.getZoom(), 15));
-        map.panTo([o.lat, o.lon]);
+        map.panTo([o.lat, o.lon], { animate: true });
       },
       onOpenRoute: (o) => selectRouteById(o.route_id, o.direction),
     });
@@ -137,7 +157,7 @@ async function refreshStopsLayer() {
     .join(',');
   try {
     const v = await api.stopsBbox(bbox, kind);
-    drawStopsLayer(v, { onStopClick: (svid) => selectStop(svid) });
+    drawStopsLayer(v, { onStopClick: (svid, marker) => openStopPopup(svid, marker) });
     if (v.truncated) status(`${kind} layer truncated — zoom in`);
   } catch (e) {
     status(`stops layer load failed: ${e.message}`);
