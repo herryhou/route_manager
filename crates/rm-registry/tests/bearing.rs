@@ -177,14 +177,51 @@ fn stop_visited_twice_in_direction_yields_one_row() {
 }
 
 #[test]
-fn station_aggregates_member_bearings() {
+fn opposite_headings_share_one_axis() {
     let conn = setup();
     insert_northbound_run(&conn); // stop 1 -> bearing ~0 (OSM)
-                                  // stop 2 via eastbound polyline -> bearing ~90
+                                  // stop 2 southbound polyline -> bearing ~180;
+                                  // same pole, opposite lanes: one axis, no spread
     let enc = polyline::encode(&[
         LatLng::new(24.1407, 120.6857),
-        LatLng::new(24.1407, 120.6957),
-        LatLng::new(24.1407, 120.7057),
+        LatLng::new(24.1397, 120.6857),
+        LatLng::new(24.1387, 120.6857),
+    ]);
+    conn.execute(
+        "INSERT INTO src_route_point (batch_id, xno, direction, encoded)
+         VALUES (1, '2', 0, ?1)",
+        [&enc],
+    )
+    .unwrap();
+
+    rm_registry::bearing::run(&conn, 1).unwrap();
+
+    let (members, spread): (i64, f64) = conn
+        .query_row(
+            "SELECT member_count, max_spread_deg
+             FROM station_bearing WHERE station_id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(members, 2);
+    assert!(
+        spread < 1.0,
+        "opposite headings must fold onto one axis: spread {spread}"
+    );
+}
+
+#[test]
+fn off_axis_member_drives_the_spread() {
+    let conn = setup();
+    insert_northbound_run(&conn); // stop 1 -> bearing ~0 (OSM)
+                                  // stop 2 northeast-bound polyline -> ~60°:
+                                  // 30° off the 0/180 axis on either side
+                                  // leg: 0.005° north (557 m) + 0.0095° east (964 m) -> heading ~60°
+    let enc = polyline::encode(&[
+        LatLng::new(24.1407, 120.6857),
+        LatLng::new(24.1457, 120.6952),
+        LatLng::new(24.1507, 120.7047),
     ]);
     conn.execute(
         "INSERT INTO src_route_point (batch_id, xno, direction, encoded)
@@ -204,6 +241,6 @@ fn station_aggregates_member_bearings() {
         )
         .unwrap();
     assert_eq!(members, 2);
-    assert!((mean - 45.0).abs() < 0.5, "circular mean got {mean}");
-    assert!((spread - 90.0).abs() < 0.5, "max spread got {spread}");
+    assert!((mean - 30.0).abs() < 0.5, "axial mean got {mean}");
+    assert!((spread - 30.0).abs() < 0.5, "off-axis spread got {spread}");
 }

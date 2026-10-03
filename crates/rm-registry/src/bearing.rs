@@ -1,13 +1,14 @@
 //! Stop/station bearings: departure heading of the bus at each stop,
 //! taken from the matched OSM way run when one covers the stop, else the
-//! direction polyline tangent. Stations get the circular mean of their
-//! member stops plus the max pairwise spread (consistency signal).
+//! direction polyline tangent. Stations get the axial mean of their
+//! member stops (one axis ± 180° reverse — a pole serves both ways)
+//! plus the largest deviation from that axis (consistency signal).
 //!
 //! Idempotent: stop_bearing / station_bearing are rebuilt each run.
 
 use std::collections::HashMap;
 
-use rm_core::geo::{angular_diff_deg, bearing_deg, circular_mean_deg};
+use rm_core::geo::{angular_diff_deg, axial_mean_deg, bearing_deg};
 use rm_core::{geo, LatLng};
 use rusqlite::Connection;
 
@@ -161,7 +162,11 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
         }
     }
 
-    // station aggregates over member stop bearings
+    // station aggregates over member stop bearings: the axial mean (a pole
+    // legitimately serves both directions of travel, so headings 180°
+    // apart fold onto one axis) and the largest deviation from that axis.
+    // route `direction` is route-relative (each route's own 去程/返程),
+    // so it cannot group headings — the axis does.
     {
         let mut stmt = tx.prepare(
             "SELECT s.station_id, b.bearing_deg
@@ -178,14 +183,20 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                 (station_id, bearing_deg, member_count, max_spread_deg, computed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
         )?;
-        for (station_id, group) in group_runs(rows) {
-            let bearings: Vec<f64> = group;
-            let mean = circular_mean_deg(&bearings).unwrap_or(0.0);
+        // group consecutive rows by station
+        let mut stations: Vec<(i64, Vec<f64>)> = Vec::new();
+        for (station_id, bearing) in rows {
+            if !matches!(stations.last(), Some((st, _)) if *st == station_id) {
+                stations.push((station_id, Vec::new()));
+            }
+            stations.last_mut().unwrap().1.push(bearing);
+        }
+        for (station_id, bearings) in stations {
+            let mean = axial_mean_deg(&bearings).unwrap_or(0.0);
             let mut spread = 0.0f64;
-            for i in 0..bearings.len() {
-                for j in (i + 1)..bearings.len() {
-                    spread = spread.max(angular_diff_deg(bearings[i], bearings[j]));
-                }
+            for &b in &bearings {
+                let dev = angular_diff_deg(b, mean).min(angular_diff_deg(b, mean + 180.0));
+                spread = spread.max(dev);
             }
             ins.execute(rusqlite::params![
                 station_id,
@@ -294,16 +305,4 @@ fn polyline_bearing(path: &[LatLng], chainage_m: f64) -> Option<f64> {
         cum += leg;
     }
     None
-}
-
-/// Group consecutive (key, value) rows by key.
-fn group_runs(rows: Vec<(i64, f64)>) -> Vec<(i64, Vec<f64>)> {
-    let mut out: Vec<(i64, Vec<f64>)> = Vec::new();
-    for (k, v) in rows {
-        match out.last_mut() {
-            Some((last_k, vs)) if *last_k == k => vs.push(v),
-            _ => out.push((k, vec![v])),
-        }
-    }
-    out
 }

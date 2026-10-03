@@ -26,9 +26,9 @@ It turns two raw inputs — the Taichung bus authority's JSON captures (392 rout
 
    Same corridor + same stations = same ID, whichever route you came from. Reverse direction hashes differently (streets are directed). Routes sharing a road segment now visibly share a row.
 
-   The same stage then computes **bearings**: the departure heading of the bus at each stop (from the matched OSM way when one covers it, otherwise from the drawn polyline) and, per station, the circular mean of its stops' headings plus how far apart they disagree.
+   The same stage then computes **bearings**: the departure heading of the bus at each stop (from the matched OSM way when one covers it, otherwise from the drawn polyline) and, per station, the mean travel axis of its stops' headings (headings 180° apart fold onto one axis — a pole serves both directions of a road) plus the largest deviation from that axis.
 
-Finally **verify** (`rm-verify`) re-checks ~26 invariants and counts against known-good numbers and writes QA files (`qa/report.json`, a GeoJSON map of all segments, a CSV of badly-placed stops). It exits non-zero if anything is off. Stations whose stops disagree on heading by more than 45° are warnings, not failures — they land in `report.json` warnings and `qa/bearing_report.json` (spreads near 180° are marked `opposite_pair`: likely one pole serving both directions).
+Finally **verify** (`rm-verify`) re-checks ~26 invariants and counts against known-good numbers and writes QA files (`qa/report.json`, a GeoJSON map of all segments, a CSV of badly-placed stops). It exits non-zero if anything is off. Stations whose member stops sit more than 45° off the station's axis are warnings, not failures — they land in `report.json` warnings and `qa/bearing_report.json` (reverse travel never flags: one axis ± 180° is legitimate).
 
 ## What you get out
 

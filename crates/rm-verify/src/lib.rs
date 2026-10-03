@@ -486,12 +486,9 @@ pub fn run(
     Ok(report)
 }
 
-/// Warn threshold for a station's member-stop bearing spread, in degrees.
+/// Warn threshold for a station's member bearing deviation from its axis
+/// (headings fold onto one axis ± 180°, so reverse travel never flags).
 pub const BEARING_SPREAD_WARN_DEG: f64 = 45.0;
-
-/// Max pairwise spread considered "the same pole serving both directions"
-/// rather than a data inconsistency.
-const BEARING_OPPOSITE_SPREAD_DEG: f64 = 170.0;
 
 /// Stations whose member stops disagree on bearing by more than the
 /// threshold. Never fails the run — see bearing_report.json for detail.
@@ -548,18 +545,19 @@ fn write_bearing_report(conn: &Connection, qa_dir: &Path) -> anyhow::Result<()> 
             let mut members = Vec::new();
             {
                 let mut m = conn.prepare(
-                    "SELECT sp.ext_uid, b.bearing_deg, b.source
+                    "SELECT sp.ext_uid, sv.direction, b.bearing_deg, b.source
                      FROM stop_bearing b
                      JOIN stop_version sv ON sv.stop_version_id = b.stop_version_id
                      JOIN stop sp ON sp.stop_id = sv.stop_id
                      WHERE sv.station_id = ?1
-                     ORDER BY b.bearing_deg",
+                     ORDER BY sv.direction, b.bearing_deg",
                 )?;
                 let it = m.query_map([station_id], |r| {
                     Ok(json!({
                         "stop": r.get::<_, String>(0)?,
-                        "bearing_deg": r.get::<_, f64>(1)?,
-                        "source": r.get::<_, String>(2)?,
+                        "direction": r.get::<_, i64>(1)?,
+                        "bearing_deg": r.get::<_, f64>(2)?,
+                        "source": r.get::<_, String>(3)?,
                     }))
                 })?;
                 for member in it {
@@ -570,8 +568,7 @@ fn write_bearing_report(conn: &Connection, qa_dir: &Path) -> anyhow::Result<()> 
                 "station_id": station_id,
                 "ext_uid": ext_uid,
                 "bearing_deg": mean,
-                "max_spread_deg": spread,
-                "opposite_pair": spread >= BEARING_OPPOSITE_SPREAD_DEG,
+                "max_spread_deg": spread,   // max deviation from the station axis
                 "members": members,
             }));
         }

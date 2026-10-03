@@ -52,11 +52,12 @@ All bins accept `--db` (default `data/taichung.db`) and `--batch`
 `stop_bearing` is the departure heading (degrees from north) of the bus at
 each stop: taken from the matched OSM way run when one covers the stop,
 else the route polyline tangent; the final stop of a direction reports its
-arrival heading. `station_bearing` is the circular mean of a station's
-member stops plus their max pairwise spread. Stations whose members
-disagree by more than 45° are flagged — warn-only (`report.json` warnings
-+ `qa/bearing_report.json`), never failing the run. Spreads near 180°
-are annotated `opposite_pair` (a pole serving both directions).
+arrival heading. `station_bearing` is the mean travel **axis** of a
+station's member stops (headings 180° apart fold onto one axis — one pole
+legitimately serves both directions of a road) plus `max_spread_deg`, the
+largest deviation from that axis. A station whose members sit more than
+45° off its axis is flagged — warn-only (`report.json` warnings +
+`qa/bearing_report.json`), never failing the run.
 
 To browse the result in a map-centric web UI (read-only, safe alongside the
 pipeline):

@@ -81,6 +81,17 @@ pub fn circular_mean_deg(bearings: &[f64]) -> Option<f64> {
     Some((m + 360.0) % 360.0)
 }
 
+/// Axial mean of bearings, in [0, 180): the mean of the doubled angles,
+/// halved — so headings 180° apart fold onto one axis. Unlike
+/// [`circular_mean_deg`] this is stable for bidirectional sets
+/// (e.g. {0.2, 179.8} -> ~0, not the perpendicular ~90). `None` when
+/// empty; inputs evenly spread over perpendicular axes have no defined
+/// axis (0 is returned there).
+pub fn axial_mean_deg(bearings: &[f64]) -> Option<f64> {
+    let doubled: Vec<f64> = bearings.iter().map(|b| b * 2.0).collect();
+    circular_mean_deg(&doubled).map(|m| ((m / 2.0) + 360.0) % 180.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,5 +218,26 @@ mod tests {
     fn circular_mean_single_and_empty() {
         assert!((circular_mean_deg(&[270.0]).unwrap() - 270.0).abs() < 1e-6);
         assert!(circular_mean_deg(&[]).is_none());
+    }
+
+    #[test]
+    fn axial_mean_folds_reverse_headings() {
+        // bidirectional pole: near-opposite headings, one road axis
+        let m = axial_mean_deg(&[0.2, 179.8]).unwrap();
+        assert!((m - 0.0).abs() < 1e-6, "got {m}");
+    }
+
+    #[test]
+    fn axial_mean_is_halfway_around_the_axis() {
+        let m = axial_mean_deg(&[0.0, 60.0]).unwrap();
+        assert!((m - 30.0).abs() < 1e-6, "got {m}");
+    }
+
+    #[test]
+    fn axial_mean_wraps_into_half_turn() {
+        // 270° doubled wraps past 360; result stays in [0, 180)
+        let m = axial_mean_deg(&[270.0]).unwrap();
+        assert!((m - 90.0).abs() < 1e-6, "got {m}");
+        assert!(axial_mean_deg(&[]).is_none());
     }
 }

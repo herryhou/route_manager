@@ -197,6 +197,13 @@ fn bearing_spread_warns_but_does_not_fail() {
             .map(Vec::len),
         Some(2)
     );
+    // members carry their route-relative direction for eyeballing
+    for m in v["violating_stations"][0]["members"].as_array().unwrap() {
+        assert!(
+            m.get("direction").is_some(),
+            "member missing direction: {m:?}"
+        );
+    }
 }
 
 #[test]
