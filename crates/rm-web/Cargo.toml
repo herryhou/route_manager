@@ -1,0 +1,28 @@
+[package]
+name = "rm-web"
+description = "Read-only map explorer for the published route/stop/segment data"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+rm-core.workspace = true
+rm-db.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+axum.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+rm-ingest = { path = "../rm-ingest", features = ["testfix"] }
+rm-identity = { path = "../rm-identity" }
+rm-publish = { path = "../rm-publish" }
+rm-segments = { path = "../rm-segments" }
+rm-osm-match = { path = "../rm-osm-match" }
+rm-registry = { path = "../rm-registry" }
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
