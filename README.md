@@ -16,7 +16,7 @@ crates/
 ├── rm-segments     polyline decode, stop projection (chainage), geometry cuts
 ├── rm-osm-prepare  PBF -> road graph tables
 ├── rm-osm-match    Viterbi way-run matcher (Newson-Krumm + A* gap repair)
-├── rm-registry     directed segment registry (blake3 identity)
+├── rm-registry     directed segment registry (blake3 identity) + stop/station bearings
 └── rm-verify       invariant checks, count cross-checks, QA exports
 ```
 
@@ -37,6 +37,7 @@ cargo run -r -p rm-segments      # projections + geometry drafts
 cargo run -r -p rm-osm-prepare   # PBF -> osm_* tables
 cargo run -r -p rm-osm-match     # way runs + match stats
 cargo run -r -p rm-registry      # seg_segment / seg_segment_way / seg_traversal
+                                  #   + stop_bearing / station_bearing
 
 # 3. verify + QA exports (exits non-zero on any failed check)
 cargo run -r -p rm-verify
@@ -44,7 +45,18 @@ cargo run -r -p rm-verify
 
 All bins accept `--db` (default `data/taichung.db`) and `--batch`
 (default: latest OPEN batch). `rm-verify` writes `qa/report.json`,
-`qa/segments.geojson`, `qa/outlier_stops.csv`.
+`qa/segments.geojson`, `qa/outlier_stops.csv`, `qa/bearing_report.json`.
+
+## Bearings
+
+`stop_bearing` is the departure heading (degrees from north) of the bus at
+each stop: taken from the matched OSM way run when one covers the stop,
+else the route polyline tangent; the final stop of a direction reports its
+arrival heading. `station_bearing` is the circular mean of a station's
+member stops plus their max pairwise spread. Stations whose members
+disagree by more than 45° are flagged — warn-only (`report.json` warnings
++ `qa/bearing_report.json`), never failing the run. Spreads near 180°
+are annotated `opposite_pair` (a pole serving both directions).
 
 ## Data model notes
 

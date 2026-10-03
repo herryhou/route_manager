@@ -45,6 +45,42 @@ pub fn path_length_m(points: &[LatLng]) -> f64 {
     points.windows(2).map(|w| haversine_m(w[0], w[1])).sum()
 }
 
+/// Initial bearing from `a` to `b`, degrees clockwise from true north
+/// (0 = north, 90 = east), in [0, 360). A degenerate (same-point) leg
+/// bears north by convention.
+pub fn bearing_deg(a: LatLng, b: LatLng) -> f64 {
+    let (lat1, lat2) = (a.lat.to_radians(), b.lat.to_radians());
+    let dlon = (b.lon - a.lon).to_radians();
+    let y = dlon.sin() * lat2.cos();
+    let x = lat1.cos() * lat2.sin() - lat1.sin() * lat2.cos() * dlon.cos();
+    let b = y.atan2(x).to_degrees();
+    (b + 360.0) % 360.0
+}
+
+/// Smaller angle between two bearings, in [0, 180].
+pub fn angular_diff_deg(a: f64, b: f64) -> f64 {
+    let d = (a - b).abs() % 360.0;
+    d.min(360.0 - d)
+}
+
+/// Circular (vector) mean of bearings, in [0, 360); `None` when empty.
+/// Diametrically opposed inputs have no defined mean — 0 is returned
+/// there; callers flag such sets via [`angular_diff_deg`] spread.
+pub fn circular_mean_deg(bearings: &[f64]) -> Option<f64> {
+    if bearings.is_empty() {
+        return None;
+    }
+    let mut s = 0.0f64;
+    let mut c = 0.0f64;
+    for &b in bearings {
+        let r = b.to_radians();
+        s += r.sin();
+        c += r.cos();
+    }
+    let m = s.atan2(c).to_degrees();
+    Some((m + 360.0) % 360.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +149,63 @@ mod tests {
         // 0.01 deg lon at lat 24 = 1015.85 m; two legs = 2031.7 m
         assert!((2028.0..=2036.0).contains(&total), "got {total}");
         assert!(path_length_m(&[G44]).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bearing_deg_points_north_east_south_west() {
+        let o = LatLng::new(24.14, 120.68);
+        // ~0.01 deg offsets around the origin, Taichung-scale
+        let north = bearing_deg(o, LatLng::new(24.15, 120.68));
+        let east = bearing_deg(o, LatLng::new(24.14, 120.69));
+        let south = bearing_deg(o, LatLng::new(24.13, 120.68));
+        let west = bearing_deg(o, LatLng::new(24.14, 120.67));
+        assert!((north - 0.0).abs() < 0.5, "north got {north}");
+        assert!((east - 90.0).abs() < 0.5, "east got {east}");
+        assert!((south - 180.0).abs() < 0.5, "south got {south}");
+        assert!((west - 270.0).abs() < 0.5, "west got {west}");
+    }
+
+    #[test]
+    fn bearing_deg_diagonal_is_northeast() {
+        let o = LatLng::new(24.14, 120.68);
+        // equal-metre offsets north and east of the origin
+        let dlat = 0.01;
+        let dlon = 0.01 / 24.14f64.to_radians().cos();
+        let ne = bearing_deg(o, LatLng::new(o.lat + dlat, o.lon + dlon));
+        assert!((ne - 45.0).abs() < 0.5, "NE got {ne}");
+    }
+
+    #[test]
+    fn bearing_deg_degenerate_point_is_north() {
+        assert_eq!(bearing_deg(G44, G44), 0.0);
+    }
+
+    #[test]
+    fn angular_diff_wraps_across_north() {
+        assert!((angular_diff_deg(10.0, 350.0) - 20.0).abs() < 1e-9);
+        assert!((angular_diff_deg(350.0, 10.0) - 20.0).abs() < 1e-9);
+        assert!((angular_diff_deg(0.0, 180.0) - 180.0).abs() < 1e-9);
+        assert!((angular_diff_deg(270.0, 270.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn circular_mean_wraps_across_north() {
+        let m = circular_mean_deg(&[350.0, 10.0]).unwrap();
+        assert!(
+            (m - 0.0).abs() < 1e-6 || (m - 360.0).abs() < 1e-6,
+            "got {m}"
+        );
+    }
+
+    #[test]
+    fn circular_mean_of_quadrant_spread_is_middle() {
+        let m = circular_mean_deg(&[45.0, 90.0, 135.0]).unwrap();
+        assert!((m - 90.0).abs() < 1e-6, "got {m}");
+    }
+
+    #[test]
+    fn circular_mean_single_and_empty() {
+        assert!((circular_mean_deg(&[270.0]).unwrap() - 270.0).abs() < 1e-6);
+        assert!(circular_mean_deg(&[]).is_none());
     }
 }

@@ -50,6 +50,8 @@ pub struct Check {
 pub struct Report {
     pub batch_id: i64,
     pub checks: Vec<Check>,
+    /// Advisory findings that never affect the exit status (warn-only).
+    pub warnings: Vec<Check>,
     pub counts: BTreeMap<String, i64>,
     pub stats: BTreeMap<String, f64>,
 }
@@ -455,9 +457,21 @@ pub fn run(
         }
     }
 
+    let mut warnings = Vec::new();
+
+    // ---- bearing consistency (warn-only) ----
+    {
+        let (warn, bearing_stats) = bearing_warnings(conn)?;
+        stats.extend(bearing_stats);
+        if let Some(warn) = warn {
+            warnings.push(warn);
+        }
+    }
+
     let report = Report {
         batch_id: batch,
         checks,
+        warnings,
         counts,
         stats,
     };
@@ -467,8 +481,118 @@ pub fn run(
     write_report_json(qa_dir, &report)?;
     write_segments_geojson(conn, qa_dir)?;
     write_outlier_csv(conn, qa_dir)?;
+    write_bearing_report(conn, qa_dir)?;
 
     Ok(report)
+}
+
+/// Warn threshold for a station's member-stop bearing spread, in degrees.
+pub const BEARING_SPREAD_WARN_DEG: f64 = 45.0;
+
+/// Max pairwise spread considered "the same pole serving both directions"
+/// rather than a data inconsistency.
+const BEARING_OPPOSITE_SPREAD_DEG: f64 = 170.0;
+
+/// Stations whose member stops disagree on bearing by more than the
+/// threshold. Never fails the run — see bearing_report.json for detail.
+fn bearing_warnings(conn: &Connection) -> anyhow::Result<(Option<Check>, BTreeMap<String, f64>)> {
+    let stations = n(conn, "SELECT COUNT(*) FROM station_bearing", &[])?;
+    let violating = n(
+        conn,
+        "SELECT COUNT(*) FROM station_bearing WHERE max_spread_deg > ?1",
+        &[&BEARING_SPREAD_WARN_DEG],
+    )?;
+    let stats = BTreeMap::from([
+        ("bearing_stations".into(), stations as f64),
+        ("bearing_violating".into(), violating as f64),
+    ]);
+    let warn = if violating > 0 {
+        Some(check(
+            "bearing:station-spread",
+            "station member bearings agree",
+            true,
+            format!(
+                "{violating} stations exceed {}° max spread (see bearing_report.json)",
+                BEARING_SPREAD_WARN_DEG as i64
+            ),
+        ))
+    } else {
+        None
+    };
+    Ok((warn, stats))
+}
+
+/// Per-station bearing detail for QA: every violating station with its
+/// member stops, plus the stop-bearing source mix.
+fn write_bearing_report(conn: &Connection, qa_dir: &Path) -> anyhow::Result<()> {
+    use serde_json::json;
+    let mut violations = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT sb.station_id, st.ext_uid, sb.bearing_deg, sb.max_spread_deg
+             FROM station_bearing sb
+             JOIN station st ON st.station_id = sb.station_id
+             WHERE sb.max_spread_deg > ?1
+             ORDER BY sb.max_spread_deg DESC",
+        )?;
+        let rows = stmt.query_map([&BEARING_SPREAD_WARN_DEG], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, f64>(2)?,
+                r.get::<_, f64>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (station_id, ext_uid, mean, spread) = row?;
+            let mut members = Vec::new();
+            {
+                let mut m = conn.prepare(
+                    "SELECT sp.ext_uid, b.bearing_deg, b.source
+                     FROM stop_bearing b
+                     JOIN stop_version sv ON sv.stop_version_id = b.stop_version_id
+                     JOIN stop sp ON sp.stop_id = sv.stop_id
+                     WHERE sv.station_id = ?1
+                     ORDER BY b.bearing_deg",
+                )?;
+                let it = m.query_map([station_id], |r| {
+                    Ok(json!({
+                        "stop": r.get::<_, String>(0)?,
+                        "bearing_deg": r.get::<_, f64>(1)?,
+                        "source": r.get::<_, String>(2)?,
+                    }))
+                })?;
+                for member in it {
+                    members.push(member?);
+                }
+            }
+            violations.push(json!({
+                "station_id": station_id,
+                "ext_uid": ext_uid,
+                "bearing_deg": mean,
+                "max_spread_deg": spread,
+                "opposite_pair": spread >= BEARING_OPPOSITE_SPREAD_DEG,
+                "members": members,
+            }));
+        }
+    }
+    let (osm, polyline): (i64, i64) = conn.query_row(
+        "SELECT COALESCE(SUM(CASE WHEN source = 'OSM' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN source = 'POLYLINE' THEN 1 ELSE 0 END), 0)
+         FROM stop_bearing",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let report = json!({
+        "threshold_deg": BEARING_SPREAD_WARN_DEG,
+        "source_mix": {"OSM": osm, "POLYLINE": polyline},
+        "violating_stations": violations,
+    });
+    std::fs::write(
+        qa_dir.join("bearing_report.json"),
+        serde_json::to_string_pretty(&report)?,
+    )?;
+    Ok(())
 }
 
 fn write_report_json(qa_dir: &Path, report: &Report) -> anyhow::Result<()> {

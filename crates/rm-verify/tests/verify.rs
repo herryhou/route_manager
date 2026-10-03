@@ -156,3 +156,71 @@ fn shared_pair_joins_through_route_version() {
         "expected 1 shared segment: {pair:?}"
     );
 }
+
+#[test]
+fn bearing_spread_warns_but_does_not_fail() {
+    let (_dir, conn, batch) = setup();
+    // one station, two member stops 50° apart — over the 45° threshold
+    conn.execute_batch(
+        "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+            SELECT stop_version_id, CASE stop_sequence WHEN 1 THEN 10.0 ELSE 60.0 END,
+                   'OSM', '2026-01-01T00:00:00Z'
+            FROM stop_of_route_version;
+         INSERT INTO station_bearing
+            (station_id, bearing_deg, member_count, max_spread_deg, computed_at)
+            SELECT station_id, 35.0, 2, 50.0, '2026-01-01T00:00:00Z'
+            FROM station LIMIT 1;",
+    )
+    .unwrap();
+    let qa = tempfile::tempdir().unwrap();
+
+    let report = rm_verify::run(&conn, batch, &fixture_expectations(), qa.path()).unwrap();
+
+    // warn-only: exit status unchanged
+    assert!(report.all_pass(), "spread must not fail: {report:#?}");
+    let warn = report
+        .warnings
+        .iter()
+        .find(|w| w.id == "bearing:station-spread")
+        .expect("bearing warning present");
+    assert!(warn.detail.contains('1'), "one station flagged: {warn:?}");
+
+    // QA detail file with per-station members
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(qa.path().join("bearing_report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["violating_stations"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        v["violating_stations"][0]["members"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+}
+
+#[test]
+fn tight_bearing_spread_does_not_warn() {
+    let (_dir, conn, batch) = setup();
+    conn.execute_batch(
+        "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+            SELECT stop_version_id, 12.0, 'OSM', '2026-01-01T00:00:00Z'
+            FROM stop_of_route_version;
+         INSERT INTO station_bearing
+            (station_id, bearing_deg, member_count, max_spread_deg, computed_at)
+            SELECT station_id, 12.0, 2, 3.0, '2026-01-01T00:00:00Z'
+            FROM station LIMIT 1;",
+    )
+    .unwrap();
+    let qa = tempfile::tempdir().unwrap();
+
+    let report = rm_verify::run(&conn, batch, &fixture_expectations(), qa.path()).unwrap();
+
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|w| w.id == "bearing:station-spread"),
+        "tight spread must not warn: {report:#?}"
+    );
+}

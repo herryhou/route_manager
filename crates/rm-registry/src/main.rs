@@ -32,5 +32,15 @@ fn main() -> anyhow::Result<()> {
         "batch {} registry: {} directions, {} traversals, {} segments, {} skipped pairs",
         s.batch_id, s.directions, s.traversals, s.segments, s.skipped_pairs
     );
+    let b = rm_registry::bearing::run(&conn, batch)?;
+    println!(
+        "batch {} bearings: {} stops ({} OSM, {} polyline, {} skipped), {} stations",
+        batch,
+        b.stops_osm + b.stops_polyline + b.stops_skipped,
+        b.stops_osm,
+        b.stops_polyline,
+        b.stops_skipped,
+        b.stations
+    );
     Ok(())
 }
