@@ -287,3 +287,133 @@ async fn unknown_api_path_is_404_json() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
+
+/// Full fixture chain through rm-registry: road along lon 120.6857, both
+/// routes ride it, registry mints 3 canonical segments (44→46, 44→50, 50→46).
+fn fixture_db_with_segments() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    rm_ingest::testfix::make_fixture(&dir.path().join("src"));
+    let db = dir.path().join("fixture.db");
+    let mut conn = rm_db::open(&db).unwrap();
+    let s = rm_ingest::run(&conn, &dir.path().join("src")).unwrap();
+    conn.execute_batch(
+        "INSERT INTO osm_way (osm_way_id, highway, oneway, name) VALUES (100, 'residential', 0, '測試路');
+         INSERT INTO osm_node (osm_node_id, lat, lon) VALUES
+            (1, 24.1405, 120.6857), (2, 24.1408, 120.6857), (3, 24.1412, 120.6857);
+         INSERT INTO osm_way_node (osm_way_id, ordinal, osm_node_id) VALUES
+            (100, 1, 1), (100, 2, 2), (100, 3, 3);",
+    )
+    .unwrap();
+    let enc = rm_core::polyline::encode(&[
+        rm_core::LatLng { lat: 24.1412, lon: 120.6857 },
+        rm_core::LatLng { lat: 24.1410, lon: 120.6857 },
+        rm_core::LatLng { lat: 24.1407, lon: 120.6857 },
+        rm_core::LatLng { lat: 24.1405, lon: 120.6857 },
+    ]);
+    conn.execute(
+        "UPDATE src_route_point SET encoded = ?1 WHERE batch_id = ?2 AND xno IN ('1','2')",
+        rusqlite::params![enc, s.batch_id],
+    )
+    .unwrap();
+    let rows: [(i64, i64, &str, f64, f64); 3] = [
+        (1, 21, "44", 24.1409, 120.6857),
+        (2, 22, "50", 24.14085, 120.6858),
+        (3, 23, "46", 24.1408, 120.6859),
+    ];
+    conn.execute(
+        "DELETE FROM src_stop_edge WHERE batch_id = ?1 AND xno = '2'",
+        [s.batch_id],
+    )
+    .unwrap();
+    for (order, sid, node, lat, lon) in rows {
+        conn.execute(
+            "INSERT OR REPLACE INTO src_stop_edge
+                (batch_id, xno, direction, source_order_no, ivr_no, sid, node_id, station_name, lat, lon, lat_e6, lon_e6)
+             VALUES (?1, '2', 0, ?2, NULL, ?3, ?4, '干城站', ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                s.batch_id, order, sid, node, lat, lon,
+                (lat * 1e6).round() as i64,
+                (lon * 1e6).round() as i64
+            ],
+        )
+        .unwrap();
+    }
+    conn.execute_batch(
+        "UPDATE route SET current_route_version_id = NULL, revision = 0 WHERE ext_uid = 'tcg:2';
+         DELETE FROM stop_of_route_version WHERE subroute_version_id IN
+            (SELECT subroute_version_id FROM subroute_version WHERE route_version_id =
+                (SELECT route_version_id FROM route_version WHERE route_id =
+                    (SELECT route_id FROM route WHERE ext_uid = 'tcg:2')));
+         DELETE FROM subroute_version WHERE route_version_id IN
+            (SELECT route_version_id FROM route_version WHERE route_id =
+                (SELECT route_id FROM route WHERE ext_uid = 'tcg:2'));
+         DELETE FROM route_version WHERE route_id IN
+            (SELECT route_id FROM route WHERE route_id =
+                (SELECT route_id FROM route WHERE ext_uid = 'tcg:2'));
+         DELETE FROM stop_version WHERE stop_id IN
+            (SELECT stop_id FROM stop WHERE ext_uid LIKE 'tcg:2:%');
+         DELETE FROM stop WHERE ext_uid LIKE 'tcg:2:%';",
+    )
+    .unwrap();
+    rm_identity::run(&conn, s.batch_id).unwrap();
+    rm_publish::run(&mut conn, s.batch_id).unwrap();
+    rm_segments::run(&conn, s.batch_id, 50.0).unwrap();
+    rm_osm_match::run(&conn, s.batch_id).unwrap();
+    rm_registry::run(&conn, s.batch_id).unwrap();
+    (dir, db)
+}
+
+#[tokio::test]
+async fn segments_bbox_and_detail() {
+    let (_dir, db) = fixture_db_with_segments();
+    let app = router_with(AppState::new(db));
+
+    // bbox around the road (lon 120.6857, lat 24.1405..24.1412)
+    let v = get_json(&app, "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420").await;
+    assert_eq!(v["type"], serde_json::json!("FeatureCollection"), "{v}");
+    let feats = v["features"].as_array().unwrap();
+    assert_eq!(feats.len(), 3, "3 canonical segments: {v}");
+    for f in feats {
+        assert_eq!(f["geometry"]["type"], serde_json::json!("LineString"));
+        let cs = f["geometry"]["coordinates"].as_array().unwrap();
+        assert!(cs.len() >= 2, "{f}");
+        assert!((120.68..120.69).contains(&cs[0][0].as_f64().unwrap()), "lon first: {cs:?}");
+        assert!(f["properties"]["segment_id"].is_string());
+        assert!(f["properties"]["route_count"].as_i64().unwrap() >= 1);
+        assert!(f["properties"]["length_m"].as_f64().unwrap() > 0.0);
+    }
+
+    // disjunct bbox → empty
+    let v = get_json(&app, "/api/segments?bbox=121.0,24.0,121.1,24.1").await;
+    assert_eq!(v["features"].as_array().unwrap().len(), 0, "{v}");
+
+    // min_routes=2 → none (each segment carries exactly one route in fixture)
+    let v = get_json(&app, "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420&min_routes=2").await;
+    assert_eq!(v["features"].as_array().unwrap().len(), 0, "{v}");
+
+    // detail: ways composition + traversing routes
+    let v = get_json(&app, "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420").await;
+    let seg_id = v["features"][0]["properties"]["segment_id"].as_str().unwrap();
+    let d = get_json(&app, &format!("/api/segments/{seg_id}")).await;
+    assert_eq!(d["segment_id"], serde_json::json!(seg_id));
+    let ways = d["ways"].as_array().unwrap();
+    assert!(!ways.is_empty(), "{d}");
+    assert_eq!(ways[0]["osm_way_id"].as_i64().unwrap(), 100);
+    assert_eq!(ways[0]["name"], serde_json::json!("測試路"));
+    let routes = d["routes"].as_array().unwrap();
+    assert_eq!(routes.len(), 1, "one route per fixture segment: {d}");
+    let codes: Vec<&str> = routes.iter().map(|r| r["route_code"].as_str().unwrap()).collect();
+    assert!(codes.contains(&"1") || codes.contains(&"2"), "{codes:?}");
+
+    // unknown segment id → 404
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/segments/nonexistent")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}

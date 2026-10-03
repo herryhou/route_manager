@@ -160,6 +160,30 @@ export function profileSvg(stops) {
     </svg>`;
 }
 
+/// Segment detail panel: corridor card + ways table + traversing routes.
+export function segmentPanel(d, { onPickRoute }) {
+  const ways = (d.ways ?? [])
+    .map(
+      (w) => `<tr><td>${w.ordinal}</td><td>${w.name ?? '—'}</td><td>${w.highway ?? '—'}</td>
+        <td style="text-align:right">${w.length_m.toFixed(0)}m</td></tr>`
+    )
+    .join('');
+  showDetail(`
+    <h2>Segment <small class="muted">${d.segment_id.slice(0, 12)}…</small></h2>
+    ${kv([
+      ['length', `${d.length_m.toFixed(0)} m`],
+      ['ways', d.way_count],
+      ['start', `${d.start_station.station_name ?? d.start_station.station_id}`],
+      ['end', `${d.end_station.station_name ?? d.end_station.station_id}`],
+    ])}
+    <h3>Ways (${(d.ways ?? []).length})</h3>
+    <table class="kv"><tr><td>#</td><td>name</td><td>highway</td><td style="text-align:right">len</td></tr>${ways}</table>
+    <h3>Routes (${(d.routes ?? []).length})</h3>
+    <div id="segment-routes"></div>
+  `);
+  document.getElementById('segment-routes').append(routeChips(d.routes ?? [], onPickRoute));
+}
+
 /// Outlier list panel (topbar outliers chip).
 export function outlierPanel(rows, { onPick, onOpenRoute }) {
   const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);

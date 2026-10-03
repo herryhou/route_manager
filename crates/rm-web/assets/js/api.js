@@ -21,7 +21,7 @@ export const routeRaw = (id, dir) => fetchJson(`/api/routes/${id}/directions/${d
 export const stopDetail = (id) => fetchJson(`/api/stops/${id}`);
 export const stationDetail = (id) => fetchJson(`/api/stations/${id}`);
 export const segmentsBbox = (bbox, minRoutes = 0) =>
-  fetchJson(`/api/segments?bbox=${bbox.join(',')}&min_routes=${minRoutes}`);
+  fetchJson(`/api/segments?bbox=${bbox}&min_routes=${minRoutes}`);
 export const segmentDetail = (id) => fetchJson(`/api/segments/${id}`);
 export const stopsBbox = (bbox, kind) =>
   fetchJson(`/api/stops?bbox=${bbox.join(',')}&kind=${kind}`);

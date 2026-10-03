@@ -2,4 +2,5 @@
 
 pub mod qa;
 pub mod routes;
+pub mod segments;
 pub mod stops;

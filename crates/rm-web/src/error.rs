@@ -5,21 +5,34 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
-pub struct ApiError(pub anyhow::Error);
+pub struct ApiError {
+    err: anyhow::Error,
+    status: Option<StatusCode>,
+}
+
+impl ApiError {
+    /// 400 helper for malformed query params.
+    pub fn bad_request(msg: &str) -> Self {
+        Self {
+            err: anyhow::anyhow!("{msg}"),
+            status: Some(StatusCode::BAD_REQUEST),
+        }
+    }
+}
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": self.0.to_string() })),
-        )
-            .into_response()
+        let status = self.status.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        (status, Json(json!({ "error": self.err.to_string() }))).into_response()
     }
 }
 
 impl<E: Into<anyhow::Error>> From<E> for ApiError {
     fn from(e: E) -> Self {
-        Self(e.into())
+        Self {
+            err: e.into(),
+            status: None,
+        }
     }
 }
 

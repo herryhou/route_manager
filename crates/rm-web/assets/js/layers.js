@@ -1,6 +1,5 @@
-// Leaflet layer management: route path/stops, highlights.
-// Viewport-driven stops/segments layers land in later steps.
-import { METHOD_COLORS } from './colors.js';
+// Leaflet layer management: route path/stops, highlights, viewport segments.
+import { METHOD_COLORS, routeCountColor } from './colors.js';
 
 export const layers = {};
 
@@ -8,6 +7,7 @@ export function initLayers(map) {
   layers.routePath = L.layerGroup().addTo(map);
   layers.routeStops = L.layerGroup().addTo(map);
   layers.highlight = L.layerGroup().addTo(map);
+  layers.segments = L.layerGroup().addTo(map);
 }
 
 export function clearRoute() {
@@ -85,4 +85,23 @@ export function flashStop(lat, lon) {
     fillOpacity: 0.2,
   }).addTo(layers.highlight);
   m.bindTooltip('outlier', { direction: 'top' });
+}
+
+/// Viewport-driven canonical-segment corridors, colored by route_count heat.
+export function drawSegments(fc, { onSegmentClick }) {
+  layers.segments.clearLayers();
+  L.geoJSON(fc, {
+    style: (f) => ({
+      color: routeCountColor(f.properties.route_count ?? 1),
+      weight: 2.5,
+      opacity: 0.75,
+    }),
+  })
+    .bindTooltip((l) => `${l.feature.properties.route_count} routes · ${Math.round(l.feature.properties.length_m)}m`)
+    .on('click', (e) => onSegmentClick(e.layer.feature.properties.segment_id))
+    .addTo(layers.segments);
+}
+
+export function clearSegments() {
+  layers.segments.clearLayers();
 }

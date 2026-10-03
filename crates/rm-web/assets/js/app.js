@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, outlierPanel } from './panels.js';
-import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop } from './layers.js';
+import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, outlierPanel, segmentPanel } from './panels.js';
+import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -90,6 +90,39 @@ async function openOutliers() {
   }
 }
 
+/// Viewport segments layer: checkbox + zoom ≥13 gated, debounced on moveend.
+let segmentsTimer = null;
+async function refreshSegments() {
+  if (!document.getElementById('layer-segments').checked) return;
+  const b = map.getBounds();
+  if (map.getZoom() < 13) {
+    clearSegments();
+    status('segments need zoom ≥13');
+    return;
+  }
+  const pad = 0.05;
+  const bbox = [
+    b.getWest() - pad, b.getSouth() - pad, b.getEast() + pad, b.getNorth() + pad,
+  ].map((x) => x.toFixed(4)).join(',');
+  try {
+    const v = await api.segmentsBbox(bbox);
+    drawSegments(v, { onSegmentClick: selectSegment });
+    if (v.truncated) status('segments truncated — zoom in');
+  } catch (e) {
+    status(`segments load failed: ${e.message}`);
+  }
+}
+
+async function selectSegment(segmentId) {
+  try {
+    const d = await api.segmentDetail(segmentId);
+    segmentPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0) });
+    location.hash = `#segment=${segmentId}`;
+  } catch (e) {
+    status(`segment load failed: ${e.message}`);
+  }
+}
+
 function parseHash() {
   const h = location.hash.replace(/^#/, '');
   const m = Object.fromEntries(
@@ -105,6 +138,15 @@ async function boot() {
   const search = document.getElementById('route-search');
   search.addEventListener('input', () => refreshList(search.value));
   document.getElementById('chip-outliers').addEventListener('click', openOutliers);
+  const segToggle = document.getElementById('layer-segments');
+  segToggle.addEventListener('change', () => {
+    if (segToggle.checked) refreshSegments();
+    else clearSegments();
+  });
+  map.on('moveend', () => {
+    clearTimeout(segmentsTimer);
+    segmentsTimer = setTimeout(refreshSegments, 250);
+  });
 
   try {
     const [s, rv] = await Promise.all([api.stats(), api.routes()]);
@@ -126,6 +168,8 @@ async function boot() {
       selectRouteById(Number(h.route), Number(h.dir ?? 0));
     } else if (h.stop) {
       selectStop(Number(h.stop));
+    } else if (h.segment) {
+      selectSegment(h.segment);
     }
   } catch (e) {
     status(`boot failed: ${e.message}`);
