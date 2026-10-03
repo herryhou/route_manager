@@ -31,7 +31,9 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
     let found = match conn.query_row(
         "SELECT sv.stop_version_id, sv.stop_code, sv.stop_name, sv.latitude, sv.longitude,
                 st.station_id, stv.station_name, stv.latitude, stv.longitude,
-                sg.station_group_id, sgv.station_group_name, sgv.source
+                sg.station_group_id, sgv.station_group_name, sgv.source,
+                sb.bearing_deg, sb.source,
+                stb.bearing_deg, stb.max_spread_deg, stb.member_count
          FROM stop_version sv
          JOIN station st ON st.station_id = sv.station_id
          JOIN station_version stv
@@ -39,6 +41,8 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
          JOIN station_group sg ON sg.station_group_id = stv.station_group_id
          JOIN station_group_version sgv
            ON sgv.station_group_id = sg.station_group_id AND sgv.valid_to IS NULL
+         LEFT JOIN stop_bearing sb ON sb.stop_version_id = sv.stop_version_id
+         LEFT JOIN station_bearing stb ON stb.station_id = st.station_id
          WHERE sv.stop_version_id = ?1",
         [stop_version_id],
         |r| {
@@ -55,6 +59,11 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
                 r.get::<_, i64>(9)?,
                 r.get::<_, String>(10)?,
                 r.get::<_, String>(11)?,
+                r.get::<_, Option<f64>>(12)?,
+                r.get::<_, Option<String>>(13)?,
+                r.get::<_, Option<f64>>(14)?,
+                r.get::<_, Option<f64>>(15)?,
+                r.get::<_, Option<i64>>(16)?,
             ))
         },
     ) {
@@ -63,7 +72,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
         Err(e) => return Err(e.into()),
     };
 
-    let (_, _, _, _, _, station_id, _, _, _, group_id, _, _) = &found;
+    let (_, _, _, _, _, station_id, _, _, _, group_id, _, _, _, _, _, _, _) = &found;
 
     let members: Vec<Value> = {
         let mut stmt = conn.prepare(
@@ -122,6 +131,21 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
             "station_group_name": found.10,
             "source": found.11,
         },
+        "bearing": match found.12 {
+            Some(bearing_deg) => json!({
+                "bearing_deg": bearing_deg,
+                "source": found.13,
+            }),
+            None => Value::Null,
+        },
+        "station_bearing": match found.14 {
+            Some(bearing_deg) => json!({
+                "bearing_deg": bearing_deg,
+                "max_spread_deg": found.15,
+                "member_count": found.16,
+            }),
+            None => Value::Null,
+        },
         "group_members": members,
         "routes_by_stop": routes_by_stop,
         "routes_by_station": routes_by_station,
@@ -133,13 +157,15 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
 pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value>> {
     let found = match conn.query_row(
         "SELECT st.station_id, stv.station_name, stv.latitude, stv.longitude,
-                sg.station_group_id, sgv.station_group_name, sgv.source
+                sg.station_group_id, sgv.station_group_name, sgv.source,
+                stb.bearing_deg, stb.max_spread_deg, stb.member_count
          FROM station st
          JOIN station_version stv
            ON stv.station_id = st.station_id AND stv.valid_to IS NULL
          JOIN station_group sg ON sg.station_group_id = stv.station_group_id
          JOIN station_group_version sgv
            ON sgv.station_group_id = sg.station_group_id AND sgv.valid_to IS NULL
+         LEFT JOIN station_bearing stb ON stb.station_id = st.station_id
          WHERE st.station_id = ?1",
         [station_id],
         |r| {
@@ -151,6 +177,9 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
                 r.get::<_, i64>(4)?,
                 r.get::<_, String>(5)?,
                 r.get::<_, String>(6)?,
+                r.get::<_, Option<f64>>(7)?,
+                r.get::<_, Option<f64>>(8)?,
+                r.get::<_, Option<i64>>(9)?,
             ))
         },
     ) {
@@ -195,6 +224,14 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
             "station_group_name": found.5,
             "source": found.6,
         },
+        "bearing": match found.7 {
+            Some(bearing_deg) => json!({
+                "bearing_deg": bearing_deg,
+                "max_spread_deg": found.8,
+                "member_count": found.9,
+            }),
+            None => Value::Null,
+        },
         "stops": stops,
         "routes": routes,
     })))
@@ -204,10 +241,24 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
 /// Viewport layer — bbox WHERE over current versions, LIMIT with truncation.
 pub fn viewport(conn: &Connection, bbox: (f64, f64, f64, f64), kind: &str, limit: i64) -> Result<Value> {
     let (min_lon, min_lat, max_lon, max_lat) = bbox;
-    let (table, id_col, name_col) = if kind == "station" {
-        ("station_version", "station_id", "station_name")
+    // kind-specific table + bearing join: stops get their own bearing + source,
+    // stations get the circular-mean bearing + member spread.
+    let (table, id_col, name_col, join, extra) = if kind == "station" {
+        (
+            "station_version",
+            "station_version.station_id",
+            "station_name",
+            "LEFT JOIN station_bearing stb ON stb.station_id = station_version.station_id",
+            "stb.bearing_deg, stb.max_spread_deg",
+        )
     } else {
-        ("stop_version", "stop_version_id", "stop_name")
+        (
+            "stop_version",
+            "stop_version.stop_version_id",
+            "stop_name",
+            "LEFT JOIN stop_bearing sb ON sb.stop_version_id = stop_version.stop_version_id",
+            "sb.bearing_deg, sb.source",
+        )
     };
     let total: i64 = conn.query_row(
         &format!(
@@ -220,8 +271,9 @@ pub fn viewport(conn: &Connection, bbox: (f64, f64, f64, f64), kind: &str, limit
         |r| r.get(0),
     )?;
     let mut stmt = conn.prepare(&format!(
-        "SELECT {id_col}, {name_col}, longitude, latitude
+        "SELECT {id_col}, {name_col}, longitude, latitude, {extra}
          FROM {table}
+         {join}
          WHERE valid_to IS NULL
            AND longitude BETWEEN ?1 AND ?3
            AND latitude BETWEEN ?2 AND ?4
@@ -231,14 +283,22 @@ pub fn viewport(conn: &Connection, bbox: (f64, f64, f64, f64), kind: &str, limit
         let it = stmt.query_map(
             rusqlite::params![min_lon, min_lat, max_lon, max_lat, limit],
             |r| {
+                let bearing = r.get::<_, Option<f64>>(4)?;
+                let mut props = json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "name": r.get::<_, String>(1)?,
+                    "kind": kind,
+                    "bearing": bearing,
+                });
+                if kind == "station" {
+                    props["spread"] = r.get::<_, Option<f64>>(5)?.into();
+                } else {
+                    props["bearing_source"] = r.get::<_, Option<String>>(5)?.into();
+                }
                 Ok(json!({
                     "type": "Feature",
                     "geometry": crate::geojson::point(r.get::<_, f64>(2)?, r.get::<_, f64>(3)?),
-                    "properties": {
-                        "id": r.get::<_, i64>(0)?,
-                        "name": r.get::<_, String>(1)?,
-                        "kind": kind,
-                    },
+                    "properties": props,
                 }))
             },
         )?;

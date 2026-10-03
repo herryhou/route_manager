@@ -30,8 +30,14 @@ async fn get_json(app: &axum::Router, uri: &str) -> serde_json::Value {
         .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK, "GET {uri}");
+    let status = res.status();
     let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "GET {uri}: {}",
+        String::from_utf8_lossy(&bytes)
+    );
     serde_json::from_slice(&bytes).unwrap()
 }
 
@@ -360,6 +366,7 @@ fn fixture_db_with_segments() -> (tempfile::TempDir, std::path::PathBuf) {
     rm_segments::run(&conn, s.batch_id, 50.0).unwrap();
     rm_osm_match::run(&conn, s.batch_id).unwrap();
     rm_registry::run(&conn, s.batch_id).unwrap();
+    rm_registry::bearing::run(&conn, s.batch_id).unwrap();
     (dir, db)
 }
 
@@ -549,6 +556,60 @@ async fn stops_viewport_and_search() {
     assert!(!results.is_empty(), "{v}");
     assert!(results[0]["stop_name"].as_str().unwrap().contains("干城"));
     assert!(results[0]["stop_version_id"].is_i64());
+}
+
+#[tokio::test]
+async fn bearings_exposed_across_endpoints() {
+    let (_dir, db) = fixture_db_with_segments();
+    let app = router_with(AppState::new(db));
+
+    // viewport stops: bearing + source
+    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=stop").await;
+    let feats = v["features"].as_array().unwrap();
+    assert!(!feats.is_empty(), "{v}");
+    for f in feats {
+        let b = f["properties"]["bearing"].as_f64().expect("stop bearing present");
+        assert!((0.0..360.0).contains(&b), "{f}");
+        assert!(f["properties"]["bearing_source"].is_string(), "{f}");
+    }
+
+    // viewport stations: bearing + spread
+    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=station").await;
+    let feats = v["features"].as_array().unwrap();
+    assert!(!feats.is_empty(), "{v}");
+    for f in feats {
+        let b = f["properties"]["bearing"].as_f64().expect("station bearing present");
+        assert!((0.0..360.0).contains(&b), "{f}");
+        assert!(f["properties"]["spread"].is_f64(), "{f}");
+    }
+
+    // route stops: per-stop departure heading
+    let v = get_json(&app, "/api/routes").await;
+    let id1 = v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route_code"] == serde_json::json!("1"))
+        .unwrap()["route_id"]
+        .as_i64()
+        .unwrap();
+    let s = get_json(&app, &format!("/api/routes/{id1}/directions/0/stops")).await;
+    let stops = s["stops"].as_array().unwrap();
+    assert!(!stops.is_empty(), "{s}");
+    for st in stops {
+        let b = st["bearing"].as_f64().expect("route-stop bearing present");
+        assert!((0.0..360.0).contains(&b), "{st}");
+    }
+
+    // stop detail: own bearing + station bearing
+    let sv = stops[0]["stop_version_id"].as_i64().unwrap();
+    let d = get_json(&app, &format!("/api/stops/{sv}")).await;
+    let b = d["bearing"]["bearing_deg"].as_f64().expect("stop detail bearing");
+    assert!((0.0..360.0).contains(&b), "{d}");
+    assert!(d["bearing"]["source"].is_string(), "{d}");
+    let sb = d["station_bearing"]["bearing_deg"].as_f64().expect("station bearing in stop detail");
+    assert!((0.0..360.0).contains(&sb), "{d}");
+    assert!(d["station_bearing"]["max_spread_deg"].is_f64(), "{d}");
 }
 
 #[tokio::test]

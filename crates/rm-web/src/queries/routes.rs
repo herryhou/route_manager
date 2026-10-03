@@ -295,13 +295,14 @@ pub fn stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> 
                 sv2.stop_version_id, sv2.stop_code, sv2.stop_name,
                 sv2.latitude, sv2.longitude, sv2.station_id,
                 p.chainage_m, p.snap_dist_m, p.method, p.monotonic_clamped,
-                p.projected_lat, p.projected_lon
+                p.projected_lat, p.projected_lon, sb.bearing_deg
          FROM stop_of_route_version sorv
          JOIN subroute_version sv ON sv.subroute_version_id = sorv.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
          JOIN stop_version sv2 ON sv2.stop_version_id = sorv.stop_version_id
          LEFT JOIN path_stop_projection p
            ON p.stop_of_route_version_id = sorv.stop_of_route_version_id
+         LEFT JOIN stop_bearing sb ON sb.stop_version_id = sv2.stop_version_id
          WHERE rv.route_id = ?1 AND sorv.direction = ?2
          ORDER BY sorv.stop_sequence",
     )?;
@@ -323,6 +324,7 @@ pub fn stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> 
                 (Some(lat), Some(lon)) => json!([lon, lat]),
                 _ => Value::Null,
             },
+            "bearing": r.get::<_, Option<f64>>(14)?,
         }))
     })?;
     let stops: Vec<Value> = it.collect::<Result<_, _>>()?;

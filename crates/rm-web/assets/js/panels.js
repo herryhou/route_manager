@@ -216,7 +216,11 @@ export function stopPanel(d, { onPickRoute }) {
     <h2>${d.stop.stop_name} <small class="muted">#${d.stop.stop_code}</small></h2>
     ${kv([
       ['stop', `${d.stop.stop_name} (${d.stop.stop_code})`],
+      ['bearing', d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'],
       ['station', d.station.station_name],
+      ['station bearing', d.station_bearing
+        ? `${Math.round(d.station_bearing.bearing_deg)}° · spread ${Math.round(d.station_bearing.max_spread_deg)}° · ${d.station_bearing.member_count} members`
+        : '—'],
       ['group', `${d.group.station_group_name} · ${d.group.source}`],
     ])}
     <h3>Group members (${(d.group_members ?? []).length} stations)</h3>

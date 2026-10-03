@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
 import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, outlierPanel, segmentPanel } from './panels.js';
-import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawWays, clearWays, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer } from './layers.js';
+import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawWays, clearWays, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -9,7 +9,7 @@ export const map = L.map('map', { preferCanvas: true }).fitBounds([
 ]);
 
 L.tileLayer(window.RM_TILES, {
-  maxZoom: 19,
+  maxZoom: 23,
   attribution: '&copy; OpenStreetMap contributors',
 }).addTo(map);
 
@@ -27,6 +27,7 @@ function setChip(id, text) {
 let allRoutes = [];
 let selectedKey = null;
 let selectedRoute = null; // { route_id, dir }
+let lastRouteDraw = null; // { p, s, onStopClick } — for bearing-toggle redraw
 
 function refreshList(q) {
   renderRouteList(filterRoutes(allRoutes, q), { selectedKey, onSelect: (r) => selectRoute(r) });
@@ -50,7 +51,9 @@ async function selectRoute(r, dir = 0) {
       api.routeStops(route_id, dir),
     ]);
     if (selectedRoute?.route_id !== route_id || selectedRoute.dir !== dir) return; // stale
-    drawRoute(p, s, { onStopClick: (stop) => selectStop(stop.stop_version_id, stop) });
+    const onStopClick = (stop) => selectStop(stop.stop_version_id, stop);
+    lastRouteDraw = { p, s, onStopClick };
+    drawRoute(p, s, { onStopClick });
     if (document.getElementById('layer-osm').checked) loadWays(route_id, dir);
     else clearWays();
     if (document.getElementById('layer-raw').checked) loadRaw(route_id, dir);
@@ -104,7 +107,8 @@ async function openOutliers() {
     outlierPanel(v.outliers ?? [], {
       onPick: (o) => {
         flashStop(o.lat, o.lon);
-        map.setView([o.lat, o.lon], Math.max(map.getZoom(), 15));
+        //map.setView([o.lat, o.lon], Math.max(map.getZoom(), 15));
+        map.panTo([o.lat, o.lon]);
       },
       onOpenRoute: (o) => selectRouteById(o.route_id, o.direction),
     });
@@ -203,6 +207,12 @@ async function boot() {
   stopsToggle.addEventListener('change', () => {
     if (stopsToggle.checked) refreshStopsLayer();
     else clearStopsLayer();
+  });
+  const bearingsToggle = document.getElementById('layer-bearings');
+  bearingsToggle.addEventListener('change', () => {
+    setBearingsOn(bearingsToggle.checked);
+    if (stopsToggle.checked) refreshStopsLayer();
+    if (lastRouteDraw) drawRoute(lastRouteDraw.p, lastRouteDraw.s, { onStopClick: lastRouteDraw.onStopClick });
   });
   map.on('moveend', () => {
     clearTimeout(segmentsTimer);

@@ -3,6 +3,12 @@ import { METHOD_COLORS, routeCountColor } from './colors.js';
 
 export const layers = {};
 
+// Bearing arrows toggle (sidebar). drawRoute/drawStopsLayer read it live.
+let bearingsOn = true;
+export function setBearingsOn(on) {
+  bearingsOn = on;
+}
+
 export function initLayers(map) {
   layers.routePath = L.layerGroup().addTo(map);
   layers.routeStops = L.layerGroup().addTo(map);
@@ -48,11 +54,15 @@ export function drawRoute(pathFc, stopsJson, { onStopClick }) {
 
     if (s.projected && s.method === 'PROJECTED') {
       L.circleMarker([s.projected[1], s.projected[0]], {
-        radius: 2,
+        radius: 14,
         color: METHOD_COLORS.PROJECTED,
-        weight: 1,
-        fillOpacity: 0,
+        weight: 2,
+        fillOpacity: 0.2,
       }).addTo(layers.routeStops);
+    }
+
+    if (bearingsOn && s.bearing != null) {
+      drawBearing(s.lat, s.lon, s.bearing, layers.routeStops);
     }
   }
 }
@@ -63,7 +73,7 @@ export function fitRoute(pathFc, stopsJson) {
     for (const c of f.geometry?.coordinates ?? []) pts.push([c[1], c[0]]);
   }
   for (const s of stopsJson.stops ?? []) pts.push([s.lat, s.lon]);
-  if (pts.length) layers.routePath._map.fitBounds(L.latLngBounds(pts).pad(0.05));
+  if (pts.length) layers.routePath._map;
 }
 
 /// Ring group-member stations for stop drill-down.
@@ -161,12 +171,55 @@ export function drawStopsLayer(fc, { onStopClick }) {
     const m = isStation
       ? L.circleMarker([lat, lon], { radius: 7, color: '#d19a00', weight: 1.5, fillOpacity: 0.1 })
       : L.circleMarker([lat, lon], { radius: 2.5, color: '#404040', weight: 0.5, fillOpacity: 0.7 });
-    m.bindTooltip(f.properties.name, { direction: 'top' });
-    if (!isStation) m.on('click', () => onStopClick(f.properties.id));
+    const p = f.properties;
+    let tip = p.name;
+    if (p.bearing != null) {
+      tip += ` · bearing ${Math.round(p.bearing)}°`;
+      if (isStation && p.spread != null) tip += ` · spread ${Math.round(p.spread)}°`;
+    }
+    m.bindTooltip(tip, { direction: 'top' });
+    if (!isStation) m.on('click', () => onStopClick(p.id));
     m.addTo(layers.stopsLayer);
+    if (bearingsOn && p.bearing != null) drawBearing(lat, lon, p.bearing, layers.stopsLayer);
   }
 }
 
 export function clearStopsLayer() {
   layers.stopsLayer.clearLayers();
+}
+
+/**
+ * Draw a bearing marker as one rigid dot-and-arrow group.
+ *
+ * The group is anchored at the stop point. In its unrotated state:
+ * - the dot is 5 px to the right
+ * - the arrow is 9 px to the right
+ * - the arrow points north
+ */
+export function drawBearing(lat, lon, deg, layer) {
+  const bearing = ((Number(deg) % 360) + 360) % 360;
+
+  const html = `
+    <div class="bearing" style="transform: rotate(${bearing}deg)">
+      <span class="bdot"></span>
+      <svg
+        class="barrow"
+        viewBox="0 0 10 10"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path d="M5 0.5 L9.5 9 L5 7 L0.5 9 Z"></path>
+      </svg>
+    </div>
+  `;
+
+  return L.marker([lat, lon], {
+    icon: L.divIcon({
+      className: "bearing-wrap",
+      html,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    }),
+    interactive: false,
+    keyboard: false,
+  }).addTo(layer);
 }
