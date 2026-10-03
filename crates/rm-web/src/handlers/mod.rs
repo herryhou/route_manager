@@ -1,6 +1,7 @@
 //! Route table.
 
 pub mod assets;
+pub mod qa;
 pub mod routes;
 pub mod stats;
 pub mod stops;
@@ -28,4 +29,5 @@ pub fn router() -> Router<AppState> {
         .route("/api/routes/{id}/directions/{dir}/stops", get(routes::stops))
         .route("/api/stops/{id}", get(stops::detail))
         .route("/api/stations/{id}", get(stops::station_detail))
+        .route("/api/qa/outliers", get(qa::outliers))
 }

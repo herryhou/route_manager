@@ -203,6 +203,76 @@ async fn route_path_stops_and_drilldown() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
+/// Like `fixture_db`, but route 2 dir 0 gets rm-segments' 3-point reference
+/// path plus an extra stop ~Mm off it, so `rm_segments` records OUTLIER
+/// projections (fixture routePoint for route 1 decodes to a single point,
+/// which yields ENDPOINT, not OUTLIER).
+fn fixture_db_with_outlier() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    rm_ingest::testfix::make_fixture(&dir.path().join("src"));
+    let db = dir.path().join("fixture.db");
+    let mut conn = rm_db::open(&db).unwrap();
+    let s = rm_ingest::run(&conn, &dir.path().join("src")).unwrap();
+    conn.execute(
+        "UPDATE src_route_point SET encoded = ?1
+         WHERE batch_id = ?2 AND xno = '2' AND direction = 0",
+        rusqlite::params![rm_segments::geometry::REF_PATH_ENC, s.batch_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO src_stop_edge
+            (batch_id, xno, direction, source_order_no, ivr_no, sid, node_id, station_name, lat, lon, lat_e6, lon_e6)
+         VALUES (?1, '2', 0, 2, NULL, 99, '99', '遠方站', 24.5, 121.0, 24500000, 121000000)",
+        rusqlite::params![s.batch_id],
+    )
+    .unwrap();
+    rm_identity::run(&conn, s.batch_id).unwrap();
+    rm_publish::run(&mut conn, s.batch_id).unwrap();
+    rm_segments::run(&conn, s.batch_id, 50.0).unwrap();
+    (dir, db)
+}
+
+#[tokio::test]
+async fn qa_outliers_list() {
+    let (_dir, db) = fixture_db_with_outlier();
+    let app = router_with(AppState::new(db));
+
+    let v = get_json(&app, "/api/qa/outliers").await;
+    let outliers = v["outliers"].as_array().unwrap();
+    // far stop (OUTLIER, huge snap) + route 1 dir 1's NO_PATH stop
+    assert!(outliers.len() >= 2, "OUTLIER + NO_PATH rows: {v}");
+    let far = outliers
+        .iter()
+        .find(|o| o["stop_name"] == serde_json::json!("遠方站"))
+        .expect("far stop in outliers");
+    assert_eq!(far["method"], serde_json::json!("OUTLIER"));
+    assert!(far["snap_dist_m"].as_f64().unwrap() > 1000.0, "{far}");
+    assert_eq!(far["route_code"], serde_json::json!("2"));
+    assert_eq!(far["direction"].as_i64().unwrap(), 0);
+    assert!(far["stop_sequence"].as_i64().unwrap() >= 1);
+    assert!(far["lat"].is_f64() && far["lon"].is_f64());
+    // sorted by snap DESC: far stop (km away) first, not the NO_PATH one
+    assert!(
+        outliers[0]["snap_dist_m"].as_f64().unwrap()
+            >= outliers[outliers.len() - 1]["snap_dist_m"]
+                .as_f64()
+                .unwrap(),
+        "snap-desc order: {v}"
+    );
+
+    // min_snap filters by distance but keeps method outliers
+    let v = get_json(&app, "/api/qa/outliers?min_snap=999999").await;
+    let rows = v["outliers"].as_array().unwrap();
+    assert!(
+        rows.iter().all(|o| o["method"] != serde_json::json!("PROJECTED")),
+        "min_snap keeps method outliers, drops plain far stops: {v}"
+    );
+
+    // limit caps rows
+    let v = get_json(&app, "/api/qa/outliers?limit=1").await;
+    assert_eq!(v["outliers"].as_array().unwrap().len(), 1, "{v}");
+}
+
 #[tokio::test]
 async fn unknown_api_path_is_404_json() {
     let res = app()
@@ -216,3 +286,4 @@ async fn unknown_api_path_is_404_json() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+

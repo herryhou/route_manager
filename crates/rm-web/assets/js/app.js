@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel } from './panels.js';
-import { initLayers, drawRoute, fitRoute, highlightGroup } from './layers.js';
+import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, outlierPanel } from './panels.js';
+import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -74,6 +74,22 @@ async function selectStop(stopVersionId) {
   }
 }
 
+async function openOutliers() {
+  try {
+    const v = await api.outliers();
+    outlierPanel(v.outliers ?? [], {
+      onPick: (o) => {
+        flashStop(o.lat, o.lon);
+        map.setView([o.lat, o.lon], Math.max(map.getZoom(), 15));
+      },
+      onOpenRoute: (o) => selectRouteById(o.route_id, o.direction),
+    });
+    location.hash = '#outliers';
+  } catch (e) {
+    status(`outliers load failed: ${e.message}`);
+  }
+}
+
 function parseHash() {
   const h = location.hash.replace(/^#/, '');
   const m = Object.fromEntries(
@@ -88,6 +104,7 @@ function parseHash() {
 async function boot() {
   const search = document.getElementById('route-search');
   search.addEventListener('input', () => refreshList(search.value));
+  document.getElementById('chip-outliers').addEventListener('click', openOutliers);
 
   try {
     const [s, rv] = await Promise.all([api.stats(), api.routes()]);
