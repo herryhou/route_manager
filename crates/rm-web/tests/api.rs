@@ -461,3 +461,55 @@ async fn route_ways_overlay_trims_to_entry_exit() {
     assert_eq!(v["type"], serde_json::json!("FeatureCollection"), "{v}");
 }
 
+
+#[tokio::test]
+async fn raw_staging_compare() {
+    let (_dir, db) = fixture_db_with_segments();
+    let app = router_with(AppState::new(db));
+
+    let v = get_json(&app, "/api/routes").await;
+    let id1 = v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route_code"] == serde_json::json!("1"))
+        .unwrap()["route_id"]
+        .as_i64()
+        .unwrap();
+    let id2 = v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route_code"] == serde_json::json!("2"))
+        .unwrap()["route_id"]
+        .as_i64()
+        .unwrap();
+
+    // route 1 dir 0: road polyline + the two fixture stops
+    let v = get_json(&app, &format!("/api/routes/{id1}/directions/0/raw")).await;
+    assert_eq!(v["batch_id"].as_i64().unwrap(), 1);
+    let coords = v["path"]["geometry"]["coordinates"].as_array().unwrap();
+    assert!(coords.len() >= 2, "{v}");
+    assert!((120.68..120.69).contains(&coords[0][0].as_f64().unwrap()), "{coords:?}");
+    let stops = v["stops"].as_array().unwrap();
+    assert_eq!(stops.len(), 2, "{v}");
+    assert_eq!(stops[0]["node_id"], serde_json::json!("44"));
+    assert_eq!(stops[0]["station_name"], serde_json::json!("干城站"));
+    assert!(stops[0]["lat"].is_f64() && stops[0]["lon"].is_f64());
+    assert_eq!(stops[0]["source_order_no"].as_i64().unwrap(), 1);
+
+    // route 2 dir 0: three rewritten raw stops in order 44 -> 50 -> 46
+    let v = get_json(&app, &format!("/api/routes/{id2}/directions/0/raw")).await;
+    let stops = v["stops"].as_array().unwrap();
+    let nodes: Vec<&str> = stops.iter().map(|s| s["node_id"].as_str().unwrap()).collect();
+    assert_eq!(nodes, vec!["44", "50", "46"], "{v}");
+
+    // route 1 dir 1: this fixture's UPDATE fills both directions, so the
+    // path decodes too; dir 1 staging has the single node-46 stop
+    let v = get_json(&app, &format!("/api/routes/{id1}/directions/1/raw")).await;
+    assert!(v["path"]["geometry"]["coordinates"].as_array().is_some(), "{v}");
+    let stops = v["stops"].as_array().unwrap();
+    assert_eq!(stops.len(), 1, "{v}");
+    assert_eq!(stops[0]["node_id"], serde_json::json!("46"));
+}
+

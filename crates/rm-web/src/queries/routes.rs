@@ -394,3 +394,69 @@ pub fn ways(conn: &Connection, route_id: i64, dir: i64) -> Result<Value> {
     }
     Ok(json!({ "type": "FeatureCollection", "features": features }))
 }
+
+/// `GET /api/routes/{id}/directions/{dir}/raw` — latest-batch staging rows
+/// for compare: src_route_point polyline + ordered src_stop_edge stops.
+pub fn raw(conn: &Connection, route_id: i64, dir: i64) -> Result<Option<Value>> {
+    let xno: Option<String> = match conn.query_row(
+        "SELECT substr(ext_uid, 5) FROM route WHERE route_id = ?1",
+        [route_id],
+        |r| r.get(0),
+    ) {
+        Ok(x) => Some(x),
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let Some(xno) = xno else {
+        return Ok(None);
+    };
+
+    let batch_id: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(batch_id), 0) FROM import_batch",
+        [],
+        |r| r.get(0),
+    )?;
+
+    let encoded: Option<String> = conn.query_row(
+        "SELECT encoded FROM src_route_point
+         WHERE batch_id = ?1 AND xno = ?2 AND direction = ?3",
+        rusqlite::params![batch_id, xno, dir],
+        |r| r.get(0),
+    )?;
+    let path = match encoded {
+        Some(enc) => match polyline::decode(&enc) {
+            Ok(pts) if pts.len() >= 2 => Some(geojson::feature(
+                geojson::line_string(&pts),
+                json!({ "source": "src_route_point" }),
+            )),
+            _ => None,
+        },
+        None => None,
+    };
+
+    let mut stmt = conn.prepare(
+        "SELECT source_order_no, ivr_no, sid, node_id, station_name, lat, lon
+         FROM src_stop_edge
+         WHERE batch_id = ?1 AND xno = ?2 AND direction = ?3
+         ORDER BY source_order_no",
+    )?;
+    let stops: Vec<Value> = stmt
+        .query_map(rusqlite::params![batch_id, xno, dir], |r| {
+            Ok(json!({
+                "source_order_no": r.get::<_, i64>(0)?,
+                "ivr_no": r.get::<_, Option<i64>>(1)?,
+                "sid": r.get::<_, Option<i64>>(2)?,
+                "node_id": r.get::<_, String>(3)?,
+                "station_name": r.get::<_, String>(4)?,
+                "lat": r.get::<_, f64>(5)?,
+                "lon": r.get::<_, f64>(6)?,
+            }))
+        })?
+        .collect::<Result<_, _>>()?;
+
+    Ok(Some(json!({
+        "batch_id": batch_id,
+        "path": path,
+        "stops": stops,
+    })))
+}

@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
 import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, outlierPanel, segmentPanel } from './panels.js';
-import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawWays, clearWays } from './layers.js';
+import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawWays, clearWays, drawRaw, clearRaw } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -53,6 +53,8 @@ async function selectRoute(r, dir = 0) {
     drawRoute(p, s, { onStopClick: (stop) => selectStop(stop.stop_version_id, stop) });
     if (document.getElementById('layer-osm').checked) loadWays(route_id, dir);
     else clearWays();
+    if (document.getElementById('layer-raw').checked) loadRaw(route_id, dir);
+    else clearRaw();
     fitRoute(p, s);
     routeStopsPanel(d, dir, s, {
       onDirection: (nd) => selectRoute(r, nd),
@@ -72,6 +74,16 @@ async function loadWays(routeId, dir) {
     drawWays(fc);
   } catch (e) {
     status(`ways load failed: ${e.message}`);
+  }
+}
+
+async function loadRaw(routeId, dir) {
+  try {
+    const v = await api.routeRaw(routeId, dir);
+    if (selectedRoute?.route_id !== routeId || selectedRoute.dir !== dir) return; // stale
+    drawRaw(v);
+  } catch (e) {
+    status(`raw load failed: ${e.message}`);
   }
 }
 
@@ -158,6 +170,10 @@ async function boot() {
   document.getElementById('layer-osm').addEventListener('change', (e) => {
     if (e.target.checked && selectedRoute) loadWays(selectedRoute.route_id, selectedRoute.dir);
     else clearWays();
+  });
+  document.getElementById('layer-raw').addEventListener('change', (e) => {
+    if (e.target.checked && selectedRoute) loadRaw(selectedRoute.route_id, selectedRoute.dir);
+    else clearRaw();
   });
   map.on('moveend', () => {
     clearTimeout(segmentsTimer);

@@ -123,3 +123,30 @@ export function drawWays(fc) {
 export function clearWays() {
   layers.osm.clearLayers();
 }
+
+/// Raw staging compare: dashed blue src_route_point + square raw stops.
+export function drawRaw(raw) {
+  layers.raw.clearLayers();
+  if (raw?.path?.geometry) {
+    L.geoJSON(raw.path, {
+      style: { color: '#7c3aed', weight: 3, dashArray: '2 7', opacity: 0.8 },
+    })
+      .bindTooltip('src_route_point (raw)')
+      .addTo(layers.raw);
+  }
+  for (const s of raw?.stops ?? []) {
+    L.rectangle(
+      [
+        [s.lat - 0.00012, s.lon - 0.00012],
+        [s.lat + 0.00012, s.lon + 0.00012],
+      ],
+      { color: '#7c3aed', weight: 1.5, fillOpacity: 0.35 }
+    )
+      .bindTooltip(`${s.source_order_no}. ${s.station_name} (node ${s.node_id})`, { direction: 'top' })
+      .addTo(layers.raw);
+  }
+}
+
+export function clearRaw() {
+  layers.raw.clearLayers();
+}

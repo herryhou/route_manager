@@ -59,3 +59,14 @@ pub async fn ways(
     let v = run_db(state, move |conn| crate::queries::routes::ways(conn, route_id, dir)).await?;
     Ok(Json(v))
 }
+
+pub async fn raw(
+    Path((route_id, dir)): Path<(i64, i64)>,
+    State(state): State<AppState>,
+) -> Result<Response, crate::error::ApiError> {
+    let v = run_db(state, move |conn| crate::queries::routes::raw(conn, route_id, dir)).await?;
+    match v {
+        Some(v) => Ok(Json(v).into_response()),
+        None => Ok(crate::error::not_found("route")),
+    }
+}
