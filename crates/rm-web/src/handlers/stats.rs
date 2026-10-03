@@ -2,11 +2,11 @@
 
 use axum::extract::State;
 use axum::Json;
-use serde_json::{json, Value};
+use serde_json::Value;
 
-use crate::state::AppState;
+use crate::state::{AppState, run_db};
 
-/// Scaffold stub — real queries land with the stats task.
-pub async fn stats(State(_state): State<AppState>) -> Json<Value> {
-    Json(json!({}))
+pub async fn stats(State(state): State<AppState>) -> Result<Json<Value>, crate::error::ApiError> {
+    let v = run_db(state, |conn| crate::queries::qa::stats(conn)).await?;
+    Ok(Json(v))
 }
