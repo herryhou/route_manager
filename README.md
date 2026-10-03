@@ -46,6 +46,15 @@ All bins accept `--db` (default `data/taichung.db`) and `--batch`
 (default: latest OPEN batch). `rm-verify` writes `qa/report.json`,
 `qa/segments.geojson`, `qa/outlier_stops.csv`.
 
+To browse the result in a map-centric web UI (read-only, safe alongside the
+pipeline):
+
+```sh
+cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
+```
+
+See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
+
 ## Data model notes
 
 - Station identity = API `node.id` (`station.ext_uid = tcg:node:{id}`);

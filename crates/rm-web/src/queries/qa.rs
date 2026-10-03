@@ -4,6 +4,21 @@ use anyhow::Result;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
+/// Row shape of the scalar-count query in `stats`.
+type CountsRow = (i64, i64, i64, i64, i64, i64, i64, i64);
+
+/// Row shape of the seg_match_stat aggregate in `stats`.
+type MatchAgg = (
+    i64,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+);
+
 /// Overview: counts, match summary, outlier count, latest batch.
 pub fn stats(conn: &Connection) -> Result<Value> {
     let (routes, stops, stations, groups, segments, traversals, osm_ways, drafts) = conn
@@ -17,7 +32,7 @@ pub fn stats(conn: &Connection) -> Result<Value> {
                     (SELECT COUNT(*) FROM osm_way),
                     (SELECT COUNT(*) FROM seg_geometry_draft)",
             [],
-            |r| -> rusqlite::Result<(i64, i64, i64, i64, i64, i64, i64, i64)> {
+            |r| -> rusqlite::Result<CountsRow> {
                 Ok((
                     r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
                     r.get(7)?,
@@ -41,23 +56,13 @@ pub fn stats(conn: &Connection) -> Result<Value> {
         gap_repairs,
         p95_over_100,
         matched_under_half,
-    ): (i64, Option<f64>, Option<f64>, Option<f64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>) =
-        conn.query_row(
+    ): MatchAgg = conn.query_row(
         "SELECT COUNT(*), SUM(matched_length_m), SUM(path_length_m), AVG(snap_dist_p50),
                 SUM(outliers), SUM(gap_repairs),
                 SUM(snap_dist_p95 > 100.0), SUM(matched_length_m < 0.5 * path_length_m)
          FROM seg_match_stat",
         [],
-        |r| -> rusqlite::Result<(
-            i64,
-            Option<f64>,
-            Option<f64>,
-            Option<f64>,
-            Option<i64>,
-            Option<i64>,
-            Option<i64>,
-            Option<i64>,
-        )> {
+        |r| -> rusqlite::Result<MatchAgg> {
             Ok((
                 r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
                 r.get(7)?,

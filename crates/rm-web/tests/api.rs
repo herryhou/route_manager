@@ -513,3 +513,40 @@ async fn raw_staging_compare() {
     assert_eq!(stops[0]["node_id"], serde_json::json!("46"));
 }
 
+
+#[tokio::test]
+async fn stops_viewport_and_search() {
+    let (_dir, db) = fixture_db();
+    let app = router_with(AppState::new(db));
+
+    // bbox over the fixture stops (nodes 44/46 near 24.14, 120.68)
+    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=stop").await;
+    assert_eq!(v["type"], serde_json::json!("FeatureCollection"), "{v}");
+    let feats = v["features"].as_array().unwrap();
+    assert!(!feats.is_empty(), "{v}");
+    for f in feats {
+        assert_eq!(f["geometry"]["type"], serde_json::json!("Point"));
+        let c = f["geometry"]["coordinates"].as_array().unwrap();
+        assert!((120.68..120.69).contains(&c[0].as_f64().unwrap()), "{c:?}");
+        assert!(f["properties"]["name"].is_string());
+    }
+    // kind=station returns station points
+    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=station").await;
+    assert!(!v["features"].as_array().unwrap().is_empty(), "{v}");
+
+    // disjunct bbox → empty
+    let v = get_json(&app, "/api/stops?bbox=121.0,24.0,121.1,24.1&kind=stop").await;
+    assert_eq!(v["features"].as_array().unwrap().len(), 0, "{v}");
+
+    // limit → truncated flag
+    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=stop&limit=1").await;
+    assert_eq!(v["truncated"], serde_json::json!(true), "{v}");
+    assert_eq!(v["features"].as_array().unwrap().len(), 1, "{v}");
+
+    // q search by name
+    let v = get_json(&app, "/api/stops?q=%E5%B9%B2%E5%9F%8E").await; // 干城
+    let results = v["stops"].as_array().unwrap();
+    assert!(!results.is_empty(), "{v}");
+    assert!(results[0]["stop_name"].as_str().unwrap().contains("干城"));
+    assert!(results[0]["stop_version_id"].is_i64());
+}

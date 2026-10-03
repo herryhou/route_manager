@@ -342,7 +342,9 @@ pub fn ways(conn: &Connection, route_id: i64, dir: i64) -> Result<Value> {
          WHERE rv.route_id = ?1 AND mw.direction = ?2
          ORDER BY mw.ordinal",
     )?;
-    let runs: Vec<(i64, i64, i64, i64, f64, f64, Option<String>)> = stmt
+    /// (ordinal, way_id, entry, exit, cum_start, cum_end, name)
+    type WayRun = (i64, i64, i64, i64, f64, f64, Option<String>);
+    let runs: Vec<WayRun> = stmt
         .query_map(rusqlite::params![route_id, dir], |r| {
             Ok((
                 r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,

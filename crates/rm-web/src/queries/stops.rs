@@ -199,3 +199,78 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
         "routes": routes,
     })))
 }
+
+/// `GET /api/stops?bbox=minLon,minLat,maxLon,maxLat&kind=stop|station`
+/// Viewport layer — bbox WHERE over current versions, LIMIT with truncation.
+pub fn viewport(conn: &Connection, bbox: (f64, f64, f64, f64), kind: &str, limit: i64) -> Result<Value> {
+    let (min_lon, min_lat, max_lon, max_lat) = bbox;
+    let (table, id_col, name_col) = if kind == "station" {
+        ("station_version", "station_id", "station_name")
+    } else {
+        ("stop_version", "stop_version_id", "stop_name")
+    };
+    let total: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM {table}
+             WHERE valid_to IS NULL
+               AND longitude BETWEEN ?1 AND ?3
+               AND latitude BETWEEN ?2 AND ?4"
+        ),
+        rusqlite::params![min_lon, min_lat, max_lon, max_lat],
+        |r| r.get(0),
+    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {id_col}, {name_col}, longitude, latitude
+         FROM {table}
+         WHERE valid_to IS NULL
+           AND longitude BETWEEN ?1 AND ?3
+           AND latitude BETWEEN ?2 AND ?4
+         LIMIT ?5"
+    ))?;
+    let features: Vec<Value> = {
+        let it = stmt.query_map(
+            rusqlite::params![min_lon, min_lat, max_lon, max_lat, limit],
+            |r| {
+                Ok(json!({
+                    "type": "Feature",
+                    "geometry": crate::geojson::point(r.get::<_, f64>(2)?, r.get::<_, f64>(3)?),
+                    "properties": {
+                        "id": r.get::<_, i64>(0)?,
+                        "name": r.get::<_, String>(1)?,
+                        "kind": kind,
+                    },
+                }))
+            },
+        )?;
+        it.collect::<Result<_, _>>()?
+    };
+    Ok(json!({
+        "type": "FeatureCollection",
+        "features": features,
+        "truncated": total > limit,
+    }))
+}
+
+/// `GET /api/stops?q=` — name/code prefix or substring search, LIMIT 30.
+pub fn search(conn: &Connection, q: &str) -> Result<Value> {
+    let like = format!("%{q}%");
+    let mut stmt = conn.prepare(
+        "SELECT stop_version_id, stop_code, stop_name, latitude, longitude
+         FROM stop_version
+         WHERE valid_to IS NULL AND (stop_name LIKE ?1 OR stop_code LIKE ?1)
+         ORDER BY stop_code
+         LIMIT 30",
+    )?;
+    let stops: Vec<Value> = stmt
+        .query_map([like], |r| {
+            Ok(json!({
+                "stop_version_id": r.get::<_, i64>(0)?,
+                "stop_code": r.get::<_, String>(1)?,
+                "stop_name": r.get::<_, String>(2)?,
+                "lat": r.get::<_, f64>(3)?,
+                "lon": r.get::<_, f64>(4)?,
+            }))
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(json!({ "stops": stops }))
+}

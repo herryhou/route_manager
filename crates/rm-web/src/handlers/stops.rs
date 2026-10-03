@@ -1,9 +1,8 @@
-//! `GET /api/stops/{id}` and `GET /api/stations/{id}` (bbox/search land later).
+//! Stop handlers: detail, station detail, viewport bbox layer, search.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde_json::Value;
 
 use crate::error::not_found;
 use crate::state::{AppState, run_db};
@@ -34,4 +33,44 @@ pub async fn station_detail(
         Some(v) => Ok(Json(v).into_response()),
         None => Ok(not_found("station")),
     }
+}
+
+pub async fn viewport(
+    State(state): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<axum::response::Response, crate::error::ApiError> {
+    // /api/stops?q= searches; /api/stops?bbox= is the viewport layer
+    if let Some(q) = params.get("q") {
+        let q = q.clone();
+        let v = run_db(state, move |conn| crate::queries::stops::search(conn, &q)).await?;
+        return Ok(Json(v).into_response());
+    }
+    let bbox_raw = params.get("bbox").map(|s| s.as_str());
+    let Some(bbox_raw) = bbox_raw else {
+        return Err(crate::error::ApiError::bad_request("bbox required: minLon,minLat,maxLon,maxLat"));
+    };
+    let mut it = bbox_raw.split(',');
+    let bbox = (
+        it.next().and_then(|v| v.parse().ok()),
+        it.next().and_then(|v| v.parse().ok()),
+        it.next().and_then(|v| v.parse().ok()),
+        it.next().and_then(|v| v.parse().ok()),
+    );
+    let (Some(a), Some(b), Some(c), Some(d)) = bbox else {
+        return Err(crate::error::ApiError::bad_request("bbox must be 4 numbers"));
+    };
+    let kind = params.get("kind").cloned().unwrap_or_else(|| "stop".into());
+    if kind != "stop" && kind != "station" {
+        return Err(crate::error::ApiError::bad_request("kind must be stop|station"));
+    }
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(2500)
+        .clamp(1, 5000);
+    let v = run_db(state, move |conn| {
+        crate::queries::stops::viewport(conn, (a, b, c, d), &kind, limit)
+    })
+    .await?;
+    Ok(Json(v).into_response())
 }

@@ -24,6 +24,6 @@ export const segmentsBbox = (bbox, minRoutes = 0) =>
   fetchJson(`/api/segments?bbox=${bbox}&min_routes=${minRoutes}`);
 export const segmentDetail = (id) => fetchJson(`/api/segments/${id}`);
 export const stopsBbox = (bbox, kind) =>
-  fetchJson(`/api/stops?bbox=${bbox.join(',')}&kind=${kind}`);
+  fetchJson(`/api/stops?bbox=${bbox}&kind=${kind}`);
 export const stopsSearch = (q) => fetchJson(`/api/stops?q=${encodeURIComponent(q)}`);
 export const outliers = (minSnap = 50) => fetchJson(`/api/qa/outliers?min_snap=${minSnap}`);

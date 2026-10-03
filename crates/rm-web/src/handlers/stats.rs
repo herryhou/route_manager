@@ -7,6 +7,6 @@ use serde_json::Value;
 use crate::state::{AppState, run_db};
 
 pub async fn stats(State(state): State<AppState>) -> Result<Json<Value>, crate::error::ApiError> {
-    let v = run_db(state, |conn| crate::queries::qa::stats(conn)).await?;
+    let v = run_db(state, crate::queries::qa::stats).await?;
     Ok(Json(v))
 }

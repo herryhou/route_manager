@@ -8,6 +8,7 @@ export function initLayers(map) {
   layers.routeStops = L.layerGroup().addTo(map);
   layers.highlight = L.layerGroup().addTo(map);
   layers.segments = L.layerGroup().addTo(map);
+  layers.stopsLayer = L.layerGroup().addTo(map);
   layers.osm = L.layerGroup().addTo(map);
   layers.raw = L.layerGroup().addTo(map);
 }
@@ -149,4 +150,23 @@ export function drawRaw(raw) {
 
 export function clearRaw() {
   layers.raw.clearLayers();
+}
+
+/// Viewport stops/stations: small dots + rings, zoom-gated by app.js.
+export function drawStopsLayer(fc, { onStopClick }) {
+  layers.stopsLayer.clearLayers();
+  for (const f of fc.features ?? []) {
+    const [lon, lat] = f.geometry.coordinates;
+    const isStation = f.properties.kind === 'station';
+    const m = isStation
+      ? L.circleMarker([lat, lon], { radius: 7, color: '#d19a00', weight: 1.5, fillOpacity: 0.1 })
+      : L.circleMarker([lat, lon], { radius: 2.5, color: '#404040', weight: 0.5, fillOpacity: 0.7 });
+    m.bindTooltip(f.properties.name, { direction: 'top' });
+    if (!isStation) m.on('click', () => onStopClick(f.properties.id));
+    m.addTo(layers.stopsLayer);
+  }
+}
+
+export function clearStopsLayer() {
+  layers.stopsLayer.clearLayers();
 }

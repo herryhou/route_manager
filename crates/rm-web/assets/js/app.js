@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
 import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, outlierPanel, segmentPanel } from './panels.js';
-import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawWays, clearWays, drawRaw, clearRaw } from './layers.js';
+import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawWays, clearWays, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -115,6 +115,30 @@ async function openOutliers() {
 }
 
 /// Viewport segments layer: checkbox + zoom ≥13 gated, debounced on moveend.
+/// Viewport stops/stations layer: checkbox + zoom gated
+/// (<12 off, 12–14 stations, ≥15 stops), debounced on moveend.
+let stopsTimer = null;
+async function refreshStopsLayer() {
+  if (!document.getElementById('layer-stops').checked) return;
+  const z = map.getZoom();
+  if (z < 12) {
+    clearStopsLayer();
+    return;
+  }
+  const kind = z >= 15 ? 'stop' : 'station';
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
+    .map((x) => x.toFixed(4))
+    .join(',');
+  try {
+    const v = await api.stopsBbox(bbox, kind);
+    drawStopsLayer(v, { onStopClick: (svid) => selectStop(svid) });
+    if (v.truncated) status(`${kind} layer truncated — zoom in`);
+  } catch (e) {
+    status(`stops layer load failed: ${e.message}`);
+  }
+}
+
 let segmentsTimer = null;
 async function refreshSegments() {
   if (!document.getElementById('layer-segments').checked) return;
@@ -175,9 +199,16 @@ async function boot() {
     if (e.target.checked && selectedRoute) loadRaw(selectedRoute.route_id, selectedRoute.dir);
     else clearRaw();
   });
+  const stopsToggle = document.getElementById('layer-stops');
+  stopsToggle.addEventListener('change', () => {
+    if (stopsToggle.checked) refreshStopsLayer();
+    else clearStopsLayer();
+  });
   map.on('moveend', () => {
     clearTimeout(segmentsTimer);
+    clearTimeout(stopsTimer);
     segmentsTimer = setTimeout(refreshSegments, 250);
+    stopsTimer = setTimeout(refreshStopsLayer, 250);
   });
 
   try {

@@ -52,6 +52,7 @@ route_id
 route_version_id
 
 subroute_id
+subroute_version_id
 
 stop_id
 stop_version_id
