@@ -1,0 +1,77 @@
+# rm-db
+
+The database layer the rest of the pipeline stands on: owns the schema,
+the id allocator, and the import-batch bookkeeping for the one SQLite
+file every stage shares. Runs no pipeline step itself — each stage
+binary and `rm-web` open the DB through it.
+
+## What it exports
+
+| Function | Role |
+|---|---|
+| `open` | open (create if needed) the pipeline DB: pragmas + migrations applied |
+| `open_readonly` | viewer mode — no pragmas that write, never migrates |
+| `open_in_memory` | same pragmas + migrations; the test fixture across the workspace |
+| `migrate` | apply pending migrations (see below) |
+| `mint` | next id in a table's id space |
+| `create_batch` / `set_batch_status` / `latest_open_batch` | import-batch lifecycle |
+| `now_rfc3339` | RFC3339 UTC string for `created_at` / `valid_from` columns |
+
+Write convention (crate doc): published-table writes are INSERT-only;
+UPDATE is reserved for pointers/revision inside a publish transaction.
+
+## Migrations
+
+Five SQL files under `migrations/`, embedded into the binary with
+`include_str!` — no external migration tool, no migration command to
+forget. `migrate` creates `schema_migrations` if missing, applies each
+unrecorded file in order as one batch, and records version, name, and
+`applied_at`. Recorded versions are skipped, so calling it repeatedly
+is safe — and since it runs inside every `open` / `open_in_memory`,
+any binary opening the DB brings the schema along. `open_readonly`
+deliberately never migrates.
+
+| Migration | Creates |
+|---|---|
+| `0001_init` | the versioned model per `docs/DB_Schema_Spec.md`: identity tables (`route`, `subroute`, `stop`, `station`, `station_group`), their `*_version` tables, `stop_of_route_version`, empty-by-design trip/report/outbox tables, indexes — plus pipeline tables: `id_sequence`, `import_batch`, `src_file` audit, batch-scoped `src_*` staging (no FKs by design), `route_link`, `route_provider` |
+| `0002_identity` | `ext_uid` + unique index on `stop` and `station_group`; group-provenance `source` column on `station_group_version` |
+| `0003_segment` | `path_stop_projection`, `seg_geometry_draft`, `seg_match_way`, `seg_match_stat`, and the registry: `seg_segment` / `seg_segment_way` / `seg_traversal` |
+| `0004_osm` | road graph from the PBF extract: `osm_meta`, `osm_way`, `osm_way_node`, `osm_node` |
+| `0005_bearing` | `stop_bearing`, `station_bearing` — derived data rebuilt per run, never stored inside the immutable `*_version` tables |
+
+Connections from `open` set `foreign_keys = ON`, WAL,
+`synchronous = NORMAL`, and a 30 s busy timeout (WAL is a no-op on
+`:memory:`).
+
+## ID minting
+
+`mint(conn, table)` is how published rows get ids: one id space per
+table name, seeded at 1 on first use. It is a single
+`UPDATE id_sequence ... RETURNING`, so it must run inside the caller's
+transaction — the row lock serializes concurrent minters; a missing
+row is seeded with `INSERT OR IGNORE` and the update retried. Ids are
+never reused (schema-spec invariant I02: stop/station/group ids).
+`rm-identity` mints route, subroute, station, station-group, and
+version ids this way; `rm-publish` mints `route_version`,
+`subroute_version`, `stop_of_route_version`, and `outbox_event`.
+
+## Import batches
+
+`create_batch` registers a row in `import_batch` (status `OPEN`, its id
+minted like any other) carrying `source_dir`, `file_count`,
+`captured_at`, and `valid_from` — the validity start later stamped onto
+the versions the batch produces. `rm-ingest` reuses an OPEN batch for
+the same `source_dir`, writes the per-file sha256 audit into `src_file`,
+and marks the batch `FAILED` on error. `set_batch_status` only moves
+the flag. `latest_open_batch` answers "most recent OPEN batch", which
+is the default `--batch` target for every stage binary.
+
+## Why this crate exists
+
+The schema is the contract between stages: `rm-ingest` writes staging
+tables `rm-identity` reads, `rm-registry` writes `seg_*` tables
+`rm-web` renders. Keeping migrations, id allocation, and batch state in
+one crate means every binary carries the same schema, ids stay unique
+and never reused across stages, and every tool agrees on "which batch
+are we working on" — while `rm-web` opens the same file read-only
+(a WAL reader beside the pipeline writer) and never mutates a thing.
