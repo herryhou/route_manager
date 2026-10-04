@@ -253,8 +253,9 @@ pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> 
 }
 
 impl Summary {
-    /// Project `group` onto `path`, apply outlier classification and
-    /// monotonic clamping.
+    /// Project `group` onto `path` with sequence-aware candidate selection
+    /// (loop-closure poles pick the side their stop order implies), then
+    /// apply outlier classification and monotonic clamping.
     fn projection_group<'a>(
         &mut self,
         path: &[LatLng],
@@ -262,19 +263,21 @@ impl Summary {
         outlier_m: f64,
     ) -> Vec<(Projection, &'a str, bool)> {
         let cum = geometry::cumulative_m(path);
-        let mut raw: Vec<Projection> = group
+        let cands: Vec<Vec<Projection>> = group
             .iter()
             .map(|s| {
-                geometry::project_point(
+                geometry::project_candidates(
                     path,
                     &cum,
                     &LatLng {
                         lat: s.lat,
                         lon: s.lon,
                     },
+                    geometry::CAND_SLACK_M,
                 )
             })
             .collect();
+        let mut raw = geometry::select_sequence(&cands);
         let (clamped, flags) =
             geometry::clamp_monotonic(&raw.iter().map(|p| p.chainage_m).collect::<Vec<_>>());
         for (p, c) in raw.iter_mut().zip(clamped) {

@@ -73,6 +73,123 @@ pub fn clamp_monotonic(chainages: &[f64]) -> (Vec<f64>, Vec<bool>) {
     (out, flags)
 }
 
+/// Extra snap distance tolerated beyond the best when gathering side
+/// alternatives for sequence-aware selection: a loop-closure pole sits
+/// within a few metres of both the first and last path leg, and the two
+/// candidate snaps can differ by ~10 m.
+pub const CAND_SLACK_M: f64 = 30.0;
+
+/// Snap distance weight in sequence selection. A candidate a few metres
+/// nearer the pole must not outvote a candidate hundreds of metres closer
+/// in chainage order, but a genuinely nearer pole (real parallel corridor)
+/// must: 10x balances the two.
+pub const SNAP_WEIGHT: f64 = 10.0;
+
+/// All side-alternative projections of `p` onto the path: every contiguous
+/// run of path segments whose snap distance is within `slack_m` of the best
+/// contributes its closest member. One entry per run, sorted by chainage —
+/// a pole straddling a loop closure yields the start-side and end-side
+/// candidate; a pole on a plain linear path yields exactly one.
+pub fn project_candidates(
+    path: &[LatLng],
+    cum: &[f64],
+    p: &LatLng,
+    slack_m: f64,
+) -> Vec<Projection> {
+    let n = path.len().saturating_sub(1);
+    if n == 0 {
+        return vec![Projection {
+            chainage_m: 0.0,
+            snap_dist_m: 0.0,
+            projected: *p,
+        }];
+    }
+    let mut dists = vec![0.0f64; n];
+    let mut projs = Vec::with_capacity(n);
+    for i in 0..n {
+        let (proj, dist) = rm_core::geo::point_to_segment_m(*p, path[i], path[i + 1]);
+        dists[i] = dist;
+        projs.push(Projection {
+            chainage_m: cum[i] + rm_core::geo::haversine_m(path[i], proj),
+            snap_dist_m: dist,
+            projected: proj,
+        });
+    }
+    let best = dists.iter().copied().fold(f64::INFINITY, f64::min);
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        if dists[i] > best + slack_m {
+            i += 1;
+            continue;
+        }
+        // contiguous run of near-best segments: keep its closest member
+        let mut j = i + 1;
+        let mut k = i;
+        while j < n && dists[j] <= best + slack_m {
+            if dists[j] < dists[k] {
+                k = j;
+            }
+            j += 1;
+        }
+        out.push(projs[k]);
+        i = j;
+    }
+    out.sort_by(|a, b| a.chainage_m.total_cmp(&b.chainage_m));
+    out
+}
+
+/// Pick one projection per stop (candidates from [`project_candidates`])
+/// minimizing `Σ SNAP_WEIGHT·snap + |Δchainage|` between consecutive stops
+/// — a Viterbi pass over per-stop alternatives. This is what keeps
+/// loop-closure poles on the side their stop order implies:
+/// nearest-segment alone snaps stop 1 of a circular route onto the last leg
+/// of the path, and the monotonic clamp then pins every following stop to
+/// that chainage (the 661 collapse).
+pub fn select_sequence(cands: &[Vec<Projection>]) -> Vec<Projection> {
+    let n = cands.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut cost: Vec<f64> = cands[0]
+        .iter()
+        .map(|c| SNAP_WEIGHT * c.snap_dist_m)
+        .collect();
+    let mut links: Vec<Vec<usize>> = Vec::with_capacity(n - 1);
+    for i in 1..n {
+        let (prev, cur) = (&cands[i - 1], &cands[i]);
+        let mut next = vec![f64::INFINITY; cur.len()];
+        let mut link = vec![0usize; cur.len()];
+        for (k, ck) in cur.iter().enumerate() {
+            for (j, (pj, pc)) in prev.iter().zip(cost.iter()).enumerate() {
+                let c = pc + (ck.chainage_m - pj.chainage_m).abs();
+                if c < next[k] {
+                    next[k] = c;
+                    link[k] = j;
+                }
+            }
+        }
+        for (k, ck) in cur.iter().enumerate() {
+            next[k] += SNAP_WEIGHT * ck.snap_dist_m;
+        }
+        links.push(link);
+        cost = next;
+    }
+    let mut k = cost
+        .iter()
+        .enumerate()
+        .min_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let mut out = vec![cands[n - 1][k]];
+    for i in (1..n).rev() {
+        k = links[i - 1][k];
+        out.push(cands[i - 1][k]);
+    }
+    out.reverse();
+    out
+}
+
 /// Interpolate the path point at chainage `x` (clamped to [0, total]).
 fn point_at(path: &[LatLng], cum: &[f64], x: f64) -> LatLng {
     let last = path.len() - 1;
@@ -206,5 +323,74 @@ mod tests {
         let (sub, len) = cut_subpath(&p, &cum, cum[1], cum[1]);
         assert_eq!(sub.len(), 2);
         assert!(len.abs() < 1e-9);
+    }
+
+    fn proj(chainage_m: f64, snap_dist_m: f64) -> Projection {
+        Projection {
+            chainage_m,
+            snap_dist_m,
+            projected: LatLng::new(0.0, 0.0),
+        }
+    }
+
+    #[test]
+    fn loop_closure_picks_sequence_consistent_side() {
+        // near-square loop starting and ending at the same corner (closure
+        // gap ~10 m). The first stop's pole sits nearer the END side, so
+        // nearest-segment alone snaps it to the final leg — the 661-style
+        // collapse. Stop order must keep it at chainage ~0 and put the
+        // revisit (stop 4, same pole) on the end side instead.
+        let path = vec![
+            LatLng::new(24.1400, 120.6857),  // A start
+            LatLng::new(24.1400, 120.6867),  // B east
+            LatLng::new(24.1410, 120.6867),  // C north
+            LatLng::new(24.1410, 120.6857),  // D west
+            LatLng::new(24.14009, 120.68571), // A' near closure
+        ];
+        let cum = cumulative_m(&path);
+        let total = *cum.last().unwrap();
+        // ~3.4 m from A' vs ~6.8 m from A: end side is the plain nearest
+        let start_pole = LatLng::new(24.14006, 120.685715);
+        let stops = [
+            start_pole,
+            LatLng::new(24.1400, 120.6862),   // mid A-B
+            LatLng::new(24.1405, 120.6867),   // mid B-C
+            start_pole,                        // revisit at closure
+            path[4],                           // A' itself
+        ];
+        let cands: Vec<Vec<Projection>> = stops
+            .iter()
+            .map(|s| project_candidates(&path, &cum, s, CAND_SLACK_M))
+            .collect();
+        let sel = select_sequence(&cands);
+        assert!(
+            sel[0].chainage_m < 30.0,
+            "first stop must stay start side, got {}",
+            sel[0].chainage_m
+        );
+        assert!(
+            sel[3].chainage_m > total - 30.0,
+            "revisit must land end side, got {} of {total}",
+            sel[3].chainage_m
+        );
+        assert!(sel[1].chainage_m > sel[0].chainage_m);
+        assert!(sel[2].chainage_m > sel[1].chainage_m);
+        assert!(sel[4].chainage_m >= sel[3].chainage_m - 1e-6);
+    }
+
+    #[test]
+    fn sequence_selection_penalizes_distant_snap() {
+        // candidate 25 m off the pole but zero chainage jump must lose to
+        // the 2 m snap 200 m ahead: snap term outweighs the jump
+        let cands = vec![vec![proj(100.0, 2.0)], vec![proj(100.0, 25.0), proj(300.0, 2.0)]];
+        let sel = select_sequence(&cands);
+        assert!((sel[1].chainage_m - 300.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn single_candidate_per_stop_passes_through() {
+        let cands = vec![vec![proj(0.0, 1.0)], vec![proj(100.0, 2.0)], vec![proj(250.0, 1.5)]];
+        let sel = select_sequence(&cands);
+        assert_eq!(sel.iter().map(|p| p.chainage_m as i64).collect::<Vec<_>>(), vec![0, 100, 250]);
     }
 }
