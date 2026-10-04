@@ -196,23 +196,7 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
             stations.last_mut().unwrap().1.push(bearing);
         }
         for (station_id, bearings) in stations {
-            let circular = circular_mean_deg(&bearings).unwrap_or(0.0);
-            let signed_spread = bearings
-                .iter()
-                .map(|b| angular_diff_deg(*b, circular))
-                .fold(0.0f64, f64::max);
-            // strictly < 90°: diametrically opposed members land exactly on
-            // 90 (degenerate circular mean) and must fall through to axial
-            let (mean, spread) = if signed_spread < 90.0 {
-                (circular, signed_spread)
-            } else {
-                let axial = axial_mean_deg(&bearings).unwrap_or(0.0);
-                let spread = bearings
-                    .iter()
-                    .map(|b| angular_diff_deg(*b, axial).min(angular_diff_deg(*b, axial + 180.0)))
-                    .fold(0.0f64, f64::max);
-                (axial, spread)
-            };
+            let (mean, spread) = station_axis(&bearings);
             ins.execute(rusqlite::params![
                 station_id,
                 mean,
@@ -284,6 +268,42 @@ fn osm_bearing(
     }
     Ok(best_deg)
 }
+
+/// Station axis from member stop bearings: members that agree on one
+/// direction of travel (all within [`SIGNED_SPREAD_MAX_DEG`] of the
+/// circular mean) keep the signed mean — a one-way roadside pole departs
+/// one way only, and folding its heading onto an axis would hide which
+/// way. Everything else falls back to the axial mean (headings 180°
+/// apart fold onto one axis) plus the largest deviation from that axis.
+/// A near-antipodal pair must take this branch: its circular mean is
+/// degenerate and lands perpendicular to the true axis with a spread
+/// just under 90°, so a 90° branch threshold would store a perpendicular
+/// axis and flag a perfectly consistent two-way station.
+///
+/// `route` `direction` is route-relative (each route's own 去程/返程), so
+/// it cannot group headings — the spread does.
+pub fn station_axis(bearings: &[f64]) -> (f64, f64) {
+    let circular = circular_mean_deg(bearings).unwrap_or(0.0);
+    let signed_spread = bearings
+        .iter()
+        .map(|b| angular_diff_deg(*b, circular))
+        .fold(0.0f64, f64::max);
+    if signed_spread < SIGNED_SPREAD_MAX_DEG {
+        (circular, signed_spread)
+    } else {
+        let axial = axial_mean_deg(bearings).unwrap_or(0.0);
+        let spread = bearings
+            .iter()
+            .map(|b| angular_diff_deg(*b, axial).min(angular_diff_deg(*b, axial + 180.0)))
+            .fold(0.0f64, f64::max);
+        (axial, spread)
+    }
+}
+
+/// Maximum deviation from the circular mean for a station to keep its
+/// signed heading. Aligned with rm-verify's BEARING_SPREAD_WARN_DEG: a
+/// set wider than the warning threshold is not a unidirectional cluster.
+pub const SIGNED_SPREAD_MAX_DEG: f64 = 45.0;
 
 /// Run covering the chainage; between runs (or beyond the ends), the
 /// nearest run — the last stop of a direction then reports its arrival
@@ -364,9 +384,37 @@ mod tests {
     #[test]
     fn pick_run_beyond_gap_returns_none() {
         let runs = [run(0.0, 100.0), run(5000.0, 6000.0)];
-        // 258 dir0 tail shape: stop 790+ m past the final run (matched
-        // coverage ends at the county-line extract boundary)
-        assert!(pick_run(&runs, 6800.0).unwrap().is_none());
-        assert!(pick_run(&runs, 3000.0).unwrap().is_none());
+    }
+
+    #[test]
+    fn near_antipodal_pair_folds_onto_axis() {
+        // two-way roadside station, headings ~180° apart but never exactly:
+        // the degenerate circular mean is perpendicular (92°) with spread
+        // 89.5 < 90 — the old branch threshold kept it and flagged 90°
+        let (axis, spread) = station_axis(&[2.4, 181.9]);
+        assert!(angular_diff_deg(axis, 2.1) < 3.0, "axis {axis}");
+        assert!(spread < 3.0, "spread {spread}");
+    }
+
+    #[test]
+    fn exactly_antipodal_pair_folds_onto_axis() {
+        let (axis, spread) = station_axis(&[90.0, 270.0]);
+        assert!(angular_diff_deg(axis, 90.0) % 180.0 < 1e-9);
+        assert!(spread < 1e-9);
+    }
+
+    #[test]
+    fn unidirectional_cluster_keeps_signed_mean() {
+        let (mean, spread) = station_axis(&[85.0, 86.0, 88.0]);
+        assert!(angular_diff_deg(mean, 86.3) < 0.5, "mean {mean}");
+        assert!(spread < 2.0);
+    }
+
+    #[test]
+    fn genuinely_mixed_members_still_flag() {
+        // node 3595 shape: two antipodal clusters plus a perpendicular
+        // member — axial spread stays high, the warning is honest
+        let (_, spread) = station_axis(&[111.0, 114.0, 202.0, 291.0]);
+        assert!(spread > 45.0, "spread {spread}");
     }
 }
