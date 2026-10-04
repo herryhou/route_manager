@@ -72,8 +72,8 @@ CREATE TABLE subroute_version (
 
 -- Cyclic routes may visit a stop twice (spec §9): deliberately NO
 -- UNIQUE(subroute_version_id, direction, stop_version_id).
-CREATE TABLE stop_of_route_version (
-    stop_of_route_version_id  INTEGER PRIMARY KEY,
+CREATE TABLE route_stop_version (
+    route_stop_version_id  INTEGER PRIMARY KEY,
     subroute_version_id       INTEGER NOT NULL,
     stop_version_id           INTEGER NOT NULL,
     direction                 INTEGER NOT NULL,   -- 0=去程 1=返程
@@ -186,8 +186,8 @@ CREATE TABLE outbox_event (
 
 CREATE INDEX idx_route_version_route_valid ON route_version(route_id, valid_from);
 CREATE INDEX idx_subroute_version_rv ON subroute_version(route_version_id);
-CREATE INDEX idx_sorv_seq ON stop_of_route_version(subroute_version_id, direction, stop_sequence);
-CREATE INDEX idx_sorv_stop ON stop_of_route_version(subroute_version_id, stop_version_id);
+CREATE INDEX idx_rsv_seq ON route_stop_version(subroute_version_id, direction, stop_sequence);
+CREATE INDEX idx_rsv_stop ON route_stop_version(subroute_version_id, stop_version_id);
 CREATE INDEX idx_stop_version_valid ON stop_version(stop_id, valid_from);
 CREATE INDEX idx_station_version_valid ON station_version(station_id, valid_from);
 CREATE INDEX idx_sgv_valid ON station_group_version(station_group_id, valid_from);

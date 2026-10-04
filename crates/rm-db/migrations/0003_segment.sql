@@ -3,7 +3,7 @@
 
 -- stop -> path projection (chainage along the direction's decoded polyline)
 CREATE TABLE path_stop_projection (
-    stop_of_route_version_id  INTEGER PRIMARY KEY,
+    route_stop_version_id  INTEGER PRIMARY KEY,
     route_version_id          INTEGER NOT NULL,
     direction                 INTEGER NOT NULL,
     stop_sequence             INTEGER NOT NULL,
@@ -13,8 +13,8 @@ CREATE TABLE path_stop_projection (
     monotonic_clamped         INTEGER NOT NULL DEFAULT 0,
     projected_lat             REAL NOT NULL,
     projected_lon             REAL NOT NULL,
-    FOREIGN KEY (stop_of_route_version_id)
-        REFERENCES stop_of_route_version(stop_of_route_version_id),
+    FOREIGN KEY (route_stop_version_id)
+        REFERENCES route_stop_version(route_stop_version_id),
     FOREIGN KEY (route_version_id)
         REFERENCES route_version(route_version_id)
 );
@@ -25,16 +25,16 @@ CREATE TABLE seg_geometry_draft (
     subroute_version_id            INTEGER NOT NULL,
     direction                      INTEGER NOT NULL,
     ordinal                        INTEGER NOT NULL,  -- 1..N-1
-    from_stop_of_route_version_id  INTEGER NOT NULL,
-    to_stop_of_route_version_id    INTEGER NOT NULL,
+    from_route_stop_version_id  INTEGER NOT NULL,
+    to_route_stop_version_id    INTEGER NOT NULL,
     encoded_polyline               TEXT NOT NULL,
     length_m                       REAL NOT NULL,
     geometry_method                TEXT NOT NULL,     -- path|no_path
     PRIMARY KEY (subroute_version_id, direction, ordinal),
-    FOREIGN KEY (from_stop_of_route_version_id)
-        REFERENCES stop_of_route_version(stop_of_route_version_id),
-    FOREIGN KEY (to_stop_of_route_version_id)
-        REFERENCES stop_of_route_version(stop_of_route_version_id)
+    FOREIGN KEY (from_route_stop_version_id)
+        REFERENCES route_stop_version(route_stop_version_id),
+    FOREIGN KEY (to_route_stop_version_id)
+        REFERENCES route_stop_version(route_stop_version_id)
 );
 
 -- rm-osm-match: way runs along a direction path
@@ -91,10 +91,10 @@ CREATE TABLE seg_traversal (
     route_version_id              INTEGER NOT NULL,
     subroute_version_id           INTEGER NOT NULL,
     direction                     INTEGER NOT NULL,
-    from_stop_of_route_version_id INTEGER NOT NULL,
-    to_stop_of_route_version_id   INTEGER NOT NULL,
+    from_route_stop_version_id INTEGER NOT NULL,
+    to_route_stop_version_id   INTEGER NOT NULL,
     segment_id                    TEXT NOT NULL,
-    PRIMARY KEY (from_stop_of_route_version_id, to_stop_of_route_version_id),
+    PRIMARY KEY (from_route_stop_version_id, to_route_stop_version_id),
     FOREIGN KEY (segment_id) REFERENCES seg_segment(segment_id),
     FOREIGN KEY (route_version_id) REFERENCES route_version(route_version_id),
     FOREIGN KEY (subroute_version_id) REFERENCES subroute_version(subroute_version_id)
