@@ -137,6 +137,50 @@ fn ingests_fixture_counts_and_direction_mapping() {
 }
 
 #[test]
+fn station_name_trimmed_into_staging() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    make_fixture(&src);
+    // the provider occasionally emits surrounding whitespace on station
+    // names; grouping compares names exactly, so trim at the staging door
+    write(
+        &src,
+        "raw/route_1.json",
+        r#"{"data":{"route":{
+            "stations":{"edges":[
+                {"goBack":1,"orderNo":1,"ivrNo":101,"sid":11,"node":{"id":"44","name":" 干城站 ","lat":24.1409,"lon":120.6857}},
+                {"goBack":1,"orderNo":2,"ivrNo":102,"sid":12,"node":{"id":"46","name":"干城站","lat":24.1408,"lon":120.6859}},
+                {"goBack":2,"orderNo":1,"ivrNo":201,"sid":13,"node":{"id":"46","name":"干城站","lat":24.1408,"lon":120.6859}}
+            ]},
+            "routePoint":{"go":"_p~iF~ps|U","back":null},
+            "providers":{"edges":[]}
+        }}}"#,
+    );
+    let conn = open_in_memory().unwrap();
+    run(&conn, &src).unwrap();
+
+    let names: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT station_name FROM src_stop_edge
+                 WHERE batch_id = (SELECT MAX(batch_id) FROM import_batch)
+                   AND xno = '1'
+                 ORDER BY sid",
+            )
+            .unwrap();
+        let it = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap();
+        it.collect::<Result<_, _>>().unwrap()
+    };
+    assert_eq!(names.len(), 3);
+    assert!(
+        names.iter().all(|n| n == "干城站"),
+        "names must land trimmed: {names:?}"
+    );
+}
+
+#[test]
 fn rerun_same_source_is_idempotent_same_batch() {
     let dir = tempfile::tempdir().unwrap();
     make_fixture(&dir.path().join("src"));

@@ -334,7 +334,9 @@ pub fn parse_dir(source: &Path) -> Result<Parsed> {
                     ivr_no: e.ivr_no,
                     sid: e.sid,
                     node_id: e.node.id,
-                    name: e.node.name,
+                    // station names arrive with occasional surrounding
+                    // whitespace; grouping compares names exactly
+                    name: e.node.name.trim().to_string(),
                     lat: e.node.lat,
                     lon: e.node.lon,
                 })

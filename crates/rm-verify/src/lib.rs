@@ -29,7 +29,7 @@ impl Expectations {
         stop_rows: Some(37_294),
         sids: Some(14_045),
         stops: Some(37_292),
-        groups: Some(4_047),
+        groups: Some(4_046), // 4047 pre-ingest-trim: whitespace variants merged
         providers: Some(39),
         cycled: Some(44),
         single_dir: Some(23),
