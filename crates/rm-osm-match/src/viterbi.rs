@@ -54,6 +54,13 @@ type AstarPath = Option<(f64, Vec<(u32, bool)>)>;
 struct Ctx<'a> {
     g: &'a RoadGraph,
     astar_cache: HashMap<(u32, u32), AstarPath>,
+    /// A* scratch, generation-stamped so per-call setup is O(1) instead of
+    /// O(nodes): a slot holds this call's value iff its stamp == epoch.
+    epoch: u32,
+    stamp: Vec<u32>,
+    dist: Vec<f64>,
+    came: Vec<(u32, u32, bool)>, // node -> (prev, seg, forward)
+    popped: Vec<u32>,            // epoch of last expansion
 }
 
 fn entry_of(g: &RoadGraph, s: &State) -> u32 {
@@ -150,13 +157,14 @@ fn astar(ctx: &mut Ctx, start: u32, goal: u32) -> Option<(f64, Vec<(u32, bool)>)
         return v.clone();
     }
     let g = ctx.g;
+    ctx.epoch += 1;
+    let epoch = ctx.epoch;
     let goal_pos = g.node_pos(goal);
-    let mut dist: HashMap<u32, f64> = HashMap::new();
-    let mut came: HashMap<u32, (u32, u32, bool)> = HashMap::new(); // node -> (prev, seg, forward)
-                                                                   // f64 is not Ord; distances are non-negative so bit patterns order correctly
+    // f64 is not Ord; distances are non-negative so bit patterns order correctly
     let mut heap: std::collections::BinaryHeap<Reverse<(u64, u32)>> =
         std::collections::BinaryHeap::new();
-    dist.insert(start, 0.0);
+    ctx.stamp[start as usize] = epoch;
+    ctx.dist[start as usize] = 0.0;
     heap.push(Reverse((0.0f64.to_bits(), start)));
     let mut expansions = 0;
     let mut found = false;
@@ -169,14 +177,24 @@ fn astar(ctx: &mut Ctx, start: u32, goal: u32) -> Option<(f64, Vec<(u32, bool)>)
         if expansions > ASTAR_EXPANSION_CAP {
             break;
         }
-        let du = *dist.get(&u)?;
+        if ctx.popped[u as usize] == epoch {
+            continue; // stale heap entry: already expanded this call
+        }
+        ctx.popped[u as usize] = epoch;
+        let du = ctx.dist[u as usize];
         for &(v, seg_idx) in &g.out_edges[u as usize] {
             let seg = g.seg(seg_idx);
             let nd = du + seg.length_m;
-            if nd < *dist.get(&v).unwrap_or(&f64::INFINITY) {
+            let dv = if ctx.stamp[v as usize] == epoch {
+                ctx.dist[v as usize]
+            } else {
+                f64::INFINITY
+            };
+            if nd < dv {
                 let forward = seg.a == u;
-                dist.insert(v, nd);
-                came.insert(v, (u, seg_idx, forward));
+                ctx.stamp[v as usize] = epoch;
+                ctx.dist[v as usize] = nd;
+                ctx.came[v as usize] = (u, seg_idx, forward);
                 let h = rm_core::geo::haversine_m(g.node_pos(v), goal_pos);
                 heap.push(Reverse(((nd + h).to_bits(), v)));
             }
@@ -187,12 +205,12 @@ fn astar(ctx: &mut Ctx, start: u32, goal: u32) -> Option<(f64, Vec<(u32, bool)>)
         let mut segs_rev = Vec::new();
         let mut cur = goal;
         while cur != start {
-            let (prev, seg_idx, forward) = came[&cur];
+            let (prev, seg_idx, forward) = ctx.came[cur as usize];
             segs_rev.push((seg_idx, forward));
             cur = prev;
         }
         segs_rev.reverse();
-        Some((dist[&goal], segs_rev))
+        Some((ctx.dist[goal as usize], segs_rev))
     } else {
         None
     };
@@ -327,9 +345,15 @@ pub fn match_path(
         return out;
     }
 
+    let n_nodes = graph.nodes.len();
     let mut ctx = Ctx {
         g: graph,
         astar_cache: HashMap::new(),
+        epoch: 0,
+        stamp: vec![0; n_nodes],
+        dist: vec![0.0; n_nodes],
+        came: vec![(0, 0, false); n_nodes],
+        popped: vec![0; n_nodes],
     };
 
     // DP
@@ -357,7 +381,9 @@ pub fn match_path(
             let e2 = em.emission_cost(s2.dist_m);
             for (j, s1) in prev.iter().enumerate() {
                 let base = dp[w - 1][j];
-                if !base.is_finite() {
+                // transition cost is non-negative, so base+e2 already at or
+                // above row[k] can never win: skip evaluate (and its A*)
+                if base + e2 >= row[k] {
                     continue;
                 }
                 let Some(step) = evaluate(&mut ctx, s1, s2, gps) else {
