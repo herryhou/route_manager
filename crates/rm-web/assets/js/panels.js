@@ -293,26 +293,34 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
   });
 }
 
-/// Compact stop popup (map marker click): summary + stop-serving routes + link to full panel.
+/// Compact stop popup (map marker click): stop summary + routes, then its station block.
 export function stopPopupEl(d, { onDetails, onPickRoute }) {
   const wrap = document.createElement('div');
   wrap.className = 'stop-popup';
   const bearing = d.bearing
     ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}`
     : '—';
+  const stBearing = d.station_bearing
+    ? `${Math.round(d.station_bearing.bearing_deg)}° · spread ${Math.round(d.station_bearing.max_spread_deg)}° · ${d.station_bearing.member_count} members`
+    : '—';
   wrap.innerHTML = `
     <div class="popup-title">${d.stop.stop_name} <small class="muted">#${d.stop.stop_code}</small></div>
     <div class="muted">bearing ${bearing}</div>
-    <div class="muted">station ${d.station.station_name}</div>
-    <div class="popup-routes muted">routes (${(d.routes_by_stop ?? []).length})</div>
+    <div class="popup-routes muted">stop routes (${(d.routes_by_stop ?? []).length})</div>
+    <div class="chips-stop"></div>
+    <div class="popup-title">${d.station.station_name} <small class="muted">#${d.station.station_id}</small></div>
+    <div class="muted">bearing ${stBearing}</div>
+    <div class="muted">group ${d.group?.station_group_name ?? '—'}</div>
+    <div class="popup-routes muted">station routes (${(d.routes_by_station ?? []).length})</div>
+    <div class="chips-station"></div>
   `;
-  const chips = document.createElement('div');
-  chips.append(routeChips(d.routes_by_stop ?? [], onPickRoute));
+  wrap.querySelector('.chips-stop').append(routeChips(d.routes_by_stop ?? [], onPickRoute));
+  wrap.querySelector('.chips-station').append(routeChips(d.routes_by_station ?? [], onPickRoute));
   const btn = document.createElement('button');
   btn.className = 'popup-details';
   btn.textContent = 'more details…';
   btn.addEventListener('click', onDetails);
-  wrap.append(chips, btn);
+  wrap.append(btn);
   return wrap;
 }
 

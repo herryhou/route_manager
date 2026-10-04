@@ -82,7 +82,7 @@ async function selectRoute(r, dir = 0) {
     fitRoute(p, s);
     routeStopsPanel(d, dir, s, {
       onDirection: (nd) => selectRoute(r, nd),
-      onStopClick: (svid) => selectStop(svid),
+      onStopClick: (svid) => popupStop(svid),
     });
     if ((p.features ?? []).length === 0) status('no path data for this direction');
     location.hash = `#route=${route_id}&dir=${dir}`;
@@ -150,6 +150,29 @@ async function selectStation(stationId) {
     location.hash = `#station=${stationId}`;
   } catch (e) {
     status(`station load failed: ${e.message}`);
+  }
+}
+
+/// Route-panel stop click: ring marker + compact popup, same pattern as selectStation.
+async function popupStop(stopVersionId) {
+  try {
+    const d = await api.stopDetail(stopVersionId);
+    const s = d.stop;
+    clearHighlight();
+    const m = L.circleMarker([s.lat, s.lon], {
+      radius: 10, color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.15,
+    }).addTo(layers.highlight);
+    m.bindPopup(stopPopupEl(d, {
+      onDetails: () => {
+        map.closePopup();
+        selectStop(stopVersionId);
+      },
+      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
+    }), { maxWidth: 300 }).openPopup();
+    m.on('popupclose', () => m.remove());
+    map.panTo([s.lat, s.lon], { animate: true });
+  } catch (e) {
+    status(`stop load failed: ${e.message}`);
   }
 }
 
