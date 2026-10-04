@@ -146,38 +146,70 @@ pub fn project_candidates(
     out
 }
 
+/// Chainage tolerance for non-decreasing transitions: floating-point
+/// candidates from the same path pass may differ by rounding noise.
+const CH_EPS_M: f64 = 1e-6;
+
+/// Selection cost of a full stop sequence, ordered lexicographically:
+/// first the number of backward (decreasing-chainage) transitions, then
+/// `Σ SNAP_WEIGHT·snap + Δchainage` plus terminal anchoring. Backward
+/// jumps are dominated, never merely more expensive — an out-and-back
+/// path makes the outbound and return valleys of a revisit nearly
+/// equidistant in |Δ| (5010 松茂: 8164.6 vs 8164.7), so any finite price
+/// on going backward loses to a 1 m saving. Backward transitions only
+/// ever appear when no non-decreasing assignment exists (truncated
+/// polyline); there they degrade gracefully to the cheapest backward
+/// jump and the downstream clamp pins the result.
+type SelCost = (u32, f64);
+
 /// Pick one projection per stop (candidates from [`project_candidates`])
-/// minimizing `Σ SNAP_WEIGHT·snap + |Δchainage|` between consecutive stops
-/// — a Viterbi pass over per-stop alternatives. This is what keeps
-/// loop-closure poles on the side their stop order implies:
-/// nearest-segment alone snaps stop 1 of a circular route onto the last leg
-/// of the path, and the monotonic clamp then pins every following stop to
-/// that chainage (the 661 collapse).
+/// — a Viterbi pass over per-stop alternatives minimizing [`SelCost`].
+/// Chainage is distance travelled along the path: a bus never reverses
+/// along its own polyline, so a valid stop order maps to a non-decreasing
+/// chainage sequence even when the path doubles back on itself
+/// (out-and-back detours; revisits take the SECOND valley). The first
+/// stop additionally pays its own chainage and the last stop
+/// `total − chainage`: the polyline starts at the departure terminal, so
+/// leading/trailing chainage is dead mileage, which anchors terminals to
+/// the path ends instead of mid-path valleys (5010 梨山).
 pub fn select_sequence(cands: &[Vec<Projection>]) -> Vec<Projection> {
     let n = cands.len();
     if n == 0 {
         return Vec::new();
     }
-    let mut cost: Vec<f64> = cands[0]
+    // candidates are chainage-sorted; the last stop's last candidate is
+    // the furthest reach of the path it can see
+    let total = cands[n - 1]
+        .last()
+        .map(|c| c.chainage_m)
+        .unwrap_or(0.0);
+    let mut cost: Vec<SelCost> = cands[0]
         .iter()
-        .map(|c| SNAP_WEIGHT * c.snap_dist_m)
+        .map(|c| (0, SNAP_WEIGHT * c.snap_dist_m + c.chainage_m))
         .collect();
     let mut links: Vec<Vec<usize>> = Vec::with_capacity(n - 1);
     for i in 1..n {
         let (prev, cur) = (&cands[i - 1], &cands[i]);
-        let mut next = vec![f64::INFINITY; cur.len()];
+        let last = i + 1 == n;
+        let mut next = vec![(u32::MAX, f64::INFINITY); cur.len()];
         let mut link = vec![0usize; cur.len()];
         for (k, ck) in cur.iter().enumerate() {
             for (j, (pj, pc)) in prev.iter().zip(cost.iter()).enumerate() {
-                let c = pc + (ck.chainage_m - pj.chainage_m).abs();
-                if c < next[k] {
-                    next[k] = c;
+                let jump = ck.chainage_m - pj.chainage_m;
+                // forward transitions keep the backtrack count; the single
+                // fallback (nothing ahead of any predecessor) costs one
+                let cand_cost = if jump >= -CH_EPS_M {
+                    (pc.0, pc.1 + jump)
+                } else {
+                    (pc.0 + 1, pc.1 + jump.abs())
+                };
+                if cand_cost < next[k] {
+                    next[k] = cand_cost;
                     link[k] = j;
                 }
             }
-        }
-        for (k, ck) in cur.iter().enumerate() {
-            next[k] += SNAP_WEIGHT * ck.snap_dist_m;
+            let anchor = if last { total - ck.chainage_m } else { 0.0 };
+            next[k].1 += SNAP_WEIGHT * ck.snap_dist_m + anchor;
         }
         links.push(link);
         cost = next;
@@ -185,7 +217,11 @@ pub fn select_sequence(cands: &[Vec<Projection>]) -> Vec<Projection> {
     let mut k = cost
         .iter()
         .enumerate()
-        .min_by(|a, b| a.1.total_cmp(b.1))
+        .min_by(|a, b| {
+            a.1 .0
+                .cmp(&b.1 .0)
+                .then_with(|| a.1 .1.total_cmp(&b.1 .1))
+        })
         .map(|(i, _)| i)
         .unwrap_or(0);
     let mut out = vec![cands[n - 1][k]];
@@ -429,6 +465,55 @@ mod tests {
             assert!(w[1].chainage_m >= w[0].chainage_m - 1e-6, "non-monotone");
         }
         assert!(sel[8].chainage_m > total - 30.0);
+    }
+
+    #[test]
+    fn out_and_back_revisit_takes_return_pass() {
+        // 5010 shape: out-and-back path (A -> far point -> back past A).
+        // Chainage is distance travelled, so stop order maps to a
+        // non-decreasing chainage sequence — the revisit must take the
+        // SECOND valley even though its pole sits 1 m off the first pass
+        // and 3 m off the return pass. A symmetric |dCh| cost would
+        // zigzag back to the first valley (cheap backward jump).
+        let path = vec![
+            LatLng::new(24.1400, 120.6857),  // A start
+            LatLng::new(24.1450, 120.6857),  // M0 outbound mid
+            LatLng::new(24.1500, 120.6857),  // F turn
+            LatLng::new(24.1475, 120.68575), // return flank
+            LatLng::new(24.1450, 120.6858),  // M1 return mid
+            LatLng::new(24.1425, 120.6858),  // return flank
+            LatLng::new(24.1400, 120.6858),  // A end (closure gap)
+        ];
+        let cum = cumulative_m(&path);
+        let total = *cum.last().unwrap();
+        // ~1.1 m off the outbound pass (M0), ~9.6 m off the return pass (M1)
+        let mid = LatLng::new(24.1450, 120.68571);
+        let stops = [
+            LatLng::new(24.1400, 120.6857), // A start
+            mid,                            // outbound
+            LatLng::new(24.1500, 120.6857), // F turn
+            mid,                            // revisit on return pass
+            LatLng::new(24.1400, 120.6858), // A end
+        ];
+        let cands: Vec<Vec<Projection>> = stops
+            .iter()
+            .map(|s| project_candidates(&path, &cum, s, CAND_SLACK_M))
+            .collect();
+        let sel = select_sequence(&cands);
+        let half = total / 2.0;
+        assert!(
+            sel[1].chainage_m < half,
+            "outbound mid must take the first valley, got {}",
+            sel[1].chainage_m
+        );
+        assert!(
+            sel[3].chainage_m > half,
+            "revisit must take the return valley, got {}",
+            sel[3].chainage_m
+        );
+        for w in sel.windows(2) {
+            assert!(w[1].chainage_m >= w[0].chainage_m - 1e-6, "non-monotone");
+        }
     }
 
     #[test]
