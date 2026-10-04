@@ -8,15 +8,14 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::error::ApiError;
-use crate::state::{AppState, run_db};
+use crate::state::{run_db, AppState};
 
 pub async fn list(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, ApiError> {
-    let bbox = parse_bbox(params.get("bbox").map(|s| s.as_str())).ok_or_else(|| {
-        ApiError::bad_request("bbox must be minLon,minLat,maxLon,maxLat")
-    })?;
+    let bbox = parse_bbox(params.get("bbox").map(|s| s.as_str()))
+        .ok_or_else(|| ApiError::bad_request("bbox must be minLon,minLat,maxLon,maxLat"))?;
     let min_routes = params
         .get("min_routes")
         .and_then(|s| s.parse::<i64>().ok())

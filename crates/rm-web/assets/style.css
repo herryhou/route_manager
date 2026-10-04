@@ -232,6 +232,56 @@ body {
   border-color: var(--accent);
 }
 
+/* Top-level detail panel tabs: one per opened route/stop/segment/outliers. */
+.detail-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: -10px -12px 8px;
+  padding: 8px 12px 6px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-tabs .close {
+  margin-left: auto;
+}
+
+.detail-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.detail-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.detail-tab .tab-x {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.detail-tab .tab-x:hover {
+  color: #c0392b;
+}
+
+.detail-tab.active .tab-x {
+  color: #fff;
+}
+
 .stop-row {
   display: flex;
   gap: 8px;

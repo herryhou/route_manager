@@ -34,18 +34,15 @@ pub fn list(
                AND sv.latitude BETWEEN ?2 AND ?4
          )",
     )?;
-    let it = stmt.query_map(
-        rusqlite::params![min_lon, min_lat, max_lon, max_lat],
-        |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, f64>(2)?,
-                r.get::<_, i64>(3)?,
-                r.get::<_, i64>(6)?,
-            ))
-        },
-    )?;
+    let it = stmt.query_map(rusqlite::params![min_lon, min_lat, max_lon, max_lat], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, f64>(2)?,
+            r.get::<_, i64>(3)?,
+            r.get::<_, i64>(6)?,
+        ))
+    })?;
     let rows: Vec<(String, String, f64, i64, i64)> = it.collect::<Result<_, _>>()?;
 
     let mut features = Vec::new();
@@ -94,9 +91,7 @@ pub fn detail(conn: &Connection, segment_id: &str) -> Result<Option<Value>> {
          FROM seg_segment WHERE segment_id = ?1",
         [segment_id],
         |r| -> rusqlite::Result<(String, f64, i64, i64, i64)> {
-            Ok((
-                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?,
-            ))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         },
     ) {
         Ok(row) => row,

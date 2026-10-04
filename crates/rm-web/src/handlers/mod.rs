@@ -27,7 +27,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/routes", get(routes::list))
         .route("/api/routes/{id}", get(routes::detail))
         .route("/api/routes/{id}/directions/{dir}/path", get(routes::path))
-        .route("/api/routes/{id}/directions/{dir}/stops", get(routes::stops))
+        .route(
+            "/api/routes/{id}/directions/{dir}/stops",
+            get(routes::stops),
+        )
         .route("/api/routes/{id}/directions/{dir}/ways", get(routes::ways))
         .route("/api/routes/{id}/directions/{dir}/raw", get(routes::raw))
         .route("/api/stops", get(stops::viewport))

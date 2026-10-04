@@ -5,7 +5,7 @@ use axum::Json;
 use serde_json::Value;
 
 use crate::error::ApiError;
-use crate::state::{AppState, run_db};
+use crate::state::{run_db, AppState};
 use std::collections::HashMap;
 
 pub async fn outliers(

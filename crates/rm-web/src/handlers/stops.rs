@@ -5,7 +5,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 
 use crate::error::not_found;
-use crate::state::{AppState, run_db};
+use crate::state::{run_db, AppState};
 
 pub async fn detail(
     Path(stop_version_id): Path<i64>,
@@ -47,7 +47,9 @@ pub async fn viewport(
     }
     let bbox_raw = params.get("bbox").map(|s| s.as_str());
     let Some(bbox_raw) = bbox_raw else {
-        return Err(crate::error::ApiError::bad_request("bbox required: minLon,minLat,maxLon,maxLat"));
+        return Err(crate::error::ApiError::bad_request(
+            "bbox required: minLon,minLat,maxLon,maxLat",
+        ));
     };
     let mut it = bbox_raw.split(',');
     let bbox = (
@@ -57,11 +59,15 @@ pub async fn viewport(
         it.next().and_then(|v| v.parse().ok()),
     );
     let (Some(a), Some(b), Some(c), Some(d)) = bbox else {
-        return Err(crate::error::ApiError::bad_request("bbox must be 4 numbers"));
+        return Err(crate::error::ApiError::bad_request(
+            "bbox must be 4 numbers",
+        ));
     };
     let kind = params.get("kind").cloned().unwrap_or_else(|| "stop".into());
     if kind != "stop" && kind != "station" {
-        return Err(crate::error::ApiError::bad_request("kind must be stop|station"));
+        return Err(crate::error::ApiError::bad_request(
+            "kind must be stop|station",
+        ));
     }
     let limit = params
         .get("limit")

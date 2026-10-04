@@ -31,7 +31,10 @@ mod tests {
 
     #[test]
     fn coords_are_lon_first() {
-        let c = coords(&[LatLng { lat: 24.14, lon: 120.68 }]);
+        let c = coords(&[LatLng {
+            lat: 24.14,
+            lon: 120.68,
+        }]);
         let pair = c[0].as_array().unwrap();
         assert_eq!(pair[0].as_f64().unwrap(), 120.68, "lon first");
         assert_eq!(pair[1].as_f64().unwrap(), 24.14, "lat second");

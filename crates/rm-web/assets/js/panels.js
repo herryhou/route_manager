@@ -38,15 +38,74 @@ export function filterRoutes(routes, q) {
   );
 }
 
-export function showDetail(html) {
+/// Tabbed detail panel: each { key, title } is one tab; content panes stay in
+/// the DOM (listeners intact) so flipping back needs no refetch. Re-showing a
+/// key replaces its content and activates it.
+export function showDetail(html, { key = 'main', title = 'detail' } = {}) {
   const el = document.getElementById('detail');
-  el.innerHTML = `<button class="close" title="close">✕</button>` + html;
+  let strip = el.querySelector('.detail-tabs');
+  if (!strip) {
+    el.replaceChildren();
+    strip = document.createElement('div');
+    strip.className = 'detail-tabs';
+    const closeAll = document.createElement('button');
+    closeAll.className = 'close';
+    closeAll.title = 'close panel';
+    closeAll.textContent = '✕';
+    closeAll.addEventListener('click', hideDetail);
+    strip.append(closeAll);
+    el.append(strip);
+  }
+  let pane = el.querySelector(`[data-pane="${key}"]`);
+  if (pane) {
+    pane.replaceChildren();
+  } else {
+    pane = document.createElement('div');
+    pane.dataset.pane = key;
+    pane.hidden = true;
+    el.append(pane);
+    const tab = document.createElement('button');
+    tab.className = 'detail-tab';
+    tab.dataset.key = key;
+    const label = document.createElement('span');
+    label.textContent = title;
+    const x = document.createElement('span');
+    x.className = 'tab-x';
+    x.textContent = '✕';
+    tab.append(label, x);
+    tab.addEventListener('click', (e) => {
+      if (e.target === x) closeDetailTab(key);
+      else activateDetailTab(key);
+    });
+    strip.insertBefore(tab, strip.querySelector('.close'));
+  }
+  pane.innerHTML = html;
+  activateDetailTab(key);
+  return pane;
+}
+
+function activateDetailTab(key) {
+  const el = document.getElementById('detail');
   el.hidden = false;
-  el.querySelector('.close').addEventListener('click', hideDetail);
+  for (const p of el.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== key;
+  for (const t of el.querySelectorAll('.detail-tab')) t.classList.toggle('active', t.dataset.key === key);
+}
+
+function closeDetailTab(key) {
+  const el = document.getElementById('detail');
+  const pane = el.querySelector(`[data-pane="${key}"]`);
+  const wasActive = !pane?.hidden;
+  pane?.remove();
+  el.querySelector(`.detail-tab[data-key="${key}"]`)?.remove();
+  const remaining = [...el.querySelectorAll('.detail-tab')];
+  if (!remaining.length) hideDetail();
+  else if (wasActive) activateDetailTab(remaining[remaining.length - 1].dataset.key);
 }
 
 export function hideDetail() {
-  document.getElementById('detail').hidden = true;
+  const el = document.getElementById('detail');
+  el.replaceChildren();
+  el.hidden = true;
 }
 
 export function kv(pairs) {
@@ -94,7 +153,7 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
       </div>`;
     })
     .join('');
-  showDetail(`
+  const html = `
     <h2>Route ${d.route_code} <small class="muted">${d.subroute_name ?? ''}</small></h2>
     <div class="tabs">${dirBtns}</div>
     ${kv([
@@ -107,21 +166,22 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
       <button data-view="stops" class="active">Stops (${(stops.stops ?? []).length})</button>
       <button data-view="qa">QA profile</button>
     </div>
-    <div id="view-stops">${rows}</div>
-    <div id="view-qa" hidden>${profileSvg(stops.stops ?? [])}</div>
-  `);
-  document.querySelectorAll('#detail .tabs:not(.view-tabs) button').forEach((b) =>
+    <div class="view-stops">${rows}</div>
+    <div class="view-qa" hidden>${profileSvg(stops.stops ?? [])}</div>
+  `;
+  const pane = showDetail(html, { key: `route-${d.route_id}`, title: d.route_code });
+  pane.querySelectorAll('.tabs:not(.view-tabs) button').forEach((b) =>
     b.addEventListener('click', () => onDirection(Number(b.dataset.dir)))
   );
-  document.querySelectorAll('#detail .view-tabs button').forEach((b) =>
+  pane.querySelectorAll('.view-tabs button').forEach((b) =>
     b.addEventListener('click', () => {
-      document.querySelectorAll('#detail .view-tabs button').forEach((x) => x.classList.remove('active'));
+      pane.querySelectorAll('.view-tabs button').forEach((x) => x.classList.remove('active'));
       b.classList.add('active');
-      document.getElementById('view-stops').hidden = b.dataset.view !== 'stops';
-      document.getElementById('view-qa').hidden = b.dataset.view !== 'qa';
+      pane.querySelector('.view-stops').hidden = b.dataset.view !== 'stops';
+      pane.querySelector('.view-qa').hidden = b.dataset.view !== 'qa';
     })
   );
-  document.querySelectorAll('#view-stops .stop-row').forEach((row) =>
+  pane.querySelectorAll('.view-stops .stop-row').forEach((row) =>
     row.addEventListener('click', () => onStopClick(Number(row.dataset.svid)))
   );
 }
@@ -168,7 +228,7 @@ export function segmentPanel(d, { onPickRoute }) {
         <td style="text-align:right">${w.length_m.toFixed(0)}m</td></tr>`
     )
     .join('');
-  showDetail(`
+  const pane = showDetail(`
     <h2>Segment <small class="muted">${d.segment_id.slice(0, 12)}…</small></h2>
     ${kv([
       ['length', `${d.length_m.toFixed(0)} m`],
@@ -179,9 +239,9 @@ export function segmentPanel(d, { onPickRoute }) {
     <h3>Ways (${(d.ways ?? []).length})</h3>
     <table class="kv"><tr><td>#</td><td>name</td><td>highway</td><td style="text-align:right">len</td></tr>${ways}</table>
     <h3>Routes (${(d.routes ?? []).length})</h3>
-    <div id="segment-routes"></div>
-  `);
-  document.getElementById('segment-routes').append(routeChips(d.routes ?? [], onPickRoute));
+    <div class="segment-routes"></div>
+  `, { key: `segment-${d.segment_id}`, title: `seg ${d.segment_id.slice(0, 6)}` });
+  pane.querySelector('.segment-routes').append(routeChips(d.routes ?? [], onPickRoute));
 }
 
 /// Outlier list panel (topbar outliers chip).
@@ -196,12 +256,12 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
       </div>`
     )
     .join('');
-  showDetail(`
+  const pane = showDetail(`
     <h2>Outliers <small class="muted">${(rows ?? []).length}</small></h2>
     <p class="muted">click to locate; route code opens the route</p>
     ${items || '<p class="muted">none</p>'}
-  `);
-  document.querySelectorAll('#detail .outlier-row').forEach((row, i) => {
+  `, { key: 'outliers', title: 'outliers' });
+  pane.querySelectorAll('.outlier-row').forEach((row, i) => {
     row.addEventListener('click', () => onPick(rows[i]));
     row.querySelector('.route-code').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -255,7 +315,7 @@ export function stationPopupEl(d, { onPickRoute }) {
 
 /// Stop drill-down panel: stop → station → group + serving routes.
 export function stopPanel(d, { onPickRoute }) {
-  showDetail(`
+  const pane = showDetail(`
     <h2>${d.stop.stop_name} <small class="muted">#${d.stop.stop_code}</small></h2>
     ${kv([
       ['stop', `${d.stop.stop_name} (${d.stop.stop_code})`],
@@ -267,15 +327,15 @@ export function stopPanel(d, { onPickRoute }) {
       ['group', `${d.group.station_group_name} · ${d.group.source}`],
     ])}
     <h3>Group members (${(d.group_members ?? []).length} stations)</h3>
-    <div id="group-chips"></div>
+    <div class="group-chips"></div>
     <h3>Routes serving this stop (${(d.routes_by_stop ?? []).length})</h3>
-    <div id="routes-stop-chips"></div>
+    <div class="routes-stop-chips"></div>
     <h3>Routes serving station (${(d.routes_by_station ?? []).length})</h3>
-    <div id="routes-station-chips"></div>
+    <div class="routes-station-chips"></div>
     <h3>Routes serving group (${(d.routes_by_group ?? []).length})</h3>
-    <div id="routes-group-chips"></div>
-  `);
-  document.getElementById('group-chips').append(
+    <div class="routes-group-chips"></div>
+  `, { key: `stop-${d.stop.stop_version_id}`, title: `#${d.stop.stop_code}` });
+  pane.querySelector('.group-chips').append(
     ...d.group_members.map((m) => {
       const el = document.createElement('span');
       el.className = 'chip-route';
@@ -284,11 +344,11 @@ export function stopPanel(d, { onPickRoute }) {
       return el;
     })
   );
-  for (const [id, routes] of [
+  for (const [cls, routes] of [
     ['routes-stop-chips', d.routes_by_stop],
     ['routes-station-chips', d.routes_by_station],
     ['routes-group-chips', d.routes_by_group],
   ]) {
-    document.getElementById(id).append(routeChips(routes, onPickRoute));
+    pane.querySelector(`.${cls}`).append(routeChips(routes, onPickRoute));
   }
 }

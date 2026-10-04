@@ -56,10 +56,7 @@ pub async fn serve(State(state): State<AppState>, uri: Uri) -> Response {
             "application/javascript",
             include_str!("../../assets/vendor/leaflet.js"),
         ),
-        "/vendor/leaflet.css" => asset(
-            "text/css",
-            include_str!("../../assets/vendor/leaflet.css"),
-        ),
+        "/vendor/leaflet.css" => asset("text/css", include_str!("../../assets/vendor/leaflet.css")),
         _ => (StatusCode::NOT_FOUND, "not found").into_response(),
     }
 }
