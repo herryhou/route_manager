@@ -66,10 +66,10 @@ Nothing here fails the run. A direction that errors (e.g. an
 undecodable polyline) is warned and counted `failed`; one that yields no
 runs — degenerate polyline, or nothing near any road — is counted
 `unmatched`; both leave no rows and show up in the summary line. Known
-context: the local OSM extract has holes at the city edges, so ~204 of
-761 directions match nothing (root README, *Known limits*) — the fix is
-a bigger extract, not code. The one hard error is empty `osm_*` tables,
-which means `rm-osm-prepare` hasn't run.
+context: 17 of 784 directions have no drawn polyline at all and match
+nothing (root README, *Known limits*); the 2026-10 citywide extract
+covers every direction that has one. The one hard error is empty
+`osm_*` tables, which means `rm-osm-prepare` hasn't run.
 
 ## Running it
 

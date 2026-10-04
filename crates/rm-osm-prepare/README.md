@@ -8,7 +8,7 @@ drive on, and stores them once for every route direction matched after it.
 ## Input → output
 
 Input is the PBF extract (`--pbf`, default
-`assets/Taichung/data/taichung.osm.pbf`); `--db` selects the database
+`assets/Taichung/data/TW-TXG-202610020300.osm.pbf`); `--db` selects the database
 (default `data/taichung.db`). There is no `--batch` — nothing here is
 batch-scoped. Writes, in one transaction:
 

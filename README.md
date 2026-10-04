@@ -24,7 +24,8 @@ crates/
 
 ```sh
 # 0. one-time: place captures under assets/Taichung/raw/ and the OSM extract
-#    at assets/Taichung/data/taichung.osm.pbf (untracked; see .gitignore)
+#    under assets/Taichung/data/ (e.g. TW-TXG-202610020300.osm.pbf;
+#    untracked; see .gitignore) and pass --pbf to rm-osm-prepare
 
 # 1. build
 cargo build --release
@@ -80,9 +81,10 @@ See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
 
 ## Known limits (V1)
 
-- The local OSM extract has coverage holes: ~200 of 761 directions match no
-  way runs (surfaced as skipped pairs in the registry summary and
-  `qa/report.json` stats). Fix is a larger extract, not code.
+- 17 of 784 directions have no drawn polyline in the source data at all, so
+  they match no way runs (surfaced as skipped pairs in the registry summary
+  and `qa/report.json` stats); every direction with a polyline matches on the
+  2026-10 citywide extract.
 - Timetables/TRIP, GTFS export, re-import diffing (V2+ transitions) and the
   API server are out of scope; their tables exist but stay empty.
 

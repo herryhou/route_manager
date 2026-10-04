@@ -9,7 +9,7 @@ struct Args {
     #[arg(long, default_value = "data/taichung.db")]
     db: PathBuf,
     /// Local OSM PBF extract (Taichung-scoped)
-    #[arg(long, default_value = "assets/Taichung/data/taichung.osm.pbf")]
+    #[arg(long, default_value = "assets/Taichung/data/TW-TXG-202610020300.osm.pbf")]
     pbf: PathBuf,
 }
 

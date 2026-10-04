@@ -33,11 +33,11 @@ Finally **verify** (`rm-verify`) re-checks ~26 invariants and counts against kno
 ## What you get out
 
 - `data/taichung.db` — the whole model: routes, stops, stations, groups, OSM graph, match stats, segment registry
-- 19,612 stop-to-stop traversals, 6,111 unique segments, 3,326 shared by more than one route (routes 1 and 9221 share 10 — the built-in sanity pair)
+- 35,876 stop-to-stop traversals, 10,631 unique segments, 5,897 shared by more than one route (routes 1 and 9221 share 22 — the built-in sanity pair)
 
 ## Known limits
 
-The local OSM extract has holes at the edges of the city: 204 of 761 directions couldn't be matched to streets and are reported (not hidden) as skipped pairs. Fix is a bigger extract, not code. Timetables, GTFS export, and a second-import diff are deliberately out of scope for this version — the schema leaves room for them.
+With the 2026-10 citywide extract (`TW-TXG-202610020300.osm.pbf`), 767 of 784 directions match; the remaining 17 are routes with no drawn polyline at all, reported (not hidden) as skipped pairs. Timetables, GTFS export, and a second-import diff are deliberately out of scope for this version — the schema leaves room for them.
 
 See `README.md` for build/run instructions and command flags.
 

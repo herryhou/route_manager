@@ -49,7 +49,7 @@ with the summed way overlap as length.
 
 The shared-segment surface is `seg_traversal` grouped by `segment_id`
 with `COUNT(DISTINCT route_version_id) > 1`. Known outputs on the
-current batch: 19,612 traversals, 6,111 unique segments, 3,326 shared
+current batch: 35,876 traversals, 10,631 unique segments, 5,897 shared
 by more than one route.
 
 ## Bearings
@@ -103,8 +103,8 @@ stations with `max_spread_deg` over 45° into `report.json` warnings and
 CLI: `--db` (default `data/taichung.db`) and `--batch` (default: latest
 OPEN batch; the run errors if none is open and no `--batch` is passed).
 Directions the matcher couldn't match show up as skipped pairs here and
-in `qa/report.json` — the current extract leaves 204 of 761 directions
-unmatched (coverage holes, not code).
+in `qa/report.json` — 17 of 784 directions have no drawn polyline at
+all and stay unmatched (source data, not code).
 
 ## Why this stage exists
 
