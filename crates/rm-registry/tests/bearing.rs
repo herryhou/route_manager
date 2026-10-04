@@ -212,6 +212,31 @@ fn opposite_headings_share_one_axis() {
 }
 
 #[test]
+fn single_direction_station_keeps_signed_mean() {
+    let conn = setup();
+    // southbound run only: both member stops depart at ~180° — a
+    // one-way roadside pole whose travel direction must not fold away
+    insert_northbound_run(&conn);
+    conn.execute(
+        "UPDATE seg_match_way SET entry_node_id = 4, exit_node_id = 2",
+        [],
+    )
+    .unwrap();
+
+    rm_registry::bearing::run(&conn, 1).unwrap();
+
+    let (mean, spread): (f64, f64) = conn
+        .query_row(
+            "SELECT bearing_deg, max_spread_deg FROM station_bearing WHERE station_id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!((mean - 180.0).abs() < 0.5, "southbound station got {mean}");
+    assert!(spread < 0.5, "aligned members spread {spread}");
+}
+
+#[test]
 fn off_axis_member_drives_the_spread() {
     let conn = setup();
     insert_northbound_run(&conn); // stop 1 -> bearing ~0 (OSM)

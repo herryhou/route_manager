@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use rm_core::geo::{angular_diff_deg, axial_mean_deg, bearing_deg};
+use rm_core::geo::{angular_diff_deg, axial_mean_deg, bearing_deg, circular_mean_deg};
 use rm_core::{geo, LatLng};
 use rusqlite::Connection;
 
@@ -162,11 +162,15 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
         }
     }
 
-    // station aggregates over member stop bearings: the axial mean (a pole
-    // legitimately serves both directions of travel, so headings 180°
-    // apart fold onto one axis) and the largest deviation from that axis.
-    // route `direction` is route-relative (each route's own 去程/返程),
-    // so it cannot group headings — the axis does.
+    // station aggregates over member stop bearings. Members that agree on
+    // one direction of travel (all within 90° of the circular mean) keep
+    // the signed mean — a one-way roadside pole departs one way only, and
+    // folding its heading onto an axis would hide which way. Only genuinely
+    // mixed members (a pole serving both directions of travel) fall back to
+    // the axial mean (headings 180° apart fold onto one axis) plus the
+    // largest deviation from that axis. route `direction` is route-relative
+    // (each route's own 去程/返程), so it cannot group headings — the
+    // spread does.
     {
         let mut stmt = tx.prepare(
             "SELECT s.station_id, b.bearing_deg
@@ -192,12 +196,23 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
             stations.last_mut().unwrap().1.push(bearing);
         }
         for (station_id, bearings) in stations {
-            let mean = axial_mean_deg(&bearings).unwrap_or(0.0);
-            let mut spread = 0.0f64;
-            for &b in &bearings {
-                let dev = angular_diff_deg(b, mean).min(angular_diff_deg(b, mean + 180.0));
-                spread = spread.max(dev);
-            }
+            let circular = circular_mean_deg(&bearings).unwrap_or(0.0);
+            let signed_spread = bearings
+                .iter()
+                .map(|b| angular_diff_deg(*b, circular))
+                .fold(0.0f64, f64::max);
+            // strictly < 90°: diametrically opposed members land exactly on
+            // 90 (degenerate circular mean) and must fall through to axial
+            let (mean, spread) = if signed_spread < 90.0 {
+                (circular, signed_spread)
+            } else {
+                let axial = axial_mean_deg(&bearings).unwrap_or(0.0);
+                let spread = bearings
+                    .iter()
+                    .map(|b| angular_diff_deg(*b, axial).min(angular_diff_deg(*b, axial + 180.0)))
+                    .fold(0.0f64, f64::max);
+                (axial, spread)
+            };
             ins.execute(rusqlite::params![
                 station_id,
                 mean,
