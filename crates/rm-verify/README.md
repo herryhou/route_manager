@@ -1,7 +1,7 @@
 # rm-verify
 
 Final stage of the pipeline: re-check the database every earlier stage
-built. It runs 26 checks — count cross-checks against known-good ledger
+built. It runs 28 checks — count cross-checks against known-good ledger
 numbers plus schema invariants — writes the QA exports, and exits
 non-zero if any check fails. Read-only against the database; its only
 writes are the QA files.
@@ -11,7 +11,7 @@ writes are the QA files.
 Verifies one batch over every layer, staging `src_*` tables through
 `seg_*`. Flags: `--db` (default `data/taichung.db`), `--batch`
 (default: latest OPEN batch; an error if none is OPEN and unset),
-`--qa-dir` (default `qa`). Writes four files there:
+`--qa-dir` (default `qa`). Writes five files there:
 
 | File | Contents |
 |---|---|
@@ -19,11 +19,12 @@ Verifies one batch over every layer, staging `src_*` tables through
 | `segments.geojson` | one `LineString` per `seg_segment` with `segment_id`, `length_m`, `way_count`, `routes` |
 | `outlier_stops.csv` | `path_stop_projection` rows snapped > 50 m or method `OUTLIER`, worst first |
 | `bearing_report.json` | stations over the 45° spread threshold with member bearings, plus the OSM/POLYLINE source mix |
+| `grouping_report.json` | groups over the chain-drift thresholds with their member stations |
 
 ## What gets checked
 
 With `Expectations::REAL` (all 11 count targets set) `run()` emits
-26 checks:
+28 checks:
 
 - **Count cross-checks (11)** — routes, stations, `stop_rows`, `sids`,
   stops, groups, providers, `cycled`, `single_dir`, `no_polyline`,
@@ -44,6 +45,11 @@ With `Expectations::REAL` (all 11 count targets set) `run()` emits
   scope (INV-18). They record the decision, they can't fail.
 - **Sequence contiguity** — per `(subroute_version, direction)`,
   `stop_sequence` runs 1..N with no gaps or repeats.
+- **Station grouping (station/stop 整合)** — rerunning the grouping
+  algorithm (`rm-identity::group_stations`) over the current
+  `station_version` rows must reproduce the stored `station_group`
+  membership exactly; every station and group has exactly one current
+  version. Both fail the run when tampered with.
 - **Segment layer** — every `seg_segment` has at least one way and
   positive length; routes `tcg:1` and `tcg:9221` share at least one
   segment (the built-in corridor sanity pair). If no traversals exist
@@ -56,12 +62,23 @@ land in `report.json` stats: informational, never checks.
 ## Fail vs warn
 
 A failed check makes `main` print `FAIL <id> <detail>` per check and
-exit non-zero with the failure count. One class is deliberately
-exempt: **bearing spread**. A station whose member stops deviate more
-than `BEARING_SPREAD_WARN_DEG` (45°) from its axis becomes a warning in
-`report.json` and a row in `bearing_report.json` — the exit status is
-unchanged, because reverse travel on the same road (one axis ± 180°) is
-legitimate and headings fold onto the axis before comparing.
+exit non-zero with the failure count; warnings print as `WARN` lines.
+Some classes are deliberately exempt:
+
+- **Bearing spread** — a station whose member stops deviate more than
+  `BEARING_SPREAD_WARN_DEG` (45°) from its axis becomes a warning in
+  `report.json` and a row in `bearing_report.json` — the exit status is
+  unchanged, because reverse travel on the same road (one axis ± 180°) is
+  legitimate and headings fold onto the axis before comparing.
+- **Chain drift** — grouping unions same-name stations at < 80 m hops,
+  so a long chain can drift past any real interchange. A group over
+  `GROUP_DIAMETER_WARN_M` (300 m) diameter or `GROUP_MEMBERS_WARN`
+  (10) members warns and lands in `grouping_report.json`; the partition
+  itself is still legal, so it never fails the run.
+- **sid ambiguity / name hygiene** — a `sid` mapping to more than one
+  station node (identity resolves it first-occurrence-wins and warns at
+  mint time) and current station names carrying surrounding whitespace
+  are surfaced as warnings for manual review.
 
 ## Library shape and tests
 
@@ -72,7 +89,10 @@ fixture and asserts: a healthy fixture passes and writes all exports; a
 wrong count expectation fails the right check; a sequence gap is
 caught; the shared-pair check joins through `route_version` (misaligned
 ids must not misattribute routes); bearing spread warns without
-failing; tight spread does not warn.
+failing; tight spread does not warn; tampered group membership fails
+the recompute check; a station without a current version fails the
+current-unique check; chain drift, sid ambiguity and untrimmed names
+warn without failing.
 
 ## Why this stage exists
 

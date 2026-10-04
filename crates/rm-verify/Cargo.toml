@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 rm-core.workspace = true
 rm-db.workspace = true
+rm-identity.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -17,6 +18,5 @@ clap.workspace = true
 
 [dev-dependencies]
 rm-ingest = { path = "../rm-ingest", features = ["testfix"] }
-rm-identity = { path = "../rm-identity" }
 rm-publish = { path = "../rm-publish" }
 tempfile = "3"

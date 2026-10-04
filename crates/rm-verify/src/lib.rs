@@ -1,6 +1,6 @@
 //! Invariant checks, count cross-checks and QA exports for one batch.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension};
@@ -459,6 +459,50 @@ pub fn run(
 
     let mut warnings = Vec::new();
 
+    // ---- station grouping (整合 correctness) ----
+    {
+        let (recompute, current_unique) = station_grouping_checks(conn)?;
+        checks.push(recompute);
+        checks.push(current_unique);
+
+        let (drift, grouping_stats) = grouping_drift(conn)?;
+        stats.extend(grouping_stats);
+        if let Some(warn) = drift {
+            warnings.push(warn);
+        }
+
+        let ambiguous = n(
+            conn,
+            "SELECT COUNT(*) FROM (SELECT sid FROM src_stop_edge
+             WHERE batch_id = ?1 GROUP BY sid HAVING COUNT(DISTINCT node_id) > 1)",
+            &[&batch],
+        )?;
+        counts.insert("sid_ambiguous".into(), ambiguous);
+        if ambiguous > 0 {
+            warnings.push(check(
+                "grouping:sid-ambiguous",
+                "each sid maps to exactly one station node",
+                true,
+                format!("{ambiguous} sids map to >1 node (first occurrence won)"),
+            ));
+        }
+
+        let untrimmed = n(
+            conn,
+            "SELECT COUNT(*) FROM station_version
+             WHERE valid_to IS NULL AND station_name != TRIM(station_name)",
+            &[],
+        )?;
+        if untrimmed > 0 {
+            warnings.push(check(
+                "grouping:name-untrimmed",
+                "current station names carry no surrounding whitespace",
+                true,
+                format!("{untrimmed} current station names carry whitespace"),
+            ));
+        }
+    }
+
     // ---- bearing consistency (warn-only) ----
     {
         let (warn, bearing_stats) = bearing_warnings(conn)?;
@@ -482,6 +526,7 @@ pub fn run(
     write_segments_geojson(conn, qa_dir)?;
     write_outlier_csv(conn, qa_dir)?;
     write_bearing_report(conn, qa_dir)?;
+    write_grouping_report(conn, qa_dir)?;
 
     Ok(report)
 }
@@ -587,6 +632,271 @@ fn write_bearing_report(conn: &Connection, qa_dir: &Path) -> anyhow::Result<()> 
     });
     std::fs::write(
         qa_dir.join("bearing_report.json"),
+        serde_json::to_string_pretty(&report)?,
+    )?;
+    Ok(())
+}
+
+/// Warn thresholds for chain drift: grouping unions same-name stations at
+/// <80 m hops, so a long chain can drift far past any real interchange.
+pub const GROUP_DIAMETER_WARN_M: f64 = 300.0;
+pub const GROUP_MEMBERS_WARN: i64 = 10;
+
+/// One current station version with its stored group.
+struct GroupingRow {
+    station_id: i64,
+    ext_uid: String,
+    name: String,
+    lat: f64,
+    lon: f64,
+    group_id: i64,
+}
+
+fn current_grouping_rows(conn: &Connection) -> anyhow::Result<Vec<GroupingRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT sv.station_id, st.ext_uid, sv.station_name,
+                sv.latitude, sv.longitude, sv.station_group_id
+         FROM station_version sv
+         JOIN station st ON st.station_id = sv.station_id
+         WHERE sv.valid_to IS NULL
+         ORDER BY sv.station_id",
+    )?;
+    let it = stmt.query_map([], |r| {
+        Ok(GroupingRow {
+            station_id: r.get(0)?,
+            ext_uid: r.get(1)?,
+            name: r.get(2)?,
+            lat: r.get(3)?,
+            lon: r.get(4)?,
+            group_id: r.get(5)?,
+        })
+    })?;
+    Ok(it.collect::<Result<_, _>>()?)
+}
+
+/// Recompute the grouping algorithm over the current station versions and
+/// require its partition to equal the stored station_group membership;
+/// separately require exactly one current version per station and group.
+fn station_grouping_checks(conn: &Connection) -> anyhow::Result<(Check, Check)> {
+    let rows = current_grouping_rows(conn)?;
+
+    let inputs: Vec<rm_identity::ClusterInput> = rows
+        .iter()
+        .map(|r| rm_identity::ClusterInput {
+            ext_uid: r.ext_uid.clone(),
+            name: r.name.clone(),
+            lat: r.lat,
+            lon: r.lon,
+        })
+        .collect();
+    let clusters = rm_identity::group_stations(&inputs);
+
+    // canonical partitions: sorted member-id sets, sets sorted, so partition
+    // equality is plain slice equality regardless of cluster/group ids
+    let computed: Vec<Vec<i64>> = {
+        let mut v: Vec<Vec<i64>> = clusters
+            .iter()
+            .map(|c| {
+                let mut ids: Vec<i64> = c.iter().map(|&i| rows[i].station_id).collect();
+                ids.sort_unstable();
+                ids
+            })
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    let mut stored_map: HashMap<i64, Vec<i64>> = HashMap::new();
+    for r in &rows {
+        stored_map.entry(r.group_id).or_default().push(r.station_id);
+    }
+    let mut stored: Vec<Vec<i64>> = stored_map.into_values().collect();
+    for v in &mut stored {
+        v.sort_unstable();
+    }
+    stored.sort_unstable();
+
+    let pass = computed == stored;
+    let detail = if pass {
+        format!("{} clusters over {} stations", computed.len(), rows.len())
+    } else {
+        let stored_count = stored.len();
+        let stored_set: std::collections::HashSet<&Vec<i64>> = stored.iter().collect();
+        let example = computed
+            .iter()
+            .find(|c| !stored_set.contains(*c))
+            .and_then(|c| {
+                rows.iter()
+                    .find(|r| r.station_id == c[0])
+                    .map(|r| r.ext_uid.clone())
+            });
+        format!(
+            "{} clusters recomputed vs {stored_count} stored groups; e.g. {} grouped differently",
+            computed.len(),
+            example.as_deref().unwrap_or("?"),
+        )
+    };
+    let recompute = check(
+        "station:recompute",
+        "recomputed grouping equals stored membership",
+        pass,
+        detail,
+    );
+
+    let bad_current = n(
+        conn,
+        "SELECT (SELECT COUNT(*) FROM (SELECT s.station_id FROM station s
+             LEFT JOIN station_version v
+               ON v.station_id = s.station_id AND v.valid_to IS NULL
+             GROUP BY s.station_id HAVING COUNT(v.station_version_id) != 1))
+              + (SELECT COUNT(*) FROM (SELECT g.station_group_id FROM station_group g
+             LEFT JOIN station_group_version v
+               ON v.station_group_id = g.station_group_id AND v.valid_to IS NULL
+             GROUP BY g.station_group_id HAVING COUNT(v.station_group_version_id) != 1))",
+        &[],
+    )?;
+    let current_unique = check(
+        "station:current-unique",
+        "every station and group has exactly one current version",
+        bad_current == 0,
+        format!("{bad_current} without exactly one current version"),
+    );
+    Ok((recompute, current_unique))
+}
+
+/// One member station of a current group.
+struct GroupMember {
+    ext_uid: String,
+    name: String,
+    lat: f64,
+    lon: f64,
+}
+
+/// One current group with its members and intra-group diameter
+/// (max pairwise haversine).
+struct GroupRow {
+    group_id: i64,
+    group_name: String,
+    diameter_m: f64,
+    members: Vec<GroupMember>,
+}
+
+fn current_groups(conn: &Connection) -> anyhow::Result<Vec<GroupRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT g.station_group_id, gv.station_group_name,
+                st.ext_uid, sv.station_name, sv.latitude, sv.longitude
+         FROM station_group g
+         JOIN station_group_version gv
+           ON gv.station_group_id = g.station_group_id AND gv.valid_to IS NULL
+         JOIN station_version sv
+           ON sv.station_group_id = g.station_group_id AND sv.valid_to IS NULL
+         JOIN station st ON st.station_id = sv.station_id
+         ORDER BY g.station_group_id, st.station_id",
+    )?;
+    let it = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            GroupMember {
+                ext_uid: r.get(2)?,
+                name: r.get(3)?,
+                lat: r.get(4)?,
+                lon: r.get(5)?,
+            },
+        ))
+    })?;
+
+    let mut by_group: HashMap<i64, (String, Vec<GroupMember>)> = HashMap::new();
+    for row in it {
+        let (group_id, group_name, member) = row?;
+        by_group
+            .entry(group_id)
+            .or_insert((group_name, Vec::new()))
+            .1
+            .push(member);
+    }
+
+    let mut groups = Vec::with_capacity(by_group.len());
+    for (group_id, (group_name, mut members)) in by_group {
+        members.sort_by_key(|m| m.ext_uid.clone());
+        let mut diameter_m = 0.0_f64;
+        for a in 0..members.len() {
+            for b in (a + 1)..members.len() {
+                let d = rm_core::geo::haversine_m(
+                    rm_core::LatLng::new(members[a].lat, members[a].lon),
+                    rm_core::LatLng::new(members[b].lat, members[b].lon),
+                );
+                diameter_m = diameter_m.max(d);
+            }
+        }
+        groups.push(GroupRow {
+            group_id,
+            group_name,
+            diameter_m,
+            members,
+        });
+    }
+    groups.sort_by_key(|g| g.group_id);
+    Ok(groups)
+}
+
+fn group_drifts(g: &GroupRow) -> bool {
+    g.diameter_m > GROUP_DIAMETER_WARN_M || g.members.len() as i64 > GROUP_MEMBERS_WARN
+}
+
+/// Chain-drift advisory: groups whose members chained far apart, or that
+/// swallowed an implausible number of stations. Never fails the run.
+fn grouping_drift(conn: &Connection) -> anyhow::Result<(Option<Check>, BTreeMap<String, f64>)> {
+    let groups = current_groups(conn)?;
+    let max_members = groups.iter().map(|g| g.members.len()).max().unwrap_or(0) as i64;
+    let max_diameter = groups.iter().map(|g| g.diameter_m).fold(0.0_f64, f64::max);
+    let violating = groups.iter().filter(|g| group_drifts(g)).count();
+    let stats = BTreeMap::from([
+        ("grouping_max_members".into(), max_members as f64),
+        ("grouping_max_diameter_m".into(), max_diameter),
+        ("grouping_drift_groups".into(), violating as f64),
+    ]);
+    let warn = if violating > 0 {
+        Some(check(
+            "grouping:chain-drift",
+            "same-name chains stay within one interchange",
+            true,
+            format!(
+                "{violating} groups exceed {} m diameter or {} members (see grouping_report.json)",
+                GROUP_DIAMETER_WARN_M as i64, GROUP_MEMBERS_WARN,
+            ),
+        ))
+    } else {
+        None
+    };
+    Ok((warn, stats))
+}
+
+/// Per-group drift detail for QA: every violating group with its members.
+fn write_grouping_report(conn: &Connection, qa_dir: &Path) -> anyhow::Result<()> {
+    use serde_json::json;
+    let groups = current_groups(conn)?;
+    let mut violating: Vec<&GroupRow> = groups.iter().filter(|g| group_drifts(g)).collect();
+    violating.sort_by(|a, b| b.diameter_m.total_cmp(&a.diameter_m));
+    let report = json!({
+        "thresholds": {
+            "diameter_warn_m": GROUP_DIAMETER_WARN_M,
+            "members_warn": GROUP_MEMBERS_WARN,
+        },
+        "violating_groups": violating.iter().map(|g| json!({
+            "station_group_id": g.group_id,
+            "name": g.group_name,
+            "diameter_m": (g.diameter_m * 10.0).round() / 10.0,
+            "member_count": g.members.len(),
+            "members": g.members.iter().map(|m| json!({
+                "ext_uid": m.ext_uid,
+                "name": m.name,
+                "lat": m.lat,
+                "lon": m.lon,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    });
+    std::fs::write(
+        qa_dir.join("grouping_report.json"),
         serde_json::to_string_pretty(&report)?,
     )?;
     Ok(())

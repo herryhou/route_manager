@@ -48,6 +48,9 @@ fn main() -> anyhow::Result<()> {
             c.detail
         );
     }
+    for w in &report.warnings {
+        println!("WARN {:<28} {}", w.id, w.detail);
+    }
     println!("counts: {:?}\nstats: {:?}", report.counts, report.stats);
     if report.all_pass() {
         println!("verify: all checks pass (batch {batch})");
