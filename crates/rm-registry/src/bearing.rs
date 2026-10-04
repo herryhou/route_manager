@@ -287,7 +287,11 @@ fn osm_bearing(
 
 /// Run covering the chainage; between runs (or beyond the ends), the
 /// nearest run — the last stop of a direction then reports its arrival
-/// heading on the final way.
+/// heading on the final way. A stop further than [`RUN_GAP_MAX_M`] from
+/// every run has none: past the matched coverage the nearest run
+/// describes a different road entirely (258 dir0 tail past 卓蘭大橋, in
+/// the Miaoli part of the polyline the Taichung OSM extract cannot
+/// match), and the caller falls back to the polyline tangent.
 fn pick_run(runs: &[Run], chainage_m: f64) -> anyhow::Result<Option<&Run>> {
     let mut best: Option<(&Run, f64)> = None;
     for r in runs {
@@ -302,8 +306,18 @@ fn pick_run(runs: &[Run], chainage_m: f64) -> anyhow::Result<Option<&Run>> {
             best = Some((r, d));
         }
     }
-    Ok(best.map(|(r, _)| r))
+    Ok(match best {
+        Some((r, d)) if d <= RUN_GAP_MAX_M => Some(r),
+        _ => None,
+    })
 }
+
+/// Maximum distance from a stop's chainage to the nearest matched way run
+/// before the OSM bearing is abandoned in favour of the polyline tangent.
+/// Within it, a stop between two runs reports the neighbouring way's
+/// heading (arrival/departure ramp); beyond it the nearest run is a
+/// different road.
+pub const RUN_GAP_MAX_M: f64 = 200.0;
 
 /// Forward tangent of `path` at `chainage_m`; at/beyond the end, the
 /// final leg (arrival heading for the last stop).
@@ -320,4 +334,39 @@ fn polyline_bearing(path: &[LatLng], chainage_m: f64) -> Option<f64> {
         cum += leg;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(start: f64, end: f64) -> Run {
+        Run {
+            way_id: 1,
+            entry_node_id: 1,
+            exit_node_id: 2,
+            cum_start_m: start,
+            cum_end_m: end,
+        }
+    }
+
+    #[test]
+    fn pick_run_within_gap_returns_nearest() {
+        let runs = [run(0.0, 100.0), run(5000.0, 6000.0)];
+        // covered
+        assert!(pick_run(&runs, 50.0).unwrap().is_some());
+        // small gap between runs -> nearest run still applies
+        assert!(pick_run(&runs, 150.0).unwrap().is_some());
+        // just past the last run, inside the gap tolerance (arrival heading)
+        assert!(pick_run(&runs, 6150.0).unwrap().is_some());
+    }
+
+    #[test]
+    fn pick_run_beyond_gap_returns_none() {
+        let runs = [run(0.0, 100.0), run(5000.0, 6000.0)];
+        // 258 dir0 tail shape: stop 790+ m past the final run (matched
+        // coverage ends at the county-line extract boundary)
+        assert!(pick_run(&runs, 6800.0).unwrap().is_none());
+        assert!(pick_run(&runs, 3000.0).unwrap().is_none());
+    }
 }
