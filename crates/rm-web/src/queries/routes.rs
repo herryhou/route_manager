@@ -20,18 +20,18 @@ fn direction_rows(conn: &Connection, route_ids: &[i64]) -> Result<Vec<Value>> {
     }
     let placeholders = vec!["?"; route_ids.len()].join(",");
     let sql = format!(
-        "SELECT r.route_id, sorv.direction, COUNT(*) AS stops,
+        "SELECT r.route_id, rsv.direction, COUNT(*) AS stops,
                 ms.matched_length_m, ms.path_length_m, ms.snap_dist_p50, ms.snap_dist_p95,
                 ms.outliers
-         FROM stop_of_route_version sorv
-         JOIN subroute_version sv ON sv.subroute_version_id = sorv.subroute_version_id
+         FROM route_stop_version rsv
+         JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
          JOIN route r ON r.route_id = rv.route_id
          LEFT JOIN seg_match_stat ms
-           ON ms.route_version_id = rv.route_version_id AND ms.direction = sorv.direction
+           ON ms.route_version_id = rv.route_version_id AND ms.direction = rsv.direction
          WHERE r.route_id IN ({placeholders})
-         GROUP BY r.route_id, sorv.direction
-         ORDER BY r.route_id, sorv.direction"
+         GROUP BY r.route_id, rsv.direction
+         ORDER BY r.route_id, rsv.direction"
     );
     let mut stmt = conn.prepare(&sql)?;
     let ids: Vec<String> = route_ids.iter().map(|i| i.to_string()).collect();
@@ -131,18 +131,20 @@ pub fn list(conn: &Connection, q: &str, limit: i64) -> Result<Value> {
     let dirs = directions_by_route(direction_rows(conn, &ids)?);
     let routes: Vec<Value> = routes
         .into_iter()
-        .map(|(route_id, route_code, ext_uid, name, providers, side, main)| {
-            json!({
-                "route_id": route_id,
-                "route_code": route_code,
-                "ext_uid": ext_uid,
-                "subroute_name": name,
-                "providers": providers,
-                "side_routes": side,
-                "main_routes": main,
-                "directions": dirs.get(&route_id).cloned().unwrap_or_default(),
-            })
-        })
+        .map(
+            |(route_id, route_code, ext_uid, name, providers, side, main)| {
+                json!({
+                    "route_id": route_id,
+                    "route_code": route_code,
+                    "ext_uid": ext_uid,
+                    "subroute_name": name,
+                    "providers": providers,
+                    "side_routes": side,
+                    "main_routes": main,
+                    "directions": dirs.get(&route_id).cloned().unwrap_or_default(),
+                })
+            },
+        )
         .collect();
     Ok(json!({ "routes": routes }))
 }
@@ -237,7 +239,7 @@ pub fn detail(conn: &Connection, route_id: i64) -> Result<Option<Value>> {
 pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
     let mut stmt = conn.prepare(
         "SELECT gd.ordinal, gd.encoded_polyline, gd.length_m, gd.geometry_method,
-                gd.from_stop_of_route_version_id, gd.to_stop_of_route_version_id
+                gd.from_route_stop_version_id, gd.to_route_stop_version_id
          FROM seg_geometry_draft gd
          JOIN subroute_version sv ON sv.subroute_version_id = gd.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
@@ -257,12 +259,12 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
 
     let mut features = Vec::new();
     for row in it {
-        let (ordinal, encoded, length_m, method, from_sorv, to_sorv) = row?;
+        let (ordinal, encoded, length_m, method, from_rsv, to_rsv) = row?;
         let pts = polyline::decode(&encoded)?;
         if pts.len() < 2 {
             continue; // degenerate piece — nothing to draw
         }
-        let (from_seq, to_seq) = sorv_sequences(conn, from_sorv, to_sorv)?;
+        let (from_seq, to_seq) = rsv_sequences(conn, from_rsv, to_rsv)?;
         features.push(geojson::feature(
             geojson::line_string(&pts),
             json!({
@@ -277,12 +279,12 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
     Ok(geojson::feature_collection(features))
 }
 
-fn sorv_sequences(conn: &Connection, from: i64, to: i64) -> Result<(i64, i64)> {
+fn rsv_sequences(conn: &Connection, from: i64, to: i64) -> Result<(i64, i64)> {
     Ok(conn.query_row(
-        "SELECT (SELECT stop_sequence FROM stop_of_route_version
-                  WHERE stop_of_route_version_id = ?1),
-               (SELECT stop_sequence FROM stop_of_route_version
-                  WHERE stop_of_route_version_id = ?2)",
+        "SELECT (SELECT stop_sequence FROM route_stop_version
+                  WHERE route_stop_version_id = ?1),
+               (SELECT stop_sequence FROM route_stop_version
+                  WHERE route_stop_version_id = ?2)",
         [from, to],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?)
@@ -291,20 +293,20 @@ fn sorv_sequences(conn: &Connection, from: i64, to: i64) -> Result<(i64, i64)> {
 /// `GET /api/routes/{id}/directions/{dir}/stops` — ordered stops + projection QA.
 pub fn stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
     let mut stmt = conn.prepare(
-        "SELECT sorv.stop_sequence, sorv.source_order_no,
+        "SELECT rsv.stop_sequence, rsv.source_order_no,
                 sv2.stop_version_id, sv2.stop_code, sv2.stop_name,
                 sv2.latitude, sv2.longitude, sv2.station_id,
                 p.chainage_m, p.snap_dist_m, p.method, p.monotonic_clamped,
                 p.projected_lat, p.projected_lon, sb.bearing_deg
-         FROM stop_of_route_version sorv
-         JOIN subroute_version sv ON sv.subroute_version_id = sorv.subroute_version_id
+         FROM route_stop_version rsv
+         JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
-         JOIN stop_version sv2 ON sv2.stop_version_id = sorv.stop_version_id
+         JOIN stop_version sv2 ON sv2.stop_version_id = rsv.stop_version_id
          LEFT JOIN path_stop_projection p
-           ON p.stop_of_route_version_id = sorv.stop_of_route_version_id
+           ON p.route_stop_version_id = rsv.route_stop_version_id
          LEFT JOIN stop_bearing sb ON sb.stop_version_id = sv2.stop_version_id
-         WHERE rv.route_id = ?1 AND sorv.direction = ?2
-         ORDER BY sorv.stop_sequence",
+         WHERE rv.route_id = ?1 AND rsv.direction = ?2
+         ORDER BY rsv.stop_sequence",
     )?;
     let it = stmt.query_map(rusqlite::params![route_id, direction], |r| {
         Ok(json!({
@@ -349,7 +351,13 @@ pub fn ways(conn: &Connection, route_id: i64, dir: i64) -> Result<Value> {
     let runs: Vec<WayRun> = stmt
         .query_map(rusqlite::params![route_id, dir], |r| {
             Ok((
-                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
             ))
         })?
         .collect::<Result<_, _>>()?;
@@ -376,7 +384,10 @@ pub fn ways(conn: &Connection, route_id: i64, dir: i64) -> Result<Value> {
         };
         let pts: Vec<LatLng> = nodes[lo..=hi]
             .iter()
-            .map(|(_, lat, lon)| LatLng { lat: *lat, lon: *lon })
+            .map(|(_, lat, lon)| LatLng {
+                lat: *lat,
+                lon: *lon,
+            })
             .collect();
         if pts.len() < 2 {
             continue;

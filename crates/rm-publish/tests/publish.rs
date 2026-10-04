@@ -23,7 +23,7 @@ fn publishes_all_routes_atomically_with_pointer_and_outbox() {
     let s = run(&mut conn, batch).unwrap();
     assert_eq!(s.published, 2);
     assert_eq!(s.failed, 0);
-    assert_eq!(s.stop_of_route_rows, 4, "3 + 1 stop rows");
+    assert_eq!(s.route_stop_rows, 4, "3 + 1 stop rows");
 
     // route_version V1 PUBLISHED per route, pointer + revision
     let rows: Vec<(String, i64, String, Option<i64>, i64)> = {
@@ -63,17 +63,17 @@ fn publishes_all_routes_atomically_with_pointer_and_outbox() {
         .unwrap();
     assert_eq!((name.as_str(), cnt), ("A - B", 1));
 
-    // stop_of_route: renumbered 1..N per direction, source_order_no kept
+    // route_stop: renumbered 1..N per direction, source_order_no kept
     let rows: Vec<(i64, i64, Option<i64>)> = {
         let mut stmt = conn
             .prepare(
-                "SELECT sorv.direction, sorv.stop_sequence, sorv.source_order_no
-                 FROM stop_of_route_version sorv
-                 JOIN subroute_version sv ON sv.subroute_version_id = sorv.subroute_version_id
+                "SELECT rsv.direction, rsv.stop_sequence, rsv.source_order_no
+                 FROM route_stop_version rsv
+                 JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
                  JOIN route_version rv ON rv.route_version_id = sv.route_version_id
                  JOIN route r ON r.route_id = rv.route_id
                  WHERE r.ext_uid = 'tcg:1'
-                 ORDER BY sorv.direction, sorv.stop_sequence",
+                 ORDER BY rsv.direction, rsv.stop_sequence",
             )
             .unwrap();
         let it = stmt
@@ -89,9 +89,9 @@ fn publishes_all_routes_atomically_with_pointer_and_outbox() {
     // route 2: orderNo 5 renumbered to 1
     let (seq, src): (i64, Option<i64>) = conn
         .query_row(
-            "SELECT sorv.stop_sequence, sorv.source_order_no
-             FROM stop_of_route_version sorv
-             JOIN subroute_version sv ON sv.subroute_version_id = sorv.subroute_version_id
+            "SELECT rsv.stop_sequence, rsv.source_order_no
+             FROM route_stop_version rsv
+             JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
              JOIN route_version rv ON rv.route_version_id = sv.route_version_id
              JOIN route r ON r.route_id = rv.route_id
              WHERE r.ext_uid = 'tcg:2'",
@@ -171,19 +171,19 @@ fn cyclic_route_same_stop_twice_keeps_both_rows() {
     rm_identity::run(&conn, batch).unwrap();
     let s = run(&mut conn, batch).unwrap();
     assert_eq!(s.published, 2);
-    assert_eq!(s.stop_of_route_rows, 5);
+    assert_eq!(s.route_stop_rows, 5);
 
     // two rows, same stop_version_id, sequences 1 & 2
     let rows: Vec<(i64, i64)> = {
         let mut stmt = conn
             .prepare(
-                "SELECT sorv.stop_sequence, COUNT(DISTINCT sorv.stop_version_id)
-                 FROM stop_of_route_version sorv
-                 JOIN subroute_version sv ON sv.subroute_version_id = sorv.subroute_version_id
+                "SELECT rsv.stop_sequence, COUNT(DISTINCT rsv.stop_version_id)
+                 FROM route_stop_version rsv
+                 JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
                  JOIN route_version rv ON rv.route_version_id = sv.route_version_id
                  JOIN route r ON r.route_id = rv.route_id
-                 WHERE r.ext_uid = 'tcg:1' AND sorv.direction = 1
-                 GROUP BY sorv.stop_sequence ORDER BY sorv.stop_sequence",
+                 WHERE r.ext_uid = 'tcg:1' AND rsv.direction = 1
+                 GROUP BY rsv.stop_sequence ORDER BY rsv.stop_sequence",
             )
             .unwrap();
         let it = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
@@ -196,11 +196,11 @@ fn cyclic_route_same_stop_twice_keeps_both_rows() {
     );
     let same_stop: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM (SELECT stop_version_id FROM stop_of_route_version sorv
-             JOIN subroute_version sv ON sv.subroute_version_id = sorv.subroute_version_id
+            "SELECT COUNT(*) FROM (SELECT stop_version_id FROM route_stop_version rsv
+             JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
              JOIN route_version rv ON rv.route_version_id = sv.route_version_id
              JOIN route r ON r.route_id = rv.route_id
-             WHERE r.ext_uid='tcg:1' AND sorv.direction=1
+             WHERE r.ext_uid='tcg:1' AND rsv.direction=1
              GROUP BY stop_version_id HAVING COUNT(*)=2)",
             [],
             |r| r.get(0),
@@ -210,20 +210,20 @@ fn cyclic_route_same_stop_twice_keeps_both_rows() {
 }
 
 #[test]
-fn stop_of_route_sequence_is_contiguous_per_direction() {
+fn route_stop_sequence_is_contiguous_per_direction() {
     let (_dir, mut conn, batch) = setup();
     run(&mut conn, batch).unwrap();
     let gaps: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM (
-                SELECT sorv.subroute_version_id, sorv.direction, sorv.stop_sequence
-                FROM stop_of_route_version sorv
+                SELECT rsv.subroute_version_id, rsv.direction, rsv.stop_sequence
+                FROM route_stop_version rsv
                 JOIN (
                     SELECT subroute_version_id, direction, COUNT(*) AS n, MIN(stop_sequence) AS mn, MAX(stop_sequence) AS mx
-                    FROM stop_of_route_version GROUP BY subroute_version_id, direction
-                ) t ON t.subroute_version_id = sorv.subroute_version_id AND t.direction = sorv.direction
-                GROUP BY sorv.subroute_version_id, sorv.direction
-                HAVING COUNT(DISTINCT sorv.stop_sequence) != t.n OR t.mn != 1 OR t.mx != t.n
+                    FROM route_stop_version GROUP BY subroute_version_id, direction
+                ) t ON t.subroute_version_id = rsv.subroute_version_id AND t.direction = rsv.direction
+                GROUP BY rsv.subroute_version_id, rsv.direction
+                HAVING COUNT(DISTINCT rsv.stop_sequence) != t.n OR t.mn != 1 OR t.mx != t.n
              )",
             [],
             |r| r.get(0),

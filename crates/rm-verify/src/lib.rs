@@ -185,7 +185,7 @@ pub fn run(
             "station_version",
             "station_group",
             "station_group_version",
-            "stop_of_route_version",
+            "route_stop_version",
         ] {
             let max: i64 = conn.query_row(
                 &format!("SELECT COALESCE(MAX(rowid), 0) FROM {t}"),
@@ -276,8 +276,8 @@ pub fn run(
                 OR NOT EXISTS (SELECT 1 FROM subroute_version sv
                                WHERE sv.route_version_id = v.route_version_id)
                 OR NOT EXISTS (SELECT 1 FROM subroute_version sv
-                               JOIN stop_of_route_version sov
-                                 ON sov.subroute_version_id = sv.subroute_version_id
+                               JOIN route_stop_version rsv
+                                 ON rsv.subroute_version_id = sv.subroute_version_id
                                WHERE sv.route_version_id = v.route_version_id)",
             &[],
         )?;
@@ -315,7 +315,7 @@ pub fn run(
         ));
     }
 
-    // ---- INV-16: SubRoute/StopOfRoute only versioned inside RouteVersion ----
+    // ---- INV-16: SubRoute/RouteStop only versioned inside RouteVersion ----
     checks.push(zero_check(
         conn,
         "inv16:version-scoped",
@@ -352,7 +352,7 @@ pub fn run(
         "seq:contiguous",
         "(subroute, direction) with non-contiguous stop_sequence",
         "SELECT COUNT(*) FROM (SELECT subroute_version_id, direction
-         FROM stop_of_route_version
+         FROM route_stop_version
          GROUP BY subroute_version_id, direction
          HAVING MIN(stop_sequence) != 1
             OR MAX(stop_sequence) != COUNT(*)

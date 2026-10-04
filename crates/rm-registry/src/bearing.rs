@@ -78,9 +78,9 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                 let mut stmt = tx.prepare(
                     "SELECT s.stop_version_id, s.latitude, s.longitude, p.chainage_m
                      FROM path_stop_projection p
-                     JOIN stop_of_route_version sorv
-                        ON sorv.stop_of_route_version_id = p.stop_of_route_version_id
-                     JOIN stop_version s ON s.stop_version_id = sorv.stop_version_id
+                     JOIN route_stop_version rsv
+                        ON rsv.route_stop_version_id = p.route_stop_version_id
+                     JOIN stop_version s ON s.stop_version_id = rsv.stop_version_id
                      WHERE p.route_version_id = ?1 AND p.direction = ?2
                      ORDER BY p.stop_sequence",
                 )?;

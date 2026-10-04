@@ -72,7 +72,7 @@ Response：
     {
       "subRouteId": 30701,
       "subRouteName": "307",
-      "stopOfRoutes": [
+      "routeStops": [
         {
           "direction": 0,
           "stops": [
@@ -318,7 +318,7 @@ BEGIN
  │
  ├─ Create SubRouteVersion
  │
- ├─ Create StopOfRouteVersion
+ ├─ Create RouteStopVersion
  │    （引用既有 StopVersion）
  │
  ├─ Update current_route_version_id
@@ -590,7 +590,7 @@ Route Version
  ↓
 SubRoute Version
  ↓
-StopOfRoute Version
+RouteStop Version
  ↓
 Stop Version
  ↓
@@ -618,7 +618,7 @@ Current Route
 ```text
 Trip
 → route_version_id + subroute_id + direction
-→ stop_of_route_version
+→ route_stop_version
 → stop_version
 ```
 
@@ -958,7 +958,7 @@ Then rerunning R001 must still resolve:
 
 ## Test 7 — Atomic Publish
 
-Force failure while creating StopOfRoute Version.
+Force failure while creating RouteStop Version.
 
 Expected:
 

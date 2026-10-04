@@ -4,7 +4,7 @@
 
 **Status:** Proposed Standard
 **Audience:** Backend / Database / Architecture / BI / Data Engineering
-**Scope:** Route、SubRoute、StopOfRoute、Stop、Station、StationGroup、Trip、Report 的歷史版本與一致性管理
+**Scope:** Route、SubRoute、RouteStop、Stop、Station、StationGroup、Trip、Report 的歷史版本與一致性管理
 
 ---
 
@@ -69,7 +69,7 @@ stop_code
 其中：
 
 * `route_id`：Route 的穩定 identity
-* `route_version_id`：Route aggregate 在某個版本的完整狀態（含 SubRoute、StopOfRoute）
+* `route_version_id`：Route aggregate 在某個版本的完整狀態（含 SubRoute、RouteStop）
 * `subroute_id`：SubRoute 的穩定 identity，隸屬於 Route
 * `stop_id`：Stop（站牌）的永久 identity
 * `stop_version_id`：Stop 在某個版本的狀態
@@ -101,7 +101,7 @@ Published Version 一旦建立，不得修改其歷史內容。
 ```text
 RouteVersion
 SubRouteVersion
-StopOfRouteVersion
+RouteStopVersion
 StopVersion
 StationVersion
 StationGroupVersion
@@ -114,7 +114,7 @@ StationGroupVersion
 ```text
 RouteVersion 的 SubRoute 組成
 SubRouteVersion 的名稱
-StopOfRouteVersion 的 direction / sequence
+RouteStopVersion 的 direction / sequence
 StopVersion 的名稱
 StopVersion 的座標
 StationVersion 的名稱
@@ -197,7 +197,7 @@ RouteVersion 涵蓋整個 aggregate：
 ```text
 RouteVersion
 ├── SubRoute 組成（此版本包含哪些 SubRoute）
-├── 每個 SubRoute 的 StopOfRoute 站序（依 Direction 分開）
+├── 每個 SubRoute 的 RouteStop 站序（依 Direction 分開）
 └── 每個站序點引用的 StopVersion
 ```
 
@@ -222,10 +222,10 @@ subroute_id
 subroute_name
 ```
 
-StopOfRoute 站序在此版本的狀態：
+RouteStop 站序在此版本的狀態：
 
 ```text
-stop_of_route_version_id
+route_stop_version_id
 subroute_version_id
 stop_version_id
 direction
@@ -259,7 +259,7 @@ A → B' → E → D
 
 ### MUST
 
-SubRoute 與 StopOfRoute 只能作為 RouteVersion 的一部分建立新版本；
+SubRoute 與 RouteStop 只能作為 RouteVersion 的一部分建立新版本；
 不得脫離 RouteVersion 單獨版本化。
 
 ---
@@ -445,7 +445,7 @@ created_at
 
 ---
 
-# 8. StopOfRoute Version
+# 8. RouteStop Version
 
 SubRoute 與 Stop 的關係（實際停靠站序）也必須版本化，
 作為 RouteVersion 的一部分。
@@ -453,16 +453,16 @@ SubRoute 與 Stop 的關係（實際停靠站序）也必須版本化，
 概念：
 
 ```text
-stop_of_route_version
+route_stop_version
 ---------------------
-stop_of_route_version_id
+route_stop_version_id
 subroute_version_id
 stop_version_id
 direction
 stop_sequence
 ```
 
-同一 SubRoute 的去程與返程，是不同的 StopOfRoute 站序。
+同一 SubRoute 的去程與返程，是不同的 RouteStop 站序。
 
 例如：
 
@@ -689,7 +689,7 @@ occurred_at
 ```
 
 其中 `subroute_id` 與 `direction` 標明交易發生在哪個分支、哪個方向；
-其當時狀態由 `route_version_id` 內的 SubRouteVersion / StopOfRouteVersion 還原。
+其當時狀態由 `route_version_id` 內的 SubRouteVersion / RouteStopVersion 還原。
 
 例如：
 
@@ -973,7 +973,7 @@ create RouteVersion
 
 create SubRouteVersion(s)
 
-create StopOfRouteVersion(s)
+create RouteStopVersion(s)
 （站序引用既有 StopVersion；站體版本另有自己的版本化流程）
 
 close previous validity interval
@@ -993,7 +993,7 @@ COMMIT
 
 ```text
 RouteVersion 已建立
-但 StopOfRouteVersion 尚未完成
+但 RouteStopVersion 尚未完成
 ```
 
 的半成品 Published Version。
@@ -1169,7 +1169,7 @@ Route Publish 與 Event 必須具有一致性。
 BEGIN
 
 create RouteVersion
-create SubRouteVersion / StopOfRouteVersion
+create SubRouteVersion / RouteStopVersion
 update current pointer
 
 insert Outbox Event
@@ -1360,7 +1360,7 @@ trip 只存 route_id + route_version_id
            SubRoute Version(s)
                      │
                      ▼
-        StopOfRoute Version(s)
+        RouteStop Version(s)
         （引用既有 StopVersion）
                      │
                      ▼
@@ -1488,8 +1488,8 @@ direction_id     direction                           Direction（0 去程、1 �
 GTFS 欄位        內部來源                            TDX 對應
 ---------------  ----------------------------------  ------------------------------
 trip_id          trip_id                             Trips[]
-stop_id          StopOfRouteVersion → stop_id        StopTimes[].StopUID
-stop_sequence    StopOfRouteVersion.stop_sequence    StopTimes[].StopSequence
+stop_id          RouteStopVersion → stop_id        StopTimes[].StopUID
+stop_sequence    RouteStopVersion.stop_sequence    StopTimes[].StopSequence
 arrival_time     班表時刻                            StopTimes[].ArrivalTime
 departure_time   班表時刻                            StopTimes[].DepartureTime
 ```
@@ -1599,14 +1599,14 @@ mapping 一律以 `StopUID` 為準。
 ```text
 INV-01
 Published RouteVersion MUST be immutable,
-including its SubRouteVersion and StopOfRouteVersion content.
+including its SubRouteVersion and RouteStopVersion content.
 
 INV-02
 Published StopVersion, StationVersion and
 StationGroupVersion MUST be immutable.
 
 INV-03
-StopOfRouteVersion MUST be immutable.
+RouteStopVersion MUST be immutable.
 
 INV-04
 stop_id, station_id and
@@ -1651,7 +1651,7 @@ Business Code such as stop_code MUST NOT be treated
 as immutable identity.
 
 INV-16
-SubRoute and StopOfRoute MUST only be versioned
+SubRoute and RouteStop MUST only be versioned
 as part of a RouteVersion, never independently.
 
 INV-17
@@ -1706,9 +1706,9 @@ subroute_id FK
 subroute_name
 
 
-STOP_OF_ROUTE_VERSION
+ROUTE_STOP_VERSION
 ---------------------
-stop_of_route_version_id PK
+route_stop_version_id PK
 subroute_version_id FK
 stop_version_id FK
 direction
@@ -1836,7 +1836,7 @@ published_at
 ```text
 Route
 SubRoute
-StopOfRoute
+RouteStop
 Stop（站牌）
 Station（站位）
 StationGroup（組站位）

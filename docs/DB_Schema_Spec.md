@@ -3,7 +3,7 @@
 ## DB Schema & Constraints Specification
 
 **Status:** Implementation Specification
-**Scope:** Route / SubRoute / StopOfRoute / Stop / Station / StationGroup / Trip / Report Snapshot
+**Scope:** Route / SubRoute / RouteStop / Stop / Station / StationGroup / Trip / Report Snapshot
 **Database:** DB-neutral
 **Primary Goal:** Preserve immutable historical truth under frequent Route / Stop changes.
 
@@ -14,11 +14,11 @@
 以下規則是 DB schema 的最高優先級：
 
 1. `route_id` 是 Route identity，不隨 Version 改變。
-2. `route_version_id` 是 immutable Route aggregate state（含 SubRoute 與 StopOfRoute）。
+2. `route_version_id` 是 immutable Route aggregate state（含 SubRoute 與 RouteStop）。
 3. `stop_id`、`station_id`、`station_group_id` 永不重用。
 4. `stop_version_id` / `station_version_id` / `station_group_version_id` 是該實體在特定有效期間的狀態。
 5. `subroute` 只有 identity；其版本狀態保存於 `subroute_version`，隸屬某個 `route_version`。
-6. `stop_of_route_version` 描述某個 SubRoute Version 在某個 Direction 的站序。
+6. `route_stop_version` 描述某個 SubRoute Version 在某個 Direction 的站序。
 7. Published Version 不得 UPDATE 業務內容。
 8. `trip` 必須保存發生時的 `route_version_id`、`subroute_id`、`direction`。
 9. Report Snapshot 必須保存當時選定的 `route_version_id`。
@@ -35,7 +35,7 @@ ROUTE
   ├──  current_route_version_id
   └──< ROUTE_VERSION
          └──< SUBROUTE_VERSION >──── SUBROUTE
-                └──< STOP_OF_ROUTE_VERSION >──── STOP_VERSION
+                └──< ROUTE_STOP_VERSION >──── STOP_VERSION
                                                 │
                                                 └──── STOP
                                                       │
@@ -333,7 +333,7 @@ UNIQUE(stop_code, active_time_range)
 
 ---
 
-# 9. SUBROUTE_VERSION 與 STOP_OF_ROUTE_VERSION
+# 9. SUBROUTE_VERSION 與 ROUTE_STOP_VERSION
 
 ```sql
 CREATE TABLE subroute_version (
@@ -353,8 +353,8 @@ CREATE TABLE subroute_version (
         REFERENCES subroute(subroute_id)
 );
 
-CREATE TABLE stop_of_route_version (
-    stop_of_route_version_id  BIGINT PRIMARY KEY,
+CREATE TABLE route_stop_version (
+    route_stop_version_id  BIGINT PRIMARY KEY,
 
     subroute_version_id       BIGINT NOT NULL,
     stop_version_id           BIGINT NOT NULL,
@@ -591,7 +591,7 @@ Publish Route 時：
 ```text
 Route Version
 SubRoute Version
-StopOfRoute Version
+RouteStop Version
 Current Pointer
 Outbox Event
 ```
@@ -614,10 +614,10 @@ route_version
 subroute_version
     (route_version_id)
 
-stop_of_route_version
+route_stop_version
     (subroute_version_id, direction, stop_sequence)
 
-stop_of_route_version
+route_stop_version
     (subroute_version_id, stop_version_id)
 
 stop_version
@@ -666,10 +666,10 @@ subroute_version.route_version_id
 subroute_version.subroute_id
         → subroute.subroute_id
 
-stop_of_route_version.subroute_version_id
+route_stop_version.subroute_version_id
         → subroute_version.subroute_version_id
 
-stop_of_route_version.stop_version_id
+route_stop_version.stop_version_id
         → stop_version.stop_version_id
 
 stop_version.stop_id
@@ -712,7 +712,7 @@ Published historical records：
 ```text
 route_version
 subroute_version
-stop_of_route_version
+route_stop_version
 stop_version
 station_version
 station_group_version
@@ -792,7 +792,7 @@ I01  Published Version immutable
 I02  stop_id / station_id / station_group_id never reused
 I03  Route Version belongs to exactly one Route
 I04  SubRoute Version belongs to exactly one Route Version;
-     StopOfRoute Version belongs to exactly one SubRoute Version
+     RouteStop Version belongs to exactly one SubRoute Version
 I05  Trip preserves Route Version + SubRoute + Direction
 I06  Report Snapshot preserves Route Version
 I07  Current pointer references a published Version

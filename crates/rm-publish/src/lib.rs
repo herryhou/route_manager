@@ -1,5 +1,5 @@
 //! rm-publish: per-route atomic V1 publish (route_version + subroute_version
-//! + stop_of_route_version + current pointer + outbox_event, one tx each).
+//! + route_stop_version + current pointer + outbox_event, one tx each).
 
 use anyhow::Result;
 use rusqlite::{Connection, Transaction};
@@ -11,7 +11,7 @@ pub struct Summary {
     pub skipped: usize,
     pub failed: usize,
     pub failures: Vec<(String, String)>, // (xno, reason)
-    pub stop_of_route_rows: usize,
+    pub route_stop_rows: usize,
 }
 
 /// Publish every route in `batch` (numeric xno order). One tx per route:
@@ -52,7 +52,7 @@ pub fn run(conn: &mut Connection, batch_id: i64) -> Result<Summary> {
         match publish_route(conn, batch_id, xno, description, &valid_from, &now) {
             Ok(Some(rows)) => {
                 summary.published += 1;
-                summary.stop_of_route_rows += rows;
+                summary.route_stop_rows += rows;
             }
             Ok(None) => summary.skipped += 1,
             Err(reason) => {
@@ -194,11 +194,11 @@ fn publish_tx(
         let seq = seq_of_dir.entry(*direction).or_insert(0);
         *seq += 1;
         tx.execute(
-            "INSERT INTO stop_of_route_version
-                (stop_of_route_version_id, subroute_version_id, stop_version_id, direction, stop_sequence, source_order_no, created_at)
+            "INSERT INTO route_stop_version
+                (route_stop_version_id, subroute_version_id, stop_version_id, direction, stop_sequence, source_order_no, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
-                rm_db::mint(tx, "stop_of_route_version")?,
+                rm_db::mint(tx, "route_stop_version")?,
                 sv_id,
                 stop_version_id,
                 direction,

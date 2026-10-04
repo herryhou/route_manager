@@ -4,15 +4,19 @@ use anyhow::Result;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
-fn serving_routes_where(conn: &Connection, where_sql: &str, params: &[&dyn rusqlite::ToSql]) -> Result<Vec<Value>> {
+fn serving_routes_where(
+    conn: &Connection,
+    where_sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> Result<Vec<Value>> {
     let sql = format!(
-        "SELECT DISTINCT r.route_id, r.route_code, sv.subroute_name, sorv.direction
-         FROM stop_of_route_version sorv
-         JOIN subroute_version sv ON sv.subroute_version_id = sorv.subroute_version_id
+        "SELECT DISTINCT r.route_id, r.route_code, sv.subroute_name, rsv.direction
+         FROM route_stop_version rsv
+         JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
          JOIN route r ON r.route_id = rv.route_id
          WHERE {where_sql}
-         ORDER BY r.route_id, sorv.direction"
+         ORDER BY r.route_id, rsv.direction"
     );
     let mut stmt = conn.prepare(&sql)?;
     let it = stmt.query_map(params, |r| {
@@ -92,20 +96,17 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
         it.collect::<Result<_, _>>()?
     };
 
-    let routes_by_stop = serving_routes_where(
-        conn,
-        "sorv.stop_version_id = ?1",
-        &[&stop_version_id],
-    )?;
+    let routes_by_stop =
+        serving_routes_where(conn, "rsv.stop_version_id = ?1", &[&stop_version_id])?;
     let routes_by_station = serving_routes_where(
         conn,
-        "sorv.stop_version_id IN (SELECT stop_version_id FROM stop_version
+        "rsv.stop_version_id IN (SELECT stop_version_id FROM stop_version
                                    WHERE station_id = ?1 AND valid_to IS NULL)",
         &[station_id],
     )?;
     let routes_by_group = serving_routes_where(
         conn,
-        "sorv.stop_version_id IN (SELECT stop_version_id FROM stop_version
+        "rsv.stop_version_id IN (SELECT stop_version_id FROM stop_version
            WHERE station_id IN (SELECT station_id FROM station_version
                                 WHERE station_group_id = ?1 AND valid_to IS NULL)
            AND valid_to IS NULL)",
@@ -207,7 +208,7 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
 
     let routes = serving_routes_where(
         conn,
-        "sorv.stop_version_id IN (SELECT stop_version_id FROM stop_version
+        "rsv.stop_version_id IN (SELECT stop_version_id FROM stop_version
                                    WHERE station_id = ?1 AND valid_to IS NULL)",
         &[&station_id],
     )?;
@@ -239,7 +240,12 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
 
 /// `GET /api/stops?bbox=minLon,minLat,maxLon,maxLat&kind=stop|station`
 /// Viewport layer — bbox WHERE over current versions, LIMIT with truncation.
-pub fn viewport(conn: &Connection, bbox: (f64, f64, f64, f64), kind: &str, limit: i64) -> Result<Value> {
+pub fn viewport(
+    conn: &Connection,
+    bbox: (f64, f64, f64, f64),
+    kind: &str,
+    limit: i64,
+) -> Result<Value> {
     let (min_lon, min_lat, max_lon, max_lat) = bbox;
     // kind-specific table + bearing join: stops get their own bearing + source,
     // stations get the circular-mean bearing + member spread.

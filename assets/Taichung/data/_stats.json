@@ -1,7 +1,7 @@
 {
   "routes": 392,
   "stations_unique": 7424,
-  "stop_of_route_rows": 37294,
+  "route_stop_rows": 37294,
   "stops_unique_sid": 14045,
   "sid_reused_across_route_dir": 6830,
   "stations_with_alt_names": 0,

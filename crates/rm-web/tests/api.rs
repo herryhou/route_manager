@@ -31,7 +31,9 @@ async fn get_json(app: &axum::Router, uri: &str) -> serde_json::Value {
         .await
         .unwrap();
     let status = res.status();
-    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+        .await
+        .unwrap();
     assert_eq!(
         status,
         StatusCode::OK,
@@ -64,11 +66,19 @@ async fn stats_reports_fixture_counts() {
 
     let v = get_json(&app, "/api/stats").await;
     let counts = &v["counts"];
-    assert_eq!(counts["routes"].as_i64().unwrap(), 2, "fixture has 2 routes");
+    assert_eq!(
+        counts["routes"].as_i64().unwrap(),
+        2,
+        "fixture has 2 routes"
+    );
     for key in ["stops", "stations", "groups", "segments", "traversals"] {
         assert!(counts[key].is_i64(), "counts.{key} missing: {v}");
     }
-    assert_eq!(counts["segments"].as_i64().unwrap(), 0, "no registry stage run");
+    assert_eq!(
+        counts["segments"].as_i64().unwrap(),
+        0,
+        "no registry stage run"
+    );
     let m = &v["match"];
     assert_eq!(m["directions_with_stats"].as_i64().unwrap(), 0);
     assert!(m["directions_total"].as_i64().unwrap() >= 2);
@@ -181,7 +191,10 @@ async fn route_path_stops_and_drilldown() {
     let d = get_json(&app, &format!("/api/stops/{sv_id}")).await;
     assert_eq!(d["stop"]["stop_name"], serde_json::json!("干城站"));
     assert!(d["station"]["station_id"].is_i64());
-    assert_eq!(d["group"]["station_group_name"], serde_json::json!("干城站"));
+    assert_eq!(
+        d["group"]["station_group_name"],
+        serde_json::json!("干城站")
+    );
     let members = d["group_members"].as_array().unwrap();
     assert_eq!(members.len(), 2, "nodes 44+46 same name → one group: {d}");
     assert!(
@@ -270,7 +283,8 @@ async fn qa_outliers_list() {
     let v = get_json(&app, "/api/qa/outliers?min_snap=999999").await;
     let rows = v["outliers"].as_array().unwrap();
     assert!(
-        rows.iter().all(|o| o["method"] != serde_json::json!("PROJECTED")),
+        rows.iter()
+            .all(|o| o["method"] != serde_json::json!("PROJECTED")),
         "min_snap keeps method outliers, drops plain far stops: {v}"
     );
 
@@ -293,7 +307,6 @@ async fn unknown_api_path_is_404_json() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
-
 /// Full fixture chain through rm-registry: road along lon 120.6857, both
 /// routes ride it, registry mints 3 canonical segments (44→46, 44→50, 50→46).
 fn fixture_db_with_segments() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -311,10 +324,22 @@ fn fixture_db_with_segments() -> (tempfile::TempDir, std::path::PathBuf) {
     )
     .unwrap();
     let enc = rm_core::polyline::encode(&[
-        rm_core::LatLng { lat: 24.1412, lon: 120.6857 },
-        rm_core::LatLng { lat: 24.1410, lon: 120.6857 },
-        rm_core::LatLng { lat: 24.1407, lon: 120.6857 },
-        rm_core::LatLng { lat: 24.1405, lon: 120.6857 },
+        rm_core::LatLng {
+            lat: 24.1412,
+            lon: 120.6857,
+        },
+        rm_core::LatLng {
+            lat: 24.1410,
+            lon: 120.6857,
+        },
+        rm_core::LatLng {
+            lat: 24.1407,
+            lon: 120.6857,
+        },
+        rm_core::LatLng {
+            lat: 24.1405,
+            lon: 120.6857,
+        },
     ]);
     conn.execute(
         "UPDATE src_route_point SET encoded = ?1 WHERE batch_id = ?2 AND xno IN ('1','2')",
@@ -346,7 +371,7 @@ fn fixture_db_with_segments() -> (tempfile::TempDir, std::path::PathBuf) {
     }
     conn.execute_batch(
         "UPDATE route SET current_route_version_id = NULL, revision = 0 WHERE ext_uid = 'tcg:2';
-         DELETE FROM stop_of_route_version WHERE subroute_version_id IN
+         DELETE FROM route_stop_version WHERE subroute_version_id IN
             (SELECT subroute_version_id FROM subroute_version WHERE route_version_id =
                 (SELECT route_version_id FROM route_version WHERE route_id =
                     (SELECT route_id FROM route WHERE ext_uid = 'tcg:2')));
@@ -384,7 +409,10 @@ async fn segments_bbox_and_detail() {
         assert_eq!(f["geometry"]["type"], serde_json::json!("LineString"));
         let cs = f["geometry"]["coordinates"].as_array().unwrap();
         assert!(cs.len() >= 2, "{f}");
-        assert!((120.68..120.69).contains(&cs[0][0].as_f64().unwrap()), "lon first: {cs:?}");
+        assert!(
+            (120.68..120.69).contains(&cs[0][0].as_f64().unwrap()),
+            "lon first: {cs:?}"
+        );
         assert!(f["properties"]["segment_id"].is_string());
         assert!(f["properties"]["route_count"].as_i64().unwrap() >= 1);
         assert!(f["properties"]["length_m"].as_f64().unwrap() > 0.0);
@@ -395,12 +423,18 @@ async fn segments_bbox_and_detail() {
     assert_eq!(v["features"].as_array().unwrap().len(), 0, "{v}");
 
     // min_routes=2 → none (each segment carries exactly one route in fixture)
-    let v = get_json(&app, "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420&min_routes=2").await;
+    let v = get_json(
+        &app,
+        "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420&min_routes=2",
+    )
+    .await;
     assert_eq!(v["features"].as_array().unwrap().len(), 0, "{v}");
 
     // detail: ways composition + traversing routes
     let v = get_json(&app, "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420").await;
-    let seg_id = v["features"][0]["properties"]["segment_id"].as_str().unwrap();
+    let seg_id = v["features"][0]["properties"]["segment_id"]
+        .as_str()
+        .unwrap();
     let d = get_json(&app, &format!("/api/segments/{seg_id}")).await;
     assert_eq!(d["segment_id"], serde_json::json!(seg_id));
     let ways = d["ways"].as_array().unwrap();
@@ -409,7 +443,10 @@ async fn segments_bbox_and_detail() {
     assert_eq!(ways[0]["name"], serde_json::json!("測試路"));
     let routes = d["routes"].as_array().unwrap();
     assert_eq!(routes.len(), 1, "one route per fixture segment: {d}");
-    let codes: Vec<&str> = routes.iter().map(|r| r["route_code"].as_str().unwrap()).collect();
+    let codes: Vec<&str> = routes
+        .iter()
+        .map(|r| r["route_code"].as_str().unwrap())
+        .collect();
     assert!(codes.contains(&"1") || codes.contains(&"2"), "{codes:?}");
 
     // unknown segment id → 404
@@ -456,7 +493,10 @@ async fn route_ways_overlay_trims_to_entry_exit() {
         }
         let p = &f["properties"];
         assert_eq!(p["osm_way_id"].as_i64().unwrap(), 100);
-        assert!(p["entry_node_id"].is_i64() && p["exit_node_id"].is_i64(), "{p}");
+        assert!(
+            p["entry_node_id"].is_i64() && p["exit_node_id"].is_i64(),
+            "{p}"
+        );
         // trimmed: first vertex IS the entry node, last IS the exit node
         assert_eq!(p["entry_coords"].as_array().unwrap().len(), 2, "{p}");
         assert_eq!(cs[0], p["entry_coords"], "{f}");
@@ -467,7 +507,6 @@ async fn route_ways_overlay_trims_to_entry_exit() {
     let v = get_json(&app, &format!("/api/routes/{id1}/directions/1/ways")).await;
     assert_eq!(v["type"], serde_json::json!("FeatureCollection"), "{v}");
 }
-
 
 #[tokio::test]
 async fn raw_staging_compare() {
@@ -497,7 +536,10 @@ async fn raw_staging_compare() {
     assert_eq!(v["batch_id"].as_i64().unwrap(), 1);
     let coords = v["path"]["geometry"]["coordinates"].as_array().unwrap();
     assert!(coords.len() >= 2, "{v}");
-    assert!((120.68..120.69).contains(&coords[0][0].as_f64().unwrap()), "{coords:?}");
+    assert!(
+        (120.68..120.69).contains(&coords[0][0].as_f64().unwrap()),
+        "{coords:?}"
+    );
     let stops = v["stops"].as_array().unwrap();
     assert_eq!(stops.len(), 2, "{v}");
     assert_eq!(stops[0]["node_id"], serde_json::json!("44"));
@@ -508,18 +550,23 @@ async fn raw_staging_compare() {
     // route 2 dir 0: three rewritten raw stops in order 44 -> 50 -> 46
     let v = get_json(&app, &format!("/api/routes/{id2}/directions/0/raw")).await;
     let stops = v["stops"].as_array().unwrap();
-    let nodes: Vec<&str> = stops.iter().map(|s| s["node_id"].as_str().unwrap()).collect();
+    let nodes: Vec<&str> = stops
+        .iter()
+        .map(|s| s["node_id"].as_str().unwrap())
+        .collect();
     assert_eq!(nodes, vec!["44", "50", "46"], "{v}");
 
     // route 1 dir 1: this fixture's UPDATE fills both directions, so the
     // path decodes too; dir 1 staging has the single node-46 stop
     let v = get_json(&app, &format!("/api/routes/{id1}/directions/1/raw")).await;
-    assert!(v["path"]["geometry"]["coordinates"].as_array().is_some(), "{v}");
+    assert!(
+        v["path"]["geometry"]["coordinates"].as_array().is_some(),
+        "{v}"
+    );
     let stops = v["stops"].as_array().unwrap();
     assert_eq!(stops.len(), 1, "{v}");
     assert_eq!(stops[0]["node_id"], serde_json::json!("46"));
 }
-
 
 #[tokio::test]
 async fn stops_viewport_and_search() {
@@ -527,7 +574,11 @@ async fn stops_viewport_and_search() {
     let app = router_with(AppState::new(db));
 
     // bbox over the fixture stops (nodes 44/46 near 24.14, 120.68)
-    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=stop").await;
+    let v = get_json(
+        &app,
+        "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=stop",
+    )
+    .await;
     assert_eq!(v["type"], serde_json::json!("FeatureCollection"), "{v}");
     let feats = v["features"].as_array().unwrap();
     assert!(!feats.is_empty(), "{v}");
@@ -538,7 +589,11 @@ async fn stops_viewport_and_search() {
         assert!(f["properties"]["name"].is_string());
     }
     // kind=station returns station points
-    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=station").await;
+    let v = get_json(
+        &app,
+        "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=station",
+    )
+    .await;
     assert!(!v["features"].as_array().unwrap().is_empty(), "{v}");
 
     // disjunct bbox → empty
@@ -546,7 +601,11 @@ async fn stops_viewport_and_search() {
     assert_eq!(v["features"].as_array().unwrap().len(), 0, "{v}");
 
     // limit → truncated flag
-    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=stop&limit=1").await;
+    let v = get_json(
+        &app,
+        "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=stop&limit=1",
+    )
+    .await;
     assert_eq!(v["truncated"], serde_json::json!(true), "{v}");
     assert_eq!(v["features"].as_array().unwrap().len(), 1, "{v}");
 
@@ -564,21 +623,33 @@ async fn bearings_exposed_across_endpoints() {
     let app = router_with(AppState::new(db));
 
     // viewport stops: bearing + source
-    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=stop").await;
+    let v = get_json(
+        &app,
+        "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=stop",
+    )
+    .await;
     let feats = v["features"].as_array().unwrap();
     assert!(!feats.is_empty(), "{v}");
     for f in feats {
-        let b = f["properties"]["bearing"].as_f64().expect("stop bearing present");
+        let b = f["properties"]["bearing"]
+            .as_f64()
+            .expect("stop bearing present");
         assert!((0.0..360.0).contains(&b), "{f}");
         assert!(f["properties"]["bearing_source"].is_string(), "{f}");
     }
 
     // viewport stations: bearing + spread
-    let v = get_json(&app, "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=station").await;
+    let v = get_json(
+        &app,
+        "/api/stops?bbox=120.685,24.140,120.687,24.142&kind=station",
+    )
+    .await;
     let feats = v["features"].as_array().unwrap();
     assert!(!feats.is_empty(), "{v}");
     for f in feats {
-        let b = f["properties"]["bearing"].as_f64().expect("station bearing present");
+        let b = f["properties"]["bearing"]
+            .as_f64()
+            .expect("station bearing present");
         assert!((0.0..360.0).contains(&b), "{f}");
         assert!(f["properties"]["spread"].is_f64(), "{f}");
     }
@@ -604,10 +675,14 @@ async fn bearings_exposed_across_endpoints() {
     // stop detail: own bearing + station bearing
     let sv = stops[0]["stop_version_id"].as_i64().unwrap();
     let d = get_json(&app, &format!("/api/stops/{sv}")).await;
-    let b = d["bearing"]["bearing_deg"].as_f64().expect("stop detail bearing");
+    let b = d["bearing"]["bearing_deg"]
+        .as_f64()
+        .expect("stop detail bearing");
     assert!((0.0..360.0).contains(&b), "{d}");
     assert!(d["bearing"]["source"].is_string(), "{d}");
-    let sb = d["station_bearing"]["bearing_deg"].as_f64().expect("station bearing in stop detail");
+    let sb = d["station_bearing"]["bearing_deg"]
+        .as_f64()
+        .expect("station bearing in stop detail");
     assert!((0.0..360.0).contains(&sb), "{d}");
     assert!(d["station_bearing"]["max_spread_deg"].is_f64(), "{d}");
 }
@@ -618,14 +693,20 @@ async fn raw_endpoint_survives_missing_staging_row() {
     // second-import shape: published route, but no src_route_point row in the
     // latest batch for this direction
     let conn = rm_db::open(&db).unwrap();
-    conn.execute("DELETE FROM src_route_point WHERE xno = '1' AND direction = 0", [])
-        .unwrap();
+    conn.execute(
+        "DELETE FROM src_route_point WHERE xno = '1' AND direction = 0",
+        [],
+    )
+    .unwrap();
     drop(conn);
 
     let app = router_with(AppState::new(db));
     let v = get_json(&app, "/api/routes/1/directions/0/raw").await;
     assert!(v["path"].is_null(), "missing row → path null, not 500: {v}");
-    assert!(!v["stops"].as_array().unwrap().is_empty(), "staging stops remain: {v}");
+    assert!(
+        !v["stops"].as_array().unwrap().is_empty(),
+        "staging stops remain: {v}"
+    );
 }
 
 #[tokio::test]
@@ -649,10 +730,17 @@ async fn segments_limit_keeps_top_corridors() {
     let app = router_with(AppState::new(db));
     // 3 candidates, limit 1: the shared corridor (route_count 2, scanned
     // last) must win over the first-scanned single-route segments
-    let v = get_json(&app, "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420&limit=1").await;
+    let v = get_json(
+        &app,
+        "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420&limit=1",
+    )
+    .await;
     let feats = v["features"].as_array().unwrap();
     assert_eq!(feats.len(), 1, "{v}");
-    assert_eq!(feats[0]["properties"]["route_count"].as_i64().unwrap(), 2,
-        "top corridor kept under limit: {v}");
+    assert_eq!(
+        feats[0]["properties"]["route_count"].as_i64().unwrap(),
+        2,
+        "top corridor kept under limit: {v}"
+    );
     assert_eq!(v["truncated"], serde_json::json!(true), "{v}");
 }

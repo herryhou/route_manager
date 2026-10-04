@@ -1,6 +1,6 @@
 [package]
 name = "rm-publish"
-description = "Route/SubRoute/StopOfRoute V1 atomic publish per route"
+description = "Route/SubRoute/RouteStop V1 atomic publish per route"
 edition.workspace = true
 version.workspace = true
 

@@ -44,7 +44,7 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
         let mut stmt = conn.prepare(
             "SELECT rv.route_version_id, sv.subroute_version_id, srp.direction,
                     substr(r.ext_uid, 5), srp.encoded,
-                    (SELECT COUNT(*) FROM stop_of_route_version o
+                    (SELECT COUNT(*) FROM route_stop_version o
                       WHERE o.subroute_version_id = sv.subroute_version_id
                         AND o.direction = srp.direction)
              FROM route r

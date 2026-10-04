@@ -33,13 +33,13 @@ fn setup() -> rusqlite::Connection {
              latitude, longitude, valid_from, created_at)
             VALUES (1, 1, 1, '1', 'X', 0, 24.1407, 120.6860, '{T0}', '{T0}'),
                    (2, 2, 1, '2', 'X', 0, 24.1407, 120.6860, '{T0}', '{T0}');
-         INSERT INTO stop_of_route_version
-            (stop_of_route_version_id, subroute_version_id, stop_version_id, direction,
+         INSERT INTO route_stop_version
+            (route_stop_version_id, subroute_version_id, stop_version_id, direction,
              stop_sequence, source_order_no, created_at)
             VALUES (1, 11, 1, 0, 1, 1, '{T0}'),
                    (2, 12, 2, 0, 1, 1, '{T0}');
          INSERT INTO path_stop_projection
-            (stop_of_route_version_id, route_version_id, direction, stop_sequence,
+            (route_stop_version_id, route_version_id, direction, stop_sequence,
              chainage_m, snap_dist_m, method, monotonic_clamped, projected_lat, projected_lon)
             VALUES (1, 11, 0, 1, 400.0, 30.0, 'PROJECTED', 0, 24.1407, 120.6857),
                    (2, 12, 0, 1, 400.0, 30.0, 'PROJECTED', 0, 24.1407, 120.6857);
@@ -148,8 +148,8 @@ fn stop_visited_twice_in_direction_yields_one_row() {
     // cycled route: the same stop_version (route 1, seq 1) visited again
     // at sequence 2 — one bearing row, last visit wins
     conn.execute(
-        "INSERT INTO stop_of_route_version
-            (stop_of_route_version_id, subroute_version_id, stop_version_id, direction,
+        "INSERT INTO route_stop_version
+            (route_stop_version_id, subroute_version_id, stop_version_id, direction,
              stop_sequence, source_order_no, created_at)
          VALUES (3, 11, 1, 0, 2, 2, '2026-01-01T00:00:00Z')",
         [],
@@ -157,7 +157,7 @@ fn stop_visited_twice_in_direction_yields_one_row() {
     .unwrap();
     conn.execute(
         "INSERT INTO path_stop_projection
-            (stop_of_route_version_id, route_version_id, direction, stop_sequence,
+            (route_stop_version_id, route_version_id, direction, stop_sequence,
              chainage_m, snap_dist_m, method, monotonic_clamped, projected_lat, projected_lon)
          VALUES (3, 11, 0, 2, 800.0, 30.0, 'PROJECTED', 0, 24.1412, 120.6857)",
         [],

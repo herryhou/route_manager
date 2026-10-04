@@ -11,7 +11,7 @@ Built from `assets/Taichung/raw/route_*.json` (392 routes, captured 2026-10-02) 
 | `routes.json` | route headers + provider links (from `Routes` + `route` queries) |
 | `providers.json` | operator directory |
 | `stations.json` | unique physical stations (`node.id` key), with serving routes |
-| `stop_of_route.jsonl` | one row per stop-in-direction occurrence — the StopOfRoute table |
+| `route_stop.jsonl` | one row per stop-in-direction occurrence — the RouteStop table |
 | `polylines.json` | encoded path per route per direction |
 | `subroute_links.json` | main route → side routes (from Strapi `main-side-routes`) |
 | `station_groups.json` | **generated** StationGroup candidates (see below) |
@@ -23,7 +23,7 @@ Built from `assets/Taichung/raw/route_*.json` (392 routes, captured 2026-10-02) 
 |---|---|---|
 | Route | `routes.id` | `route_code` = rider-facing `name` |
 | SubRoute | `subroute_links.children` | side/detour routes are **separate route ids** in this API; grouping is a soft link, not an aggregate |
-| StopOfRoute row | one `stations.edges[]` entry | keyed by (route, direction, stop_sequence) |
+| RouteStop row | one `stations.edges[]` entry | keyed by (route, direction, stop_sequence) |
 | direction | `goBack`: 1→`0` 去程, 2→`1` 返程 | spec numbering |
 | stop_sequence | `orderNo` | gaps exist (non-contiguous) — keep raw values |
 | Stop (站牌) | `sid` | ⚠ NOT route-scoped: 6,107 sids are shared by >1 route, some by both directions — it is a physical pole/sign id |
@@ -34,7 +34,7 @@ Built from `assets/Taichung/raw/route_*.json` (392 routes, captured 2026-10-02) 
 
 1. **`sid` is a pole id, not a route+direction id.** 37,294 stop-of-route rows collapse
    to 14,045 unique sids. In spec terms one physical pole hosts several routes'
-   StopOfRoute rows; a spec-conformant `stop_id` would be per (route, direction,
+   RouteStop rows; a spec-conformant `stop_id` would be per (route, direction,
    sequence) with `sid` kept as an external pole reference.
 2. **`node.id` over-splits stations.** 3,542 names map to >1 `node.id`;
    3,437 of those pairs sit <80 m apart (e.g. 干城站 ids `44`+`46`, 28 m apart).
@@ -55,7 +55,7 @@ candidates; merging decisions belong to the data pipeline (spec §6.3).
 {
   "routes": 392,
   "stations_unique": 7424,
-  "stop_of_route_rows": 37294,
+  "route_stop_rows": 37294,
   "stops_unique_sid": 14045,
   "routes_without_polyline": 0,
   "providers": 39,

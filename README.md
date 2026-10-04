@@ -12,7 +12,7 @@ crates/
 ├── rm-db           migrations, id allocator, import_batch
 ├── rm-ingest       raw JSON -> src_* staging tables
 ├── rm-identity     staging -> identities + Stop/Station/StationGroup V1
-├── rm-publish      Route/SubRoute/StopOfRoute V1 atomic publish
+├── rm-publish      Route/SubRoute/RouteStop V1 atomic publish
 ├── rm-segments     polyline decode, stop projection (chainage), geometry cuts
 ├── rm-osm-prepare  PBF -> road graph tables
 ├── rm-osm-match    Viterbi way-run matcher (Newson-Krumm + A* gap repair)

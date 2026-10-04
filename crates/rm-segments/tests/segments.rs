@@ -20,8 +20,8 @@ fn projection_of(conn: &rusqlite::Connection, stop_uid: &str) -> (f64, f64, Stri
     conn.query_row(
         "SELECT p.chainage_m, p.snap_dist_m, p.method, p.monotonic_clamped
          FROM path_stop_projection p
-         JOIN stop_of_route_version sorv ON sorv.stop_of_route_version_id = p.stop_of_route_version_id
-         JOIN stop_version sv ON sv.stop_version_id = sorv.stop_version_id
+         JOIN route_stop_version rsv ON rsv.route_stop_version_id = p.route_stop_version_id
+         JOIN stop_version sv ON sv.stop_version_id = rsv.stop_version_id
          JOIN stop s ON s.stop_id = sv.stop_id
          WHERE s.ext_uid = ?1",
         [stop_uid],
@@ -107,7 +107,7 @@ fn crafted_path_projects_and_cuts_from_polyline() {
     // wipe identity rows for route 2 so re-run mints new stops (fixture stops)
     conn.execute_batch(
         "UPDATE route SET current_route_version_id = NULL, revision = 0 WHERE ext_uid = 'tcg:2';
-         DELETE FROM stop_of_route_version WHERE subroute_version_id IN
+         DELETE FROM route_stop_version WHERE subroute_version_id IN
             (SELECT subroute_version_id FROM subroute_version WHERE route_version_id =
                 (SELECT route_version_id FROM route_version WHERE route_id =
                     (SELECT route_id FROM route WHERE ext_uid = 'tcg:2')));

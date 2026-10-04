@@ -15,7 +15,7 @@ Writes, per route, in one `IMMEDIATE` transaction:
 |---|---|
 | `route_version` | version_no = max + 1, `status = 'PUBLISHED'`, batch `valid_from` |
 | `subroute_version` | one per route version, name = header description |
-| `stop_of_route_version` | stops per direction, renumbered 1..N, `source_order_no` kept |
+| `route_stop_version` | stops per direction, renumbered 1..N, `source_order_no` kept |
 | `route.current_route_version_id` | the pointer downstream stages read |
 | `outbox_event` | one `route.published` JSON event per publish |
 

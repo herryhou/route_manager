@@ -29,7 +29,7 @@ pub struct Summary {
 }
 
 struct StopRow {
-    sorv_id: i64,
+    rsv_id: i64,
     direction: i64,
     seq: i64,
     lat: f64,
@@ -65,16 +65,16 @@ pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> 
         let mut stops: Vec<StopRow> = Vec::new();
         {
             let mut stmt = tx.prepare(
-                "SELECT sorv.stop_of_route_version_id, sorv.direction, sorv.stop_sequence,
+                "SELECT rsv.route_stop_version_id, rsv.direction, rsv.stop_sequence,
                         sv.latitude, sv.longitude
-                 FROM stop_of_route_version sorv
-                 JOIN stop_version sv ON sv.stop_version_id = sorv.stop_version_id
-                 WHERE sorv.subroute_version_id = ?1
-                 ORDER BY sorv.direction, sorv.stop_sequence",
+                 FROM route_stop_version rsv
+                 JOIN stop_version sv ON sv.stop_version_id = rsv.stop_version_id
+                 WHERE rsv.subroute_version_id = ?1
+                 ORDER BY rsv.direction, rsv.stop_sequence",
             )?;
             let rows = stmt.query_map([sv_id], |r| {
                 Ok(StopRow {
-                    sorv_id: r.get(0)?,
+                    rsv_id: r.get(0)?,
                     direction: r.get(1)?,
                     seq: r.get(2)?,
                     lat: r.get(3)?,
@@ -175,12 +175,12 @@ pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> 
             for (s, (pr, method, clamped)) in group.iter().zip(&projections) {
                 tx.execute(
                     "INSERT INTO path_stop_projection
-                        (stop_of_route_version_id, route_version_id, direction, stop_sequence,
+                        (route_stop_version_id, route_version_id, direction, stop_sequence,
                          chainage_m, snap_dist_m, method, monotonic_clamped,
                          projected_lat, projected_lon)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     rusqlite::params![
-                        s.sorv_id,
+                        s.rsv_id,
                         route_version_id,
                         dir,
                         s.seq,
@@ -230,15 +230,15 @@ pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> 
                 tx.execute(
                     "INSERT INTO seg_geometry_draft
                         (subroute_version_id, direction, ordinal,
-                         from_stop_of_route_version_id, to_stop_of_route_version_id,
+                         from_route_stop_version_id, to_route_stop_version_id,
                          encoded_polyline, length_m, geometry_method)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     rusqlite::params![
                         sv_id,
                         dir,
                         ordinal,
-                        from.sorv_id,
-                        to.sorv_id,
+                        from.rsv_id,
+                        to.rsv_id,
                         enc_poly,
                         length,
                         gm

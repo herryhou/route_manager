@@ -72,7 +72,7 @@ fn wrong_count_expectation_fails() {
 fn sequence_gap_is_caught() {
     let (_dir, conn, batch) = setup();
     conn.execute(
-        "UPDATE stop_of_route_version SET stop_sequence = stop_sequence + 10
+        "UPDATE route_stop_version SET stop_sequence = stop_sequence + 10
          WHERE direction = 0 AND stop_sequence = 2",
         [],
     )
@@ -125,8 +125,8 @@ fn shared_pair_joins_through_route_version() {
          INSERT INTO seg_segment
             (segment_id, start_station_id, end_station_id, encoded_polyline, length_m, way_count)
             VALUES ('s1', 1, 2, '_p~iF~ps|U', 100.0, 1);
-         INSERT INTO stop_of_route_version
-            (stop_of_route_version_id, subroute_version_id, stop_version_id, direction,
+         INSERT INTO route_stop_version
+            (route_stop_version_id, subroute_version_id, stop_version_id, direction,
              stop_sequence, source_order_no, created_at)
             VALUES (1, 5, 1, 0, 1, 1, '2026-01-01T00:00:00Z'),
                    (2, 5, 1, 0, 2, 2, '2026-01-01T00:00:00Z'),
@@ -134,7 +134,7 @@ fn shared_pair_joins_through_route_version() {
                    (4, 6, 1, 0, 2, 2, '2026-01-01T00:00:00Z');
          INSERT INTO seg_traversal
             (route_version_id, subroute_version_id, direction,
-             from_stop_of_route_version_id, to_stop_of_route_version_id, segment_id)
+             from_route_stop_version_id, to_route_stop_version_id, segment_id)
             VALUES (5, 5, 0, 1, 2, 's1'), (6, 6, 0, 3, 4, 's1');",
     )
     .unwrap();
@@ -165,7 +165,7 @@ fn bearing_spread_warns_but_does_not_fail() {
         "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
             SELECT stop_version_id, CASE stop_sequence WHEN 1 THEN 10.0 ELSE 60.0 END,
                    'OSM', '2026-01-01T00:00:00Z'
-            FROM stop_of_route_version;
+            FROM route_stop_version;
          INSERT INTO station_bearing
             (station_id, bearing_deg, member_count, max_spread_deg, computed_at)
             SELECT station_id, 35.0, 2, 50.0, '2026-01-01T00:00:00Z'
@@ -212,7 +212,7 @@ fn tight_bearing_spread_does_not_warn() {
     conn.execute_batch(
         "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
             SELECT stop_version_id, 12.0, 'OSM', '2026-01-01T00:00:00Z'
-            FROM stop_of_route_version;
+            FROM route_stop_version;
          INSERT INTO station_bearing
             (station_id, bearing_deg, member_count, max_spread_deg, computed_at)
             SELECT station_id, 12.0, 2, 3.0, '2026-01-01T00:00:00Z'

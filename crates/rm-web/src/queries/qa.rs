@@ -34,7 +34,13 @@ pub fn stats(conn: &Connection) -> Result<Value> {
             [],
             |r| -> rusqlite::Result<CountsRow> {
                 Ok((
-                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
                     r.get(7)?,
                 ))
             },
@@ -42,7 +48,7 @@ pub fn stats(conn: &Connection) -> Result<Value> {
 
     let directions_total: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT subroute_version_id || '#' || direction)
-         FROM stop_of_route_version",
+         FROM route_stop_version",
         [],
         |r| r.get(0),
     )?;
@@ -64,7 +70,13 @@ pub fn stats(conn: &Connection) -> Result<Value> {
         [],
         |r| -> rusqlite::Result<MatchAgg> {
             Ok((
-                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
                 r.get(7)?,
             ))
         },
@@ -126,38 +138,35 @@ pub fn outliers(conn: &Connection, min_snap: f64, limit: i64) -> Result<Value> {
                 sv.latitude, sv.longitude, p.chainage_m, p.snap_dist_m, p.method,
                 p.projected_lat, p.projected_lon
          FROM path_stop_projection p
-         JOIN stop_of_route_version sorv
-           ON sorv.stop_of_route_version_id = p.stop_of_route_version_id
-         JOIN stop_version sv ON sv.stop_version_id = sorv.stop_version_id
-         JOIN subroute_version ssv ON ssv.subroute_version_id = sorv.subroute_version_id
+         JOIN route_stop_version rsv
+           ON rsv.route_stop_version_id = p.route_stop_version_id
+         JOIN stop_version sv ON sv.stop_version_id = rsv.stop_version_id
+         JOIN subroute_version ssv ON ssv.subroute_version_id = rsv.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = ssv.route_version_id
          JOIN route r ON r.route_id = rv.route_id
          WHERE p.snap_dist_m > ?1 OR p.method IN ('OUTLIER','NO_PATH')
          ORDER BY p.snap_dist_m DESC
          LIMIT ?2",
     )?;
-    let it = stmt.query_map(
-        rusqlite::params![min_snap, limit],
-        |r| {
-            Ok(json!({
-                "route_id": r.get::<_, i64>(0)?,
-                "route_code": r.get::<_, String>(1)?,
-                "direction": r.get::<_, i64>(3)?,
-                "stop_version_id": r.get::<_, i64>(4)?,
-                "stop_name": r.get::<_, String>(5)?,
-                "stop_sequence": r.get::<_, i64>(6)?,
-                "lat": r.get::<_, f64>(7)?,
-                "lon": r.get::<_, f64>(8)?,
-                "chainage_m": r.get::<_, Option<f64>>(9)?,
-                "snap_dist_m": r.get::<_, f64>(10)?,
-                "method": r.get::<_, String>(11)?,
-                "projected": match (r.get::<_, Option<f64>>(12)?, r.get::<_, Option<f64>>(13)?) {
-                    (Some(lat), Some(lon)) => json!([lon, lat]),
-                    _ => Value::Null,
-                },
-            }))
-        },
-    )?;
+    let it = stmt.query_map(rusqlite::params![min_snap, limit], |r| {
+        Ok(json!({
+            "route_id": r.get::<_, i64>(0)?,
+            "route_code": r.get::<_, String>(1)?,
+            "direction": r.get::<_, i64>(3)?,
+            "stop_version_id": r.get::<_, i64>(4)?,
+            "stop_name": r.get::<_, String>(5)?,
+            "stop_sequence": r.get::<_, i64>(6)?,
+            "lat": r.get::<_, f64>(7)?,
+            "lon": r.get::<_, f64>(8)?,
+            "chainage_m": r.get::<_, Option<f64>>(9)?,
+            "snap_dist_m": r.get::<_, f64>(10)?,
+            "method": r.get::<_, String>(11)?,
+            "projected": match (r.get::<_, Option<f64>>(12)?, r.get::<_, Option<f64>>(13)?) {
+                (Some(lat), Some(lon)) => json!([lon, lat]),
+                _ => Value::Null,
+            },
+        }))
+    })?;
     let rows: Vec<Value> = it.collect::<Result<_, _>>()?;
     let count = rows.len();
     Ok(json!({ "outliers": rows, "count": count }))

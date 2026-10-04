@@ -8,7 +8,7 @@ path start — and cuts a geometry draft between each consecutive stop pair.
 ## Input → output
 
 Reads `route` (published rows only, i.e. with a `current_route_version_id`),
-`subroute_version`, `stop_of_route_version` joined to `stop_version` for
+`subroute_version`, `route_stop_version` joined to `stop_version` for
 coordinates, and the batch's `src_route_point`. Writes, in one transaction:
 
 | Output | Meaning |

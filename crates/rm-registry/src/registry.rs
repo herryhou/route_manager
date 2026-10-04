@@ -15,7 +15,7 @@ pub struct Summary {
 }
 
 struct StopPt {
-    sorv_id: i64,
+    rsv_id: i64,
     chainage_m: f64,
     station_id: i64,
     station_ext_uid: String,
@@ -68,26 +68,26 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
         let mut ins_trav = tx.prepare(
             "INSERT OR REPLACE INTO seg_traversal
                 (route_version_id, subroute_version_id, direction,
-                 from_stop_of_route_version_id, to_stop_of_route_version_id, segment_id)
+                 from_route_stop_version_id, to_route_stop_version_id, segment_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
 
         for (sv_id, rv_id, dir) in dirs {
             let stops: Vec<StopPt> = {
                 let mut stmt = tx.prepare(
-                    "SELECT p.stop_of_route_version_id, p.chainage_m,
+                    "SELECT p.route_stop_version_id, p.chainage_m,
                             st.station_id, st.ext_uid
                      FROM path_stop_projection p
-                     JOIN stop_of_route_version sorv
-                        ON sorv.stop_of_route_version_id = p.stop_of_route_version_id
-                     JOIN stop_version s ON s.stop_version_id = sorv.stop_version_id
+                     JOIN route_stop_version rsv
+                        ON rsv.route_stop_version_id = p.route_stop_version_id
+                     JOIN stop_version s ON s.stop_version_id = rsv.stop_version_id
                      JOIN station st ON st.station_id = s.station_id
                      WHERE p.route_version_id = ?1 AND p.direction = ?2
                      ORDER BY p.stop_sequence",
                 )?;
                 let rows = stmt.query_map([rv_id, dir], |r| {
                     Ok(StopPt {
-                        sorv_id: r.get(0)?,
+                        rsv_id: r.get(0)?,
                         chainage_m: r.get(1)?,
                         station_id: r.get(2)?,
                         station_ext_uid: r.get(3)?,
@@ -130,7 +130,7 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
 
                 let way_ids: Vec<i64> = ways.iter().map(|(w, _)| *w).collect();
                 let seg = segment_id(&a.station_ext_uid, &b.station_ext_uid, &way_ids);
-                let ordinal = pair_index(&stops, a.sorv_id);
+                let ordinal = pair_index(&stops, a.rsv_id);
 
                 // geometry draft for this stop pair, if present
                 let (enc, len): (String, f64) = tx
@@ -156,7 +156,7 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                     ins_way.execute(rusqlite::params![seg, (i + 1) as i64, w, l])?;
                 }
                 ins_trav.execute(rusqlite::params![
-                    rv_id, sv_id, dir, a.sorv_id, b.sorv_id, seg
+                    rv_id, sv_id, dir, a.rsv_id, b.rsv_id, seg
                 ])?;
                 summary.traversals += 1;
             }
@@ -170,10 +170,10 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
 }
 
 /// 1-based ordinal of a stop within its direction's stop list.
-fn pair_index(stops: &[StopPt], sorv_id: i64) -> i64 {
+fn pair_index(stops: &[StopPt], rsv_id: i64) -> i64 {
     stops
         .iter()
-        .position(|s| s.sorv_id == sorv_id)
+        .position(|s| s.rsv_id == rsv_id)
         .map(|i| (i + 1) as i64)
         .unwrap_or(0)
 }

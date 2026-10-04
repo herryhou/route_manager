@@ -10,7 +10,7 @@ The same run then computes stop and station bearings.
 
 Reads `path_stop_projection` (chainages), `seg_match_way` (way runs
 with cumulative metre ranges), `seg_geometry_draft` (per-pair geometry),
-the identity tables (`station`, `stop_version`, `stop_of_route_version`,
+the identity tables (`station`, `stop_version`, `route_stop_version`,
 `subroute_version`/`route_version`), and — for the bearing fallback —
 `osm_way_node`, `osm_node`, `src_route_point`. Writes, in one
 transaction:

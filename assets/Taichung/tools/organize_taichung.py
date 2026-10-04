@@ -55,7 +55,7 @@ with open(f"{A}/main-side-routes.json") as f:
 # --- raw route details ---
 stations = {}            # node.id -> station record
 station_names = defaultdict(set)
-sor_rows = []            # stop_of_route rows
+rs_rows = []            # route_stop rows
 polylines = {}
 sid_seen = defaultdict(list)
 
@@ -87,7 +87,7 @@ for path in sorted(glob.glob(f"{A}/raw/route_*.json")):
             st["routes"].append(xno)
         st["stop_count"] += 1
         sid_seen[e["sid"]].append(f"{xno}:{direction}")
-        sor_rows.append({
+        rs_rows.append({
             "route_id": xno,
             "direction": direction,
             "stop_sequence": e["orderNo"],
@@ -112,8 +112,8 @@ dump("routes.json", [routes[k] for k in sorted(routes, key=lambda x: int(x))])
 dump("polylines.json", {k: polylines[k] for k in sorted(polylines, key=lambda x: int(x))})
 dump("subroute_links.json", subroute_links)
 dump("providers.json", [providers[k] for k in sorted(providers, key=lambda x: int(x))])
-with open(f"{DATA}/stop_of_route.jsonl", "w") as f:
-    for row in sorted(sor_rows, key=lambda r: (int(r["route_id"]), r["direction"], r["stop_sequence"])):
+with open(f"{DATA}/route_stop.jsonl", "w") as f:
+    for row in sorted(rs_rows, key=lambda r: (int(r["route_id"]), r["direction"], r["stop_sequence"])):
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 # --- stats + sanity ---
@@ -122,7 +122,7 @@ no_poly = [k for k, v in polylines.items() if not v["go"] and not v["back"]]
 stats = {
     "routes": len(routes),
     "stations_unique": len(stations),
-    "stop_of_route_rows": len(sor_rows),
+    "route_stop_rows": len(rs_rows),
     "stops_unique_sid": len(sid_seen),
     "sid_reused_across_route_dir": len(sid_dupes),
     "stations_with_alt_names": sum(1 for s in stations.values() if "alt_names" in s),

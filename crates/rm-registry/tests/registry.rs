@@ -84,7 +84,7 @@ fn rewrite_route2(conn: &rusqlite::Connection, batch: i64, enc: &str) {
     }
     conn.execute_batch(
         "UPDATE route SET current_route_version_id = NULL, revision = 0 WHERE ext_uid = 'tcg:2';
-         DELETE FROM stop_of_route_version WHERE subroute_version_id IN
+         DELETE FROM route_stop_version WHERE subroute_version_id IN
             (SELECT subroute_version_id FROM subroute_version WHERE route_version_id =
                 (SELECT route_version_id FROM route_version WHERE route_id =
                     (SELECT route_id FROM route WHERE ext_uid = 'tcg:2')));
@@ -148,7 +148,7 @@ fn shared_corridor_and_cut_boundaries() {
         .query_row(
             "SELECT COUNT(*) FROM seg_traversal t
              JOIN seg_segment sg ON sg.segment_id = t.segment_id
-             JOIN stop_of_route_version f ON f.stop_of_route_version_id = t.from_stop_of_route_version_id
+             JOIN route_stop_version f ON f.route_stop_version_id = t.from_route_stop_version_id
              JOIN stop_version fv ON fv.stop_version_id = f.stop_version_id
              JOIN station fs ON fs.station_id = fv.station_id
              WHERE fs.station_id != sg.start_station_id",

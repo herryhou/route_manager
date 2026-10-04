@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-/// Publish Route/SubRoute/StopOfRoute V1 per route (atomic tx each).
+/// Publish Route/SubRoute/RouteStop V1 per route (atomic tx each).
 #[derive(Parser)]
 struct Args {
     /// SQLite DB path
@@ -25,8 +25,8 @@ fn main() -> anyhow::Result<()> {
     };
     let s = rm_publish::run(&mut conn, batch)?;
     println!(
-        "batch {}: published {} routes ({} stop_of_route rows), skipped {}, failed {}",
-        s.batch_id, s.published, s.stop_of_route_rows, s.skipped, s.failed
+        "batch {}: published {} routes ({} route_stop rows), skipped {}, failed {}",
+        s.batch_id, s.published, s.route_stop_rows, s.skipped, s.failed
     );
     for (xno, reason) in &s.failures {
         println!("FAILED xno={xno}: {reason}");

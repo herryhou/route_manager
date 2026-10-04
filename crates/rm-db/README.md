@@ -33,7 +33,7 @@ deliberately never migrates.
 
 | Migration | Creates |
 |---|---|
-| `0001_init` | the versioned model per `docs/DB_Schema_Spec.md`: identity tables (`route`, `subroute`, `stop`, `station`, `station_group`), their `*_version` tables, `stop_of_route_version`, empty-by-design trip/report/outbox tables, indexes — plus pipeline tables: `id_sequence`, `import_batch`, `src_file` audit, batch-scoped `src_*` staging (no FKs by design), `route_link`, `route_provider` |
+| `0001_init` | the versioned model per `docs/DB_Schema_Spec.md`: identity tables (`route`, `subroute`, `stop`, `station`, `station_group`), their `*_version` tables, `route_stop_version`, empty-by-design trip/report/outbox tables, indexes — plus pipeline tables: `id_sequence`, `import_batch`, `src_file` audit, batch-scoped `src_*` staging (no FKs by design), `route_link`, `route_provider` |
 | `0002_identity` | `ext_uid` + unique index on `stop` and `station_group`; group-provenance `source` column on `station_group_version` |
 | `0003_segment` | `path_stop_projection`, `seg_geometry_draft`, `seg_match_way`, `seg_match_stat`, and the registry: `seg_segment` / `seg_segment_way` / `seg_traversal` |
 | `0004_osm` | road graph from the PBF extract: `osm_meta`, `osm_way`, `osm_way_node`, `osm_node` |
@@ -53,7 +53,7 @@ row is seeded with `INSERT OR IGNORE` and the update retried. Ids are
 never reused (schema-spec invariant I02: stop/station/group ids).
 `rm-identity` mints route, subroute, station, station-group, and
 version ids this way; `rm-publish` mints `route_version`,
-`subroute_version`, `stop_of_route_version`, and `outbox_event`.
+`subroute_version`, `route_stop_version`, and `outbox_event`.
 
 ## Import batches
 
