@@ -20,8 +20,8 @@ export const routeWays = (id, dir) => fetchJson(`/api/routes/${id}/directions/${
 export const routeRaw = (id, dir) => fetchJson(`/api/routes/${id}/directions/${dir}/raw`);
 export const stopDetail = (id) => fetchJson(`/api/stops/${id}`);
 export const stationDetail = (id) => fetchJson(`/api/stations/${id}`);
-export const segmentsBbox = (bbox, minRoutes = 0) =>
-  fetchJson(`/api/segments?bbox=${bbox}&min_routes=${minRoutes}`);
+export const segmentsBbox = (bbox, minRoutes = 0, geom = 'provider') =>
+  fetchJson(`/api/segments?bbox=${bbox}&min_routes=${minRoutes}&geom=${geom}`);
 export const segmentDetail = (id) => fetchJson(`/api/segments/${id}`);
 export const stopsBbox = (bbox, kind) =>
   fetchJson(`/api/stops?bbox=${bbox}&kind=${kind}`);

@@ -25,8 +25,13 @@ pub async fn list(
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(2000)
         .clamp(1, 5000);
+    let geom = params.get("geom").map(|s| s.as_str()).unwrap_or("provider");
+    if !matches!(geom, "provider" | "osm") {
+        return Err(ApiError::bad_request("geom must be 'provider' or 'osm'"));
+    }
+    let geom_osm = geom == "osm";
     let v = run_db(state, move |conn| {
-        crate::queries::segments::list(conn, bbox, min_routes, limit)
+        crate::queries::segments::list(conn, bbox, min_routes, limit, geom_osm)
     })
     .await?;
     Ok(Json(v))

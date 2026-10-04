@@ -13,6 +13,14 @@ pub fn line_string(points: &[LatLng]) -> Value {
     json!({ "type": "LineString", "coordinates": coords(points) })
 }
 
+/// One LineString per piece; for ways that chain into disconnected strands.
+pub fn multi_line_string(pieces: &[Vec<LatLng>]) -> Value {
+    json!({
+        "type": "MultiLineString",
+        "coordinates": pieces.iter().map(|p| coords(p)).collect::<Vec<_>>()
+    })
+}
+
 pub fn point(lon: f64, lat: f64) -> Value {
     json!({ "type": "Point", "coordinates": [lon, lat] })
 }

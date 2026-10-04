@@ -27,7 +27,18 @@
       <label><input type="checkbox" id="layer-stops"> Stops / stations</label>
       <label><input type="checkbox" id="layer-bearings" checked> Bearings <small>(dot + arrow)</small></label>
       <label><input type="checkbox" id="layer-segments"> Segments</label>
-      <label><input type="checkbox" id="layer-osm"> OSM ways <small>(needs route)</small></label>
+      <label class="layer-sub">geometry
+        <select id="segment-geom">
+          <option value="provider">provider polyline</option>
+          <option value="osm">OSM ways</option>
+        </select>
+      </label>
+      <label class="layer-sub">route path
+        <select id="route-geom">
+          <option value="provider">provider polyline</option>
+          <option value="osm">OSM ways</option>
+        </select>
+      </label>
       <label><input type="checkbox" id="layer-raw"> Raw compare <small>(needs route)</small></label>
       <div id="legend"></div>
     </div>

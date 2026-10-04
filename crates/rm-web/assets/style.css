@@ -152,6 +152,18 @@ body {
   margin: 3px 0;
 }
 
+#layer-controls .layer-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 18px;
+  font-size: 12px;
+}
+
+#layer-controls .layer-sub select {
+  font-size: 12px;
+}
+
 #layer-controls small {
   color: var(--muted);
 }
