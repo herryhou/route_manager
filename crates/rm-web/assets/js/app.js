@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, filterRoutes, routeStopsPanel, stopPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel } from './panels.js';
-import { initLayers, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn } from './layers.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel } from './panels.js';
+import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -31,6 +31,28 @@ let lastRouteDraw = null; // { p, s, onStopClick } — for bearing-toggle redraw
 
 function refreshList(q) {
   renderRouteList(filterRoutes(allRoutes, q), { selectedKey, onSelect: (r) => selectRoute(r) });
+}
+
+/// Debounced station-name search feeding the sidebar station list; seq guards stale responses.
+let stationTimer = null;
+let stationSeq = 0;
+function refreshStations(q) {
+  clearTimeout(stationTimer);
+  q = q.trim();
+  if (!q) {
+    renderStationList([]);
+    return;
+  }
+  const seq = ++stationSeq;
+  stationTimer = setTimeout(async () => {
+    try {
+      const v = await api.stationsSearch(q);
+      if (seq !== stationSeq) return; // stale
+      renderStationList(v.stations ?? [], { onSelect: (s) => selectStation(s.station_id) });
+    } catch (e) {
+      status(`station search failed: ${e.message}`);
+    }
+  }, 300);
 }
 
 async function selectRouteById(routeId, dir = 0) {
@@ -106,6 +128,26 @@ async function openStationPopup(stationId, marker) {
     });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
+  } catch (e) {
+    status(`station load failed: ${e.message}`);
+  }
+}
+
+/// Search-driven station selection: pan + ring marker + popup; popup close removes it.
+async function selectStation(stationId) {
+  try {
+    const d = await api.stationDetail(stationId);
+    const st = d.station;
+    clearHighlight();
+    const m = L.circleMarker([st.lat, st.lon], {
+      radius: 10, color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.15,
+    }).addTo(layers.highlight);
+    m.bindPopup(stationPopupEl(d, {
+      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
+    }), { maxWidth: 300 }).openPopup();
+    m.on('popupclose', () => m.remove());
+    map.panTo([st.lat, st.lon], { animate: true });
+    location.hash = `#station=${stationId}`;
   } catch (e) {
     status(`station load failed: ${e.message}`);
   }
@@ -216,7 +258,10 @@ function parseHash() {
 
 async function boot() {
   const search = document.getElementById('route-search');
-  search.addEventListener('input', () => refreshList(search.value));
+  search.addEventListener('input', () => {
+    refreshList(search.value);
+    refreshStations(search.value);
+  });
   document.getElementById('chip-outliers').addEventListener('click', openOutliers);
   const segToggle = document.getElementById('layer-segments');
   segToggle.addEventListener('change', () => {
@@ -271,6 +316,8 @@ async function boot() {
       selectRouteById(Number(h.route), Number(h.dir ?? 0));
     } else if (h.stop) {
       selectStop(Number(h.stop));
+    } else if (h.station) {
+      selectStation(Number(h.station));
     } else if (h.segment) {
       selectSegment(h.segment);
     }

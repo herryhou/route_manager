@@ -27,6 +27,29 @@ export function renderRouteList(routes, { onSelect, selectedKey }) {
   }
 }
 
+/// Sidebar station search results (above the route list); empty list hides the box.
+export function renderStationList(stations, { onSelect }) {
+  const box = document.getElementById('station-list');
+  box.innerHTML = '';
+  box.hidden = !stations.length;
+  if (!stations.length) return;
+  const head = document.createElement('div');
+  head.className = 'list-head';
+  head.textContent = `Stations (${stations.length})`;
+  box.append(head);
+  for (const s of stations) {
+    const row = document.createElement('div');
+    row.className = 'station-row';
+    const name = document.createElement('span');
+    name.className = 'station-name';
+    name.textContent = s.station_name;
+    name.title = s.station_name;
+    row.append(name);
+    row.addEventListener('click', () => onSelect(s));
+    box.append(row);
+  }
+}
+
 export function filterRoutes(routes, q) {
   q = q.trim();
   if (!q) return routes;
@@ -301,7 +324,7 @@ export function stationPopupEl(d, { onPickRoute }) {
     ? `${Math.round(d.bearing.bearing_deg)}° · spread ${Math.round(d.bearing.max_spread_deg)}° · ${d.bearing.member_count} members`
     : '—';
   wrap.innerHTML = `
-    <div class="popup-title">${d.station.station_name}</div>
+    <div class="popup-title">${d.station.station_name} <small class="muted">#${d.station.station_id}</small></div>
     <div class="muted">bearing ${bearing}</div>
     <div class="muted">group ${d.group.station_group_name}</div>
     <div class="muted">stops (${(d.stops ?? []).length}): ${(d.stops ?? []).map((s) => s.stop_code).join(' ')}</div>

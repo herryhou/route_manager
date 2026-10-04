@@ -26,4 +26,5 @@ export const segmentDetail = (id) => fetchJson(`/api/segments/${id}`);
 export const stopsBbox = (bbox, kind) =>
   fetchJson(`/api/stops?bbox=${bbox}&kind=${kind}`);
 export const stopsSearch = (q) => fetchJson(`/api/stops?q=${encodeURIComponent(q)}`);
+export const stationsSearch = (q) => fetchJson(`/api/stations?q=${encodeURIComponent(q)}`);
 export const outliers = (minSnap = 50) => fetchJson(`/api/qa/outliers?min_snap=${minSnap}`);

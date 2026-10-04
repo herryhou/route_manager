@@ -340,3 +340,30 @@ pub fn search(conn: &Connection, q: &str) -> Result<Value> {
         .collect::<Result<_, _>>()?;
     Ok(json!({ "stops": stops }))
 }
+
+/// `GET /api/stations?q=` — station name substring search, LIMIT 30.
+/// 臺/台 normalized so either spelling matches both.
+pub fn station_search(conn: &Connection, q: &str) -> Result<Value> {
+    let like = format!("%{}%", q.replace('臺', "台"));
+    let mut stmt = conn.prepare(
+        "SELECT st.station_id, stv.station_name, stv.latitude, stv.longitude
+         FROM station st
+         JOIN station_version stv
+           ON stv.station_id = st.station_id AND stv.valid_to IS NULL
+         WHERE stv.station_name LIKE ?1
+            OR REPLACE(stv.station_name, '臺', '台') LIKE ?1
+         ORDER BY stv.station_name
+         LIMIT 30",
+    )?;
+    let stations: Vec<Value> = stmt
+        .query_map([like], |r| {
+            Ok(json!({
+                "station_id": r.get::<_, i64>(0)?,
+                "station_name": r.get::<_, String>(1)?,
+                "lat": r.get::<_, f64>(2)?,
+                "lon": r.get::<_, f64>(3)?,
+            }))
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(json!({ "stations": stations }))
+}

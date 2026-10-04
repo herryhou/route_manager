@@ -21,6 +21,19 @@ pub async fn detail(
     }
 }
 
+pub async fn station_search(
+    State(state): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<axum::response::Response, crate::error::ApiError> {
+    // /api/stations?q= — name search feeding the sidebar station list.
+    let Some(q) = params.get("q").map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return Err(crate::error::ApiError::bad_request("q required"));
+    };
+    let q = q.to_owned();
+    let v = run_db(state, move |conn| crate::queries::stops::station_search(conn, &q)).await?;
+    Ok(Json(v).into_response())
+}
+
 pub async fn station_detail(
     Path(station_id): Path<i64>,
     State(state): State<AppState>,
