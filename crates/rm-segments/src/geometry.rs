@@ -74,10 +74,14 @@ pub fn clamp_monotonic(chainages: &[f64]) -> (Vec<f64>, Vec<bool>) {
 }
 
 /// Extra snap distance tolerated beyond the best when gathering side
-/// alternatives for sequence-aware selection: a loop-closure pole sits
-/// within a few metres of both the first and last path leg, and the two
-/// candidate snaps can differ by ~10 m.
-pub const CAND_SLACK_M: f64 = 30.0;
+/// alternatives for sequence-aware selection. A loop-closure pole sits
+/// within a few metres of both the first and last path leg; a one-way
+/// pair (outbound and return legs ~100 m apart, 5201) puts the revisit
+/// pole 1 m off the wrong leg and ~100 m off its sequence-side leg. The
+/// 10x snap weight in selection keeps a slack this wide safe: a distant
+/// candidate only wins when sequence continuity saves >1 km of chainage
+/// jump.
+pub const CAND_SLACK_M: f64 = 150.0;
 
 /// Snap distance weight in sequence selection. A candidate a few metres
 /// nearer the pole must not outvote a candidate hundreds of metres closer
@@ -85,11 +89,14 @@ pub const CAND_SLACK_M: f64 = 30.0;
 /// must: 10x balances the two.
 pub const SNAP_WEIGHT: f64 = 10.0;
 
-/// All side-alternative projections of `p` onto the path: every contiguous
-/// run of path segments whose snap distance is within `slack_m` of the best
-/// contributes its closest member. One entry per run, sorted by chainage —
-/// a pole straddling a loop closure yields the start-side and end-side
-/// candidate; a pole on a plain linear path yields exactly one.
+/// All side-alternative projections of `p` onto the path: every local
+/// minimum of the segment-distance profile whose snap distance is within
+/// `slack_m` of the best. One valley per path pass — a pole straddling a
+/// loop closure yields the start-side and end-side candidate, a one-way
+/// pair yields the outbound and return candidate, and a pole on a plain
+/// linear path yields exactly one. (Local minima, not one-per-contiguous
+/// run: with a wide slack on a small loop the whole path is one run, and
+/// keeping only its best member would swallow the other side's valley.)
 pub fn project_candidates(
     path: &[LatLng],
     cum: &[f64],
@@ -115,25 +122,25 @@ pub fn project_candidates(
             projected: proj,
         });
     }
-    let best = dists.iter().copied().fold(f64::INFINITY, f64::min);
+    let thresh = dists.iter().copied().fold(f64::INFINITY, f64::min) + slack_m;
     let mut out = Vec::new();
-    let mut i = 0;
-    while i < n {
-        if dists[i] > best + slack_m {
-            i += 1;
+    for i in 0..n {
+        if dists[i] > thresh {
             continue;
         }
-        // contiguous run of near-best segments: keep its closest member
-        let mut j = i + 1;
-        let mut k = i;
-        while j < n && dists[j] <= best + slack_m {
-            if dists[j] < dists[k] {
-                k = j;
-            }
-            j += 1;
+        let left = if i == 0 {
+            f64::INFINITY
+        } else {
+            dists[i - 1]
+        };
+        let right = if i + 1 == n {
+            f64::INFINITY
+        } else {
+            dists[i + 1]
+        };
+        if dists[i] <= left && dists[i] <= right {
+            out.push(projs[i]);
         }
-        out.push(projs[k]);
-        i = j;
     }
     out.sort_by(|a, b| a.chainage_m.total_cmp(&b.chainage_m));
     out
@@ -376,6 +383,52 @@ mod tests {
         assert!(sel[1].chainage_m > sel[0].chainage_m);
         assert!(sel[2].chainage_m > sel[1].chainage_m);
         assert!(sel[4].chainage_m >= sel[3].chainage_m - 1e-6);
+    }
+
+    #[test]
+    fn one_way_pair_revisit_picks_sequence_side() {
+        // 5201 shape: ~6.8 km loop whose outbound and return legs form a
+        // one-way pair ~80 m apart. The revisit pole sits 1 m off the
+        // OUTBOUND leg near the loop start (chainage ~111) and ~80 m off
+        // the RETURN leg near the loop end (~6641), where its sequence
+        // position is. With slack covering the pair separation, stop order
+        // must put the revisit on the return side despite the 10x snap
+        // penalty; slack 30 m cannot even see that candidate.
+        let path = vec![
+            LatLng::new(24.1400, 120.6857),  // A start
+            LatLng::new(24.1700, 120.6857),  // B north (outbound leg)
+            LatLng::new(24.1700, 120.68649), // C east across the pair
+            LatLng::new(24.1400, 120.68649), // D south (return leg)
+            LatLng::new(24.1400, 120.6858),  // A2 closure gap
+        ];
+        let cum = cumulative_m(&path);
+        let total = *cum.last().unwrap();
+        let pole = LatLng::new(24.1410, 120.68571); // ~1.1 m off outbound @111, ~80 m off return @6641
+        let stops = [
+            LatLng::new(24.1400, 120.6857),  // A
+            pole,                            // early visit on outbound
+            LatLng::new(24.1500, 120.68571), // outbound mid
+            LatLng::new(24.1700, 120.6857),  // B
+            LatLng::new(24.1700, 120.68649), // C corner
+            LatLng::new(24.1600, 120.6865),  // return leg
+            LatLng::new(24.1420, 120.6865),  // return leg near the end
+            pole,                            // revisit — sequence side is return
+            LatLng::new(24.1400, 120.6858),  // A2 end
+        ];
+        let cands: Vec<Vec<Projection>> = stops
+            .iter()
+            .map(|s| project_candidates(&path, &cum, s, CAND_SLACK_M))
+            .collect();
+        let sel = select_sequence(&cands);
+        assert!(
+            (6500.0..6800.0).contains(&sel[7].chainage_m),
+            "revisit must land on return leg (~6641), got {}",
+            sel[7].chainage_m
+        );
+        for w in sel.windows(2) {
+            assert!(w[1].chainage_m >= w[0].chainage_m - 1e-6, "non-monotone");
+        }
+        assert!(sel[8].chainage_m > total - 30.0);
     }
 
     #[test]
