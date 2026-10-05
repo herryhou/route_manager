@@ -1,0 +1,37 @@
+{
+  "capture_date": "2026-10-05",
+  "routes": 165,
+  "route_types": {
+    "小黃巴士": 52,
+    "市區公車": 27,
+    "棕線": 8,
+    "橘線": 14,
+    "紅線": 7,
+    "綠線": 20,
+    "藍線": 12,
+    "觀光公車": 7,
+    "雙層巴士": 1,
+    "高鐵接駁車": 1,
+    "黃線": 16
+  },
+  "single_direction_routes": 6,
+  "direction_stop_rows": 11379,
+  "stations_unique_stopid": 11379,
+  "bad_or_out_of_bbox_coords": 2,
+  "stopid_with_alt_names": 0,
+  "stopid_with_alt_coords": 0,
+  "stopid_on_multiple_routes": 0,
+  "wouldbe_pole_key_reuse": 0,
+  "geom_files_ok": 329,
+  "geom_files_bad": [
+    "1805_back"
+  ],
+  "geom_median_pts": 144,
+  "geom_first_pt_vs_first_stop_over_150m": 29,
+  "circular_DeptEqDest": 4
+}
+
+-- stopid with >1 name (first 5): {}
+-- stopid with >1 coord (first 5): {}
+-- geom far-start (first 10): [('1032_back', 14904), ('1114_back', 621), ('1114_go', 4064), ('1115_go', 4064), ('1120_back', 2536), ('1130_back', 6615), ('1132_back', 6013), ('1132_go', 2883), ('1133_go', 3061), ('1134_go', 4063)]
+-- top shared stations: [(1, '9500', '新營站'), (1, '9499', '中營興業里'), (1, '9498', '圓環(第一、京城銀行)'), (1, '9497', '新營醫院(三民路)'), (1, '9496', '民治市政中心')]

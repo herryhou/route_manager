@@ -50,9 +50,13 @@ Samples live next to this doc in `assets/Tainan/`. Counts are from those capture
 
 | Field | Space |
 |---|---|
-| `stopid` / `id` (in stop lists) | global stop id, e.g. `33316` |
+| `stopid` / `id` (in stop lists) | ⚠ **route-scoped per-occurrence** — unique per (route, direction, sequence); zero reuse across the full 2026-10-05 capture (11,379 rows, 11,379 ids). NOT a global station key (corrected from earlier reading; see Tainan_ingest_eval.md) |
 | `locationId` (endpoint 2, timetable HTML) | per-route stop occurrence, e.g. `2675` |
 | `locationid` (endpoint 1 `location.ashx`) | its own numbering, e.g. `9193` — different from the one above despite the same name |
+
+No endpoint exposes a global/shared station id. Physical-station identity must
+be derived offline (same stop name within ~80 m), as `organize`-style tooling
+does for the ingest pipeline.
 
 **No operator directory** — unlike Taichung `providers`, there is no operator list endpoint. `Dept` in `PathListV2` is the departure terminus name, not the operator.
 
@@ -106,7 +110,7 @@ GET .../API/CrossRoutesByPathName.ashx?id=2101&prj=tn
 ├── endTime    string     # last departure "HHMM", e.g. "2200"
 └── stop[]                # ordered stops of this direction
     ├── stopname string   # stop name (zh)
-    ├── stopid   string   # global stop id, e.g. "33316"
+    ├── stopid   string   # per-occurrence stop id, e.g. "33316" — see Id spaces
     ├── lat      string   # WGS84 (string, not float!)
     └── lon      string
 ```
@@ -140,7 +144,7 @@ GET .../IMP/jsp/rwd_api/ajax_routeinfo.jsp?prj=tn&id=2101
 ├── result     bool            # true on success
 ├── size       int             # stop count
 ├── data[]                    # one entry per stop, outbound order
-│   ├── id         int         # global stop id
+│   ├── id         int         # stop id, same per-occurrence space as stopid
 │   ├── stopSeq    int         # 1-based sequence
 │   ├── name       string      # stop name (zh)
 │   ├── lat / lon  string      # WGS84
