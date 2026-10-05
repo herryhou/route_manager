@@ -62,7 +62,8 @@ export function filterRoutes(routes, q) {
 }
 
 /// Detail panel = two stacked panes, latest only (no tabs): context on top
-/// (route stops / outliers / segment), point detail below (stop drill-down).
+/// (route stops / outliers — route info stays put), point detail below
+/// (stop / segment / path-piece drill-down).
 /// Re-showing a pane replaces its content and re-wires listeners.
 const PANE_KINDS = ['context', 'point'];
 
@@ -115,8 +116,7 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
   const dirBtns = (d.directions ?? [])
     .map(
       (x) =>
-        `<button data-dir="${x.direction}" class="${x.direction === dir ? 'active' : ''}">${
-          x.direction === 0 ? '去程 (0)' : '返程 (1)'
+        `<button data-dir="${x.direction}" class="${x.direction === dir ? 'active' : ''}">${x.direction === 0 ? '去程 (0)' : '返程 (1)'
         }</button>`
     )
     .join('');
@@ -138,11 +138,11 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
   const html = `
     <div class="tabs">${dirBtns}</div>
     ${kv([
-      ['providers', d.providers.join(', ')],
-      ['version', `v${d.version_no} · ${d.status}`],
-      ['side routes', d.side_routes.join(', ')],
-      ['main routes', d.main_routes.join(', ')],
-    ])}
+    ['providers', d.providers.join(', ')],
+    ['version', `v${d.version_no} · ${d.status}`],
+    ['side routes', d.side_routes.join(', ')],
+    ['main routes', d.main_routes.join(', ')],
+  ])}
     <div class="tabs view-tabs">
       <button data-view="stops" class="active">Stops (${(stops.stops ?? []).length})</button>
       <button data-view="qa">QA profile</button>
@@ -209,19 +209,44 @@ export function segmentPanel(d, { onPickRoute }) {
         <td style="text-align:right">${w.length_m.toFixed(0)}m</td></tr>`
     )
     .join('');
-  const pane = showPane('context', `
+  const pane = showPane('point', `
     ${kv([
-      ['length', `${d.length_m.toFixed(0)} m`],
-      ['ways', d.way_count],
-      ['start', `${d.start_station.station_name ?? d.start_station.station_id}`],
-      ['end', `${d.end_station.station_name ?? d.end_station.station_id}`],
-    ])}
+    ['start', `${d.start_station.station_name ?? d.start_station.station_id}`],
+    ['end', `${d.end_station.station_name ?? d.end_station.station_id}`],
+    ['length', `${d.length_m.toFixed(0)} m`],
+  ])}
     <h3>Ways (${(d.ways ?? []).length})</h3>
     <table class="kv"><tr><td>#</td><td>name</td><td>highway</td><td style="text-align:right">len</td></tr>${ways}</table>
     <h3>Routes (${(d.routes ?? []).length})</h3>
     <div class="segment-routes"></div>
   `, `Segment ${d.segment_id.slice(0, 12)}…`);
   pane.querySelector('.segment-routes').append(routeChips(d.routes ?? [], onPickRoute));
+}
+
+/// Route path piece detail (point pane, polyline click): provider draft piece
+/// or OSM way run — shape depends on the route-geom select the map drew.
+export function pathPiecePanel(p) {
+  const fmt = (m) => `${(m ?? 0).toFixed(0)}m`;
+  const isWay = p.osm_way_id != null;
+  showPane(
+    'point',
+    isWay
+      ? kv([
+        ['ordinal', p.ordinal],
+        ['way', `${p.name ?? '—'} (#${p.osm_way_id})`],
+        ['entry node', p.entry_node_id],
+        ['exit node', p.exit_node_id],
+        ['chainage', `${fmt(p.cum_start_m)} → ${fmt(p.cum_end_m)}`],
+        ['run length', fmt((p.cum_end_m ?? 0) - (p.cum_start_m ?? 0))],
+      ])
+      : kv([
+        ['ordinal', p.ordinal],
+        ['method', p.geometry_method],
+        ['length', fmt(p.length_m)],
+        ['stop span', `${p.from_seq} → ${p.to_seq}`],
+      ]),
+    isWay ? `Way ${p.name ?? `#${p.osm_way_id}`}` : `Piece #${p.ordinal} ${p.geometry_method ?? ''}`.trim()
+  );
 }
 
 /// Outlier list panel (topbar outliers chip).
@@ -249,11 +274,10 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
   });
 }
 
-/// North-up bearing dial — magnified version of the map's dot+arrow glyph.
-/// Single arrow = stop (direction of travel); axis = station (headings fold
-/// onto one axis, so the arrow is double-headed); spread draws the member-
-/// deviation wedge, warn-tinted past the rm-verify 45° threshold.
-function dialSvg(b, { axis = false, spread = null, color = 'var(--accent)' } = {}) {
+/// Solid bearing arrow — the map glyph's arrowhead (dot+arrow group),
+/// scaled up and rotated so 0° = north, 90° = east; spread draws the member-
+/// deviation wedge behind it, warn-tinted past the rm-verify 45° threshold.
+function dialSvg(b, { spread = null, color = 'var(--accent)' } = {}) {
   const C = 22, R = 18;
   const pol = (deg, r) => {
     const t = (deg * Math.PI) / 180;
@@ -265,49 +289,38 @@ function dialSvg(b, { axis = false, spread = null, color = 'var(--accent)' } = {
     wedge = `<path d="M${C},${C} L${pol(b - s, R)} A${R},${R} 0 0 1 ${pol(b + s, R)} Z"
       fill="${spread > 45 ? 'var(--warn)' : color}" opacity="0.16"/>`;
   }
-  const c = b == null ? 'var(--muted)' : color;
   const glyph = b == null ? '' : `<g transform="rotate(${b} ${C} ${C})">
-    ${axis ? `<line x1="${C}" y1="${C + 12}" x2="${C}" y2="${C - 9}" stroke="${c}" stroke-width="2"/>` : ''}
-    <line x1="${C}" y1="${C}" x2="${C}" y2="${C - 9}" stroke="${c}" stroke-width="2"/>
-    <path d="M${C},${C - 16} L${C - 3.4},${C - 8.5} L${C},${C - 10.5} L${C + 3.4},${C - 8.5} Z" fill="${c}"/>
-    ${axis ? `<path d="M${C},${C + 16} L${C - 3.4},${C + 8.5} L${C},${C + 10.5} L${C + 3.4},${C + 8.5} Z" fill="${c}"/>` : ''}
+    <path d="M22 11 L28.6 34.1 L22 29.6 L15.4 34.1 Z" fill="${color}"/>
   </g>`;
   return `<svg class="pp-dial" viewBox="0 0 44 44" width="36" height="36" role="img"
     aria-label="${b == null ? 'no bearing' : `bearing ${Math.round(b)}°`}">
-    <circle cx="${C}" cy="${C}" r="${R}" fill="white" stroke="var(--border)"/>
-    <line x1="${C}" y1="1.5" x2="${C}" y2="4" stroke="var(--muted)" stroke-width="1.5"/>
     ${wedge}${glyph}
-    <circle cx="${C}" cy="${C}" r="2" fill="${c}"/>
+    <rect x="1" y="1" width="42" height="42" rx="5" fill="none"
+      stroke="${b == null ? 'var(--border)' : color}" stroke-width="2"/>
   </svg>`;
 }
 
 // Direction variants repeat route_code — popups show one chip per code+name.
 const uniqRoutes = (rs) => [...new Map((rs ?? []).map((r) => [`${r.route_code}|${r.subroute_name ?? ''}`, r])).values()];
 
-/// Station card shared by both popups: axis dial + name + degrees (spread
-/// only when it trips the rm-verify 45° warn threshold), member stop codes
-/// (top-level only), station-serving route chips.
+/// Station card shared by both popups: arrow dial + name (spread text only
+/// when it trips the rm-verify 45° warn threshold), station-serving chips.
 function stationCard({ station, bearing, routes, stops }, { onPickRoute }) {
   const el = document.createElement('div');
   const spread = bearing?.max_spread_deg;
   const spreadTxt = spread != null && spread > 45
-    ? ` · <span class="pp-hot">spread ${Math.round(spread)}°</span>`
+    ? ` <span class="pp-hot">spread ${Math.round(spread)}°</span>`
     : '';
-  // Direction variants repeat the same stop_code — unique codes only.
-  const uniqCodes = [...new Map((stops ?? []).map((s) => [s.stop_code, s])).values()];
-  const codes = uniqCodes.length
-    ? `<div class="pp-meta">stops ${uniqCodes.map((s) =>
-        `<span class="pp-code" title="${s.stop_name}">#${s.stop_code}</span>`).join(' ')}</div>`
-    : '';
+  const subTitle = '<h3>經過路線:</h3>';
   el.innerHTML = `
     <div class="pp-head">
-      ${dialSvg(bearing?.bearing_deg, { axis: true, spread, color: 'var(--amber)' })}
+      ${dialSvg(bearing?.bearing_deg, { spread, color: 'var(--amber)' })}
       <div>
         <div class="pp-title">${station.station_name} <span class="pp-code">#${station.station_id}</span></div>
-        <div class="pp-meta">${bearing ? `axis <b>${Math.round(bearing.bearing_deg)}°</b>${spreadTxt}` : 'no bearing'}</div>
+        ${!bearing || spreadTxt ? `<div class="pp-meta">${bearing ? spreadTxt : 'no bearing'}</div>` : ''}
       </div>
     </div>
-    ${codes}
+    ${subTitle}
     <div class="pp-chips"></div>
   `;
   el.querySelector('.pp-chips').append(routeChips(uniqRoutes(routes), onPickRoute));
@@ -315,7 +328,8 @@ function stationCard({ station, bearing, routes, stops }, { onPickRoute }) {
 }
 
 /// Compact stop popup (map marker click / route-panel click): dial + name,
-/// route chips under a 經過路線 label — full detail lives in the point pane.
+/// station route chips under 經過路線 (stop-serving routes are a subset) —
+/// full detail lives in the point pane.
 export function stopPopupEl(d, { onPickRoute }) {
   const wrap = document.createElement('div');
   wrap.className = 'stop-popup';
@@ -326,10 +340,13 @@ export function stopPopupEl(d, { onPickRoute }) {
         <div class="pp-title">${d.stop.stop_name} <span class="pp-code">#${d.stop.stop_code}</span></div>
       </div>
     </div>
-    <div class="pp-label">經過路線</div>
+    <div class="pp-label"><h3>經過路線</h3></div>
     <div class="pp-chips"></div>
   `;
-  wrap.querySelector('.pp-chips').append(routeChips(uniqRoutes(d.routes_by_stop), onPickRoute));
+  const routes = uniqRoutes(d.routes_by_station);
+  wrap.querySelector('.pp-chips').append(
+    routeChips(routes.length ? routes : uniqRoutes(d.routes_by_stop), onPickRoute)
+  );
   return wrap;
 }
 
@@ -357,11 +374,11 @@ export function stationPanel(d, { onPickRoute }) {
     .join('');
   const pane = showPane('point', `
     ${kv([
-      ['axis', d.bearing ? `${Math.round(d.bearing.bearing_deg)}°` : '—'],
-      ['spread', d.bearing ? `${Math.round(d.bearing.max_spread_deg)}°` : '—'],
-      ['members', d.bearing?.member_count ?? stops.length],
-      ['group', d.group ? d.group.station_group_name : '—'],
-    ])}
+    ['axis', d.bearing ? `${Math.round(d.bearing.bearing_deg)}°` : '—'],
+    ['spread', d.bearing ? `${Math.round(d.bearing.max_spread_deg)}°` : '—'],
+    ['members', d.bearing?.member_count ?? stops.length],
+    ['group', d.group ? d.group.station_group_name : '—'],
+  ])}
     <h3>Stops (${stops.length})</h3>
     ${rows}
     <h3>Routes (${uniqRoutes(d.routes).length})</h3>
@@ -375,14 +392,14 @@ export function stationPanel(d, { onPickRoute }) {
 export function stopPanel(d, { onPickRoute }) {
   const pane = showPane('point', `
     ${kv([
-      ['stop', `${d.stop.stop_name} (${d.stop.stop_code})`],
-      ['bearing', d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'],
-      ['station', d.station.station_name],
-      ['station bearing', d.station_bearing
-        ? `${Math.round(d.station_bearing.bearing_deg)}° · spread ${Math.round(d.station_bearing.max_spread_deg)}° · ${d.station_bearing.member_count} members`
-        : '—'],
-      ['group', `${d.group.station_group_name} · ${d.group.source}`],
-    ])}
+    ['stop', `${d.stop.stop_name} (${d.stop.stop_code})`],
+    ['bearing', d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'],
+    ['station', d.station.station_name],
+    ['station bearing', d.station_bearing
+      ? `${Math.round(d.station_bearing.bearing_deg)}° · spread ${Math.round(d.station_bearing.max_spread_deg)}° · ${d.station_bearing.member_count} members`
+      : '—'],
+    ['group', `${d.group.station_group_name} · ${d.group.source}`],
+  ])}
     <h3>Group members (${(d.group_members ?? []).length} stations)</h3>
     <div class="group-chips"></div>
     <h3>Routes serving this stop (${(d.routes_by_stop ?? []).length})</h3>

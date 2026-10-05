@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel, pathPiecePanel } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -75,8 +75,9 @@ async function selectRoute(r, dir = 0) {
     ]);
     if (selectedRoute?.route_id !== route_id || selectedRoute.dir !== dir) return; // stale
     const onStopClick = (stop, marker) => openStopPopup(stop.stop_version_id, marker);
-    lastRouteDraw = { p, s, onStopClick };
-    drawRoute(p, s, { onStopClick });
+    const onPathClick = (props) => pathPiecePanel(props);
+    lastRouteDraw = { p, s, onStopClick, onPathClick };
+    drawRoute(p, s, { onStopClick, onPathClick });
     if (document.getElementById('layer-raw').checked) loadRaw(route_id, dir);
     else clearRaw();
     fitRoute(p, s);
@@ -303,7 +304,7 @@ async function boot() {
   bearingsToggle.addEventListener('change', () => {
     setBearingsOn(bearingsToggle.checked);
     if (stopsToggle.checked) refreshStopsLayer();
-    if (lastRouteDraw) drawRoute(lastRouteDraw.p, lastRouteDraw.s, { onStopClick: lastRouteDraw.onStopClick });
+    if (lastRouteDraw) drawRoute(lastRouteDraw.p, lastRouteDraw.s, { onStopClick: lastRouteDraw.onStopClick, onPathClick: lastRouteDraw.onPathClick });
   });
   map.on('moveend', () => {
     clearTimeout(segmentsTimer);

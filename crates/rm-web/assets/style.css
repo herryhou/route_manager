@@ -433,6 +433,11 @@ table.kv td:first-child {
   font: inherit;
 }
 
+/* Dim basemap tiles so routes/stops stand out. */
+.leaflet-tile-pane {
+  opacity: 0.8;
+}
+
 /* Bearing markers: dot+arrow group, rotated around the stop point.
    Local frame before rotation: dot center (5, 0), arrow center (9, 0). */
 .bearing-wrap {
@@ -481,6 +486,7 @@ table.kv td:first-child {
   stroke-width: 0.4;
   stroke-linejoin: round;
 }
+
 /* Stop/station popups: bearing dial + name header, chips, nested station card. */
 .stop-popup {
   font-size: 12px;
@@ -506,7 +512,7 @@ table.kv td:first-child {
 
 .pp-title {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 20px;
 }
 
 .pp-code {
@@ -537,4 +543,8 @@ table.kv td:first-child {
   display: flex;
   flex-wrap: wrap;
   margin-top: 3px;
+  /* Big stations have dozens of routes — cap the chip block so the popup
+     stays on screen, head stays pinned, chips scroll. */
+  max-height: 132px;
+  overflow-y: auto;
 }

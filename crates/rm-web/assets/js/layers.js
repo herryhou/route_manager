@@ -28,15 +28,27 @@ export function clearHighlight() {
   layers.highlight.clearLayers();
 }
 
+/// Piece tooltip: provider pieces lead with method, OSM way runs with name.
+function pieceTip(p) {
+  const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);
+  if (p.osm_way_id != null) {
+    return `${p.ordinal}. ${p.name ?? 'way'} · #${p.osm_way_id}`;
+  }
+  return `${p.ordinal}. ${p.geometry_method} · ${fmt(p.length_m ?? 0)} · stops ${p.from_seq}–${p.to_seq}`;
+}
+
 /// Draw canonical path pieces + stop markers + projected ghost markers.
-export function drawRoute(pathFc, stopsJson, { onStopClick }) {
+export function drawRoute(pathFc, stopsJson, { onStopClick, onPathClick }) {
   clearRoute();
   L.geoJSON(pathFc, {
     style: (f) =>
       f.properties.geometry_method === 'no_path'
         ? { color: '#cf3e3e', dashArray: '6 6', weight: 3 }
         : { color: '#2563eb', weight: 4 },
-  }).addTo(layers.routePath);
+  })
+    .bindTooltip((l) => pieceTip(l.feature.properties))
+    .on('click', (e) => onPathClick(e.layer.feature.properties))
+    .addTo(layers.routePath);
 
   for (const s of stopsJson.stops ?? []) {
     const m = L.circleMarker([s.lat, s.lon], {
