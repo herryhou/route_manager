@@ -4,7 +4,7 @@
 **Normative source:** `crates/rm-ingest/src/parse.rs` — 本文件與該檔必須同步修改;兩者不一致時以程式碼為準並回補文件。
 **Scope:** 「城市轉換器」(`organize_*.py`)與 `rm-ingest` 之間的中介資料契約。任何城市,只要產出這棵樹,管線(Rust)零修改即可匯入。
 **相關文件:** `Architecture_design_spec.md`(身分概念)、`DB_Schema_Spec.md`(staging 表)、`Tainan_ingest_eval.md`(城市轉換器完整範例)、`assets/{Taichung,Tainan}/*_API.md`(原生 API)。
-**History:** 2026-10-05 v1 — 自 parse.rs 萃取,併入台南轉換器(`organize_tainan.py`)實作經驗。
+**History:** 2026-10-05 v1 — 自 parse.rs 萃取,併入台南轉換器(`organize_tainan.py`)實作經驗。2026-10-06 v2 — 勘誤:children 空陣列亦 fallback CSV、hard error 補 `raw/` 目錄缺失、§7.3 叢集屬性措辭(座標改 per-occurrence 後屬性不再下發)、補 registry split 但書。
 
 ---
 
@@ -15,7 +15,7 @@
 | 概念 | 欄位 | 定義 |
 |---|---|---|
 | **Route(路線)** | `routes.json` 的 `node.id`(= xno) | 路線唯一識別。同時是 `raw/route_{xno}.json` 檔名的一部分,兩處必須**字串完全一致**。 |
-| **Station(站)** | `raw` stations 的 `node.id` | 實體站位(桿群)。**必須全域**:同一 `node.id` 出現在任何路線、任何方向 = 同一站。城市 API 若無此欄位,轉換器必須自行推導(見 §7.3)。 |
+| **Station(站)** | `raw` stations 的 `node.id` | 實體站位(桿群)。**必須全域**:同一 `node.id` 出現在任何路線、任何方向 = 同一站。城市 API 若無此欄位,轉換器必須自行推導(見 §7.3)。rm-registry 之後可依成員 bearing 把雙車道站再拆成兩站(`ext_uid` 加 `:heading` 後綴)— 那是 DB 層重劃,capture 樹的 `node.id` 仍是初始身分。 |
 | **Stop(杆/站牌)** | `sid` | 「某路線某方向經過的這根桿」— per-occurrence,路線+方向範圍內即可,跨路線重複無妨(台中 6,107 個 sid 跨路線共用;台南 stopid 零重複,兩者皆合法)。 |
 | **stop_sequence** | `orderNo` | 方向內行進順序,**1 起算**,在 `(route, direction)` 內唯一。同一站可在同方向重訪(循環/繞駛) — 重訪時 `node.id` 相同、`sid` 不同。 |
 | **Direction(方向)** | `goBack` | `1` = 去程(入庫為 direction 0)、`2` = 返程(direction 1)。解析器負責轉換。 |
@@ -86,7 +86,7 @@
 ```
 
 - 頂層是**陣列**(非 GraphQL 包裝)。
-- `xno`: number 或 string 皆可;`children` 優先,無 children 才用 `sideRoutes` CSV 字串(逗號切割、trim、去空)。
+- `xno`: number 或 string 皆可(其他型別 = 硬錯誤);`children` 元素同為 number/string(其他 JSON 值字串化容忍)。**`children` 非空才優先** — children 缺失**或空陣列**時用 `sideRoutes` CSV 字串(逗號切割、trim、去空)。
 - 解析後 (main, side) 配對排序 + 去重;懸空引用(xno 不在 routes.json)是**警告**不是錯誤。
 - 無資料 → `[]`。
 
@@ -130,7 +130,7 @@
 - `go` / `back`: Google encoded polyline,**精度 1e-5**(與 `rm_core::polyline` 互逆)。無 → null、省略欄位、或整個 `routePoint` 省略,staging 一律存空字串。
 - 單方向路線:存在的方向給值,另一方向 null。全無幾何的路線可進入(配對/驗證階段會回報 skipped)。
 
-`providers`: 該路線業者;與 routes.json 表頭的業者集合不一致 → 警告。
+`providers`: 該路線業者,可省略(= 無);與 routes.json 表頭的業者集合不一致 → 警告。
 
 `data.route` 為 `null` = **硬錯誤**(整批失敗);城市 API 明細抓不到時,轉換器應直接不輸出該檔(產生「header 無 raw」警告)。
 
@@ -138,7 +138,7 @@
 
 - `goBack` 1/2 → `direction` 0/1;站名 trim;polyline null → `""`。
 - 路線排序:xno 數值優先、非數字殿後(`xno_sort_key`)。
-- 每檔記 sha256 + 列數進 `src_file`(kind:`providers`/`route_header`/`main_side_route`/`joint_operation`/`route_detail`)。
+- 每檔記 sha256 + 列數進 `src_file`(kind:`providers`/`route_header`/`main_side_route`/`joint_operation`/`route_detail`;`route_detail` 的 row_count 恆 0 — 站序列數彙總在 `Summary.stop_edges`)。
 - 每路線**恆寫兩筆** `src_route_point`(direction 0 與 1,無幾何者 `encoded=''`)。
 - `lat`/`lon` 另存 e6 整數(`lat_e6`/`lon_e6`)。
 
@@ -146,7 +146,7 @@
 
 **硬錯誤**(parse 失敗 → 整批不寫入;若重用到既有 OPEN batch,該 batch 標 `FAILED`):
 
-- 必要檔缺失、JSON 壞、非 UTF-8;
+- 必要檔缺失(`routes.json`/`providers.json`/`main-side-routes.json` 或 `raw/` 目錄)、JSON 壞、非 UTF-8;
 - `data.route` 為 null;
 - `goBack` ∉ {1, 2};
 - `main-side-routes` 的 `xno` 非 number/string。
@@ -178,7 +178,7 @@
 2. **業者**:無 API → 空 edges,勿虛造。
 3. **Station id 推導**(城市無全域站位 id 時的核心工作)。台南先例(`organize_tainan.py`,與 `rm-identity/grouping.rs` 同規則):
    - 站名 trim 後完全相同者為候選;兩兩 haversine **< 80 m** 則 union(union-find 傳遞閉包);
-   - 決定論順序掃描(路線數字 id → 方向 → 站序), 叢集 id 按首見順序鑄造(台南格式 `T%06d`),叢集屬性(名稱/座標)取首見 occurrence;
+   - 決定論順序掃描(路線數字 id → 方向 → 站序), 叢集 id 按首見順序鑄造(台南格式 `T%06d`)。叢集本身**不**攜帶座標/名稱屬性 — 站位層的首見座標由 rm-identity 以 `node_id` 首見 edge 決定,杆層座標見下一條;
    - **每個 edge 的 `node.lat/lon/name` 仍填該 occurrence 自己的值** — 叢集 id 只負責身分,座標負責位置。
 4. **sid**:城市的 per-occurrence 站牌 id 原樣放入(整數)。
 5. **方向旗標**:城市旗標 → `goBack` 1/2(台南 `goback` 0→1、1→2)。
@@ -198,3 +198,5 @@
 | DB | `data/taichung.db` | `data/tainan.db`(城市各自 DB;`tcg:` 前綴兩城共用數字空間,共庫前必須先參數化前綴) |
 
 已知資料怪癖(可匯入,QA 會浮現,不需轉換器修):同方向重訪站(台南 1129 煙子林)、單方向路線(兩城皆有)、全無幾何路線、幾何起點離首站 >150 m(台南 29 條,最遠 `1032_back` 14.9 km;台中 258 尾巴同類)。
+
+責任邊界:同名雙向桿(雙車道兩側,相距 <80 m)在 capture 層**刻意同站** — `node.lat/lon` 各自保真,rm-registry 的 split 階段才依成員 bearing 拆成兩站(台南 1,820 站拆分,子站取成員座標均值)。轉換器不必也不應處理。
