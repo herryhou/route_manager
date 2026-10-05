@@ -62,7 +62,6 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
 
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM stop_bearing", [])?;
-    tx.execute("DELETE FROM station_bearing", [])?;
 
     {
         // OR REPLACE: a cycled route can visit the same stop twice in one
@@ -162,15 +161,25 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
         }
     }
 
-    // station aggregates over member stop bearings. Members that agree on
-    // one direction of travel (all within 90° of the circular mean) keep
-    // the signed mean — a one-way roadside pole departs one way only, and
-    // folding its heading onto an axis would hide which way. Only genuinely
-    // mixed members (a pole serving both directions of travel) fall back to
-    // the axial mean (headings 180° apart fold onto one axis) plus the
-    // largest deviation from that axis. route `direction` is route-relative
-    // (each route's own 去程/返程), so it cannot group headings — the
-    // spread does.
+    tx.commit()?;
+    summary.stations = stations(conn)?;
+    Ok(summary)
+}
+
+/// Rebuild station_bearing over the member stop bearings. Members that
+/// agree on one direction of travel (all within 90° of the circular mean)
+/// keep the signed mean — a one-way roadside pole departs one way only,
+/// and folding its heading onto an axis would hide which way. Only
+/// genuinely mixed members (a pole serving both directions of travel) fall
+/// back to the axial mean (headings 180° apart fold onto one axis) plus
+/// the largest deviation from that axis. route `direction` is
+/// route-relative (each route's own 去程/返程), so it cannot group
+/// headings — the spread does. Returns stations written; split::run
+/// re-runs this after moving members between stations.
+pub fn stations(conn: &Connection) -> anyhow::Result<usize> {
+    let mut written = 0;
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM station_bearing", [])?;
     {
         let mut stmt = tx.prepare(
             "SELECT s.station_id, b.bearing_deg
@@ -204,12 +213,11 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                 spread,
                 rm_db::now_rfc3339()
             ])?;
-            summary.stations += 1;
+            written += 1;
         }
     }
-
     tx.commit()?;
-    Ok(summary)
+    Ok(written)
 }
 
 /// Bearing along the way run covering (or nearest to) `chainage_m`:

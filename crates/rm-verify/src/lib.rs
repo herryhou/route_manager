@@ -44,7 +44,7 @@ impl Expectations {
     /// Verified targets from the 2026-10-05 Tainan capture (小黃巴士 excluded).
     pub const TAINAN: Expectations = Expectations {
         routes: Some(113),
-        stations: Some(2_295),
+        stations: Some(4_116),
         stop_rows: Some(8_707),
         sids: Some(8_707),
         stops: Some(8_707),
@@ -704,21 +704,69 @@ fn current_grouping_rows(conn: &Connection) -> anyhow::Result<Vec<GroupingRow>> 
     Ok(it.collect::<Result<_, _>>()?)
 }
 
-/// Recompute the grouping algorithm over the current station versions and
-/// require its partition to equal the stored station_group membership;
-/// separately require exactly one current version per station and group.
+/// Recompute the grouping algorithm and require its partition to equal the
+/// stored station_group membership; separately require exactly one current
+/// version per station and group. Inputs are the current stop versions —
+/// the level identity clusters at: a split child station legitimately sits
+/// ~100 m from its parent (poles across a wide dual carriageway) while its
+/// members stay inside the parent members' 80 m same-name chain, so station
+/// coords would over-split. A station no current member represents falls
+/// back to its own coords.
 fn station_grouping_checks(conn: &Connection) -> anyhow::Result<(Check, Check)> {
     let rows = current_grouping_rows(conn)?;
 
-    let inputs: Vec<rm_identity::ClusterInput> = rows
+    // current members of stations with a current station version
+    struct MemberRow {
+        station_id: i64,
+        name: String,
+        lat: f64,
+        lon: f64,
+    }
+    let members: Vec<MemberRow> = {
+        let mut stmt = conn.prepare(
+            "SELECT sv.station_id, sv.stop_name, sv.latitude, sv.longitude
+             FROM stop_version sv
+             JOIN station_version cv
+               ON cv.station_id = sv.station_id AND cv.valid_to IS NULL
+             WHERE sv.valid_to IS NULL
+             ORDER BY sv.station_id",
+        )?;
+        let it = stmt.query_map([], |r| {
+            Ok(MemberRow {
+                station_id: r.get(0)?,
+                name: r.get(1)?,
+                lat: r.get(2)?,
+                lon: r.get(3)?,
+            })
+        })?;
+        it.collect::<Result<_, _>>()?
+    };
+    let memberless: Vec<&GroupingRow> = rows
         .iter()
-        .map(|r| rm_identity::ClusterInput {
-            ext_uid: r.ext_uid.clone(),
-            name: r.name.clone(),
-            lat: r.lat,
-            lon: r.lon,
+        .filter(|r| !members.iter().any(|m| m.station_id == r.station_id))
+        .collect();
+    let station_of = |i: usize| {
+        if i < members.len() {
+            members[i].station_id
+        } else {
+            memberless[i - members.len()].station_id
+        }
+    };
+    let mut inputs: Vec<rm_identity::ClusterInput> = members
+        .iter()
+        .map(|m| rm_identity::ClusterInput {
+            ext_uid: String::new(),
+            name: m.name.clone(),
+            lat: m.lat,
+            lon: m.lon,
         })
         .collect();
+    inputs.extend(memberless.iter().map(|r| rm_identity::ClusterInput {
+        ext_uid: String::new(),
+        name: r.name.clone(),
+        lat: r.lat,
+        lon: r.lon,
+    }));
     let clusters = rm_identity::group_stations(&inputs);
 
     // canonical partitions: sorted member-id sets, sets sorted, so partition
@@ -727,8 +775,9 @@ fn station_grouping_checks(conn: &Connection) -> anyhow::Result<(Check, Check)> 
         let mut v: Vec<Vec<i64>> = clusters
             .iter()
             .map(|c| {
-                let mut ids: Vec<i64> = c.iter().map(|&i| rows[i].station_id).collect();
+                let mut ids: Vec<i64> = c.iter().map(|&i| station_of(i)).collect();
                 ids.sort_unstable();
+                ids.dedup();
                 ids
             })
             .collect();

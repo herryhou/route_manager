@@ -3,9 +3,11 @@
 
 Tainan has no global station id (stopid is per-occurrence — see
 Tainan_ingest_eval.md), so station identity is derived here: same stop name
-within 80 m, chained transitively (the rm-identity/grouping.rs rule), first
-occurrence wins name/coords. Station ids are minted in first-appearance order
-as T%06d.
+within 80 m, chained transitively (the rm-identity/grouping.rs rule). Station
+ids are minted in first-appearance order as T%06d, but each edge's node
+object carries that occurrence's own name/coords — poles across a dual
+carriageway keep their real positions instead of the cluster's first
+occurrence.
 
 Filters out 小黃巴士 (type name; their pathList typeid is 71-76, not the 7
 that pathTypeList implies). Direction flag maps Tainan goback 0/1 -> Taichung
@@ -131,11 +133,14 @@ for p in kept:
     edges = []
     for d in dirs:
         for i, s in enumerate(d["stop"], start=1):
-            root = find(occ_idx[(rid, int(d["goback"]), i)])
-            name, lat, lon = station_attrs[root]
+            occ = occ_idx[(rid, int(d["goback"]), i)]
+            _, _, _, sid, name, lat, lon = occurrences[occ]
+            root = find(occ)
             edges.append({
                 "goBack": 1 if int(d["goback"]) == 0 else 2,
-                "orderNo": i, "ivrNo": None, "sid": int(s["stopid"]),
+                "orderNo": i, "ivrNo": None, "sid": sid,
+                # per-occurrence coords: the cluster id carries station
+                # identity, the node coords carry the pole's own position
                 "node": {"id": cluster_of[root], "name": name, "lat": lat, "lon": lon},
             })
     rows += len(edges)

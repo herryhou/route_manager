@@ -17,6 +17,19 @@ tables; every Tainan field maps onto an existing one.
 > hardcoded — now `Expectations::TAINAN` + `--preset tainan` (101/102 share
 > 28 segments as the sanity pair). 74 stations warn on bearing spread >45°
 > (warn-only; 3.2% vs Taichung's 0.5%).
+>
+> **Re-executed 2026-10-05 (per-pole coords + registry split)**: the
+> converter used to stamp every edge with its cluster's first-occurrence
+> coords, flattening both carriageways of a dual carriageway onto one point
+> (85% of names carry >5 m per-occurrence spread; 25路 臺南高工 poles sit
+> ~60 m apart). Edges now carry their own occurrence coords and
+> rm-identity stamps `stop_version` from the edge instead of the station.
+> rm-registry's split pass moves children to their members' mean coords and
+> the parent to its retained cluster's mean; verify's `station:recompute`
+> clusters at member level (station coords can legitimately sit ~100 m
+> apart across a wide carriageway). Rebuilt result: 2,295 pre-split
+> stations → 4,116 after split (was 4,120 — real pole coords resolved five
+> clusters differently), 4,989 segments, 1,700 shared, verify green.
 
 ## What was captured
 
@@ -67,7 +80,8 @@ Route types: 市區公車 27, 小黃巴士 52, 綠 20 / 黃 16 / 橘 14 / 藍 12
 | `op_type` | `node.opType` | `typeid` | 1:1 numeric pass-through |
 | `src_provider` / `src_route_provider` | `providers.json` | — | **empty** (no operator API) |
 | `src_stop_edge.node_id` | `node.id` (global) | — | **synthesize**: cluster stops by name+80 m (grouping.rs rule) offline, mint `T00001…` per cluster |
-| `station_name/lat/lon` | `node.*` | first occurrence in cluster | — |
+| `station_name` | `node.name` | first occurrence in cluster | — |
+| `station lat/lon` | `node.*` | **per-occurrence** (the pole's own coords) | first occurrence flattened both carriageways onto one point; station coords are the cluster first-occurrence only where no member exists |
 | `src_stop_edge.sid` | `sid` (shared pole) | `stopid` | as-is — already per-occurrence |
 | `direction` | `goBack` 1→0, 2→1 | `goback` 0→0, 1→1 | flag values differ, both normalize |
 | `source_order_no` | `orderNo` | array index (1-based) | no explicit seq in payload |

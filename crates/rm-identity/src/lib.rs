@@ -145,7 +145,18 @@ pub fn run(conn: &Connection, batch_id: i64) -> Result<Summary> {
     // first occurrence wins: station attrs per node, stop per (xno, dir, sid)
     let mut stations: Vec<(String, String, f64, f64)> = Vec::new(); // (node_id, name, lat, lon)
     let mut station_index: HashMap<String, usize> = HashMap::new();
-    let mut stops: Vec<(String, i64, i64, String)> = Vec::new(); // (xno, dir, sid, node_id)
+    // per-stop (pole) attrs come from the edge itself, not the station —
+    // poles across a dual carriageway share a station but differ in coords
+    struct StopRec {
+        xno: String,
+        direction: i64,
+        sid: i64,
+        node_id: String,
+        name: String,
+        lat: f64,
+        lon: f64,
+    }
+    let mut stops: Vec<StopRec> = Vec::new();
     let mut stop_index: HashMap<(String, i64, i64), usize> = HashMap::new();
     for e in &edges {
         if !station_index.contains_key(&e.node_id) {
@@ -155,16 +166,24 @@ pub fn run(conn: &Connection, batch_id: i64) -> Result<Summary> {
         let key = (e.xno.clone(), e.direction, e.sid);
         match stop_index.get(&key) {
             Some(&i) => {
-                if stops[i].3 != e.node_id {
+                if stops[i].node_id != e.node_id {
                     warnings.push(format!(
                         "ambiguous stop: xno={} dir={} sid={} nodes {} and {}; first wins",
-                        e.xno, e.direction, e.sid, stops[i].3, e.node_id
+                        e.xno, e.direction, e.sid, stops[i].node_id, e.node_id
                     ));
                 }
             }
             None => {
                 stop_index.insert(key, stops.len());
-                stops.push((e.xno.clone(), e.direction, e.sid, e.node_id.clone()));
+                stops.push(StopRec {
+                    xno: e.xno.clone(),
+                    direction: e.direction,
+                    sid: e.sid,
+                    node_id: e.node_id.clone(),
+                    name: e.name.clone(),
+                    lat: e.lat,
+                    lon: e.lon,
+                });
             }
         }
     }
@@ -329,8 +348,8 @@ pub fn run(conn: &Connection, batch_id: i64) -> Result<Summary> {
     }
 
     // stops + stop_version V1
-    for (xno, direction, sid, node_id) in &stops {
-        let uid = stop_ext_uid(xno, *direction, *sid);
+    for s in &stops {
+        let uid = stop_ext_uid(&s.xno, s.direction, s.sid);
         let id = match lookup("SELECT stop_id FROM stop WHERE ext_uid = ?1", &uid)? {
             Some(id) => id,
             None => {
@@ -351,11 +370,7 @@ pub fn run(conn: &Connection, batch_id: i64) -> Result<Summary> {
             .optional()?
             .unwrap_or(false);
         if !has_version {
-            let (st_name, st_lat, st_lon) = {
-                let &si = station_index.get(node_id).expect("station seen");
-                (&stations[si].1, stations[si].2, stations[si].3)
-            };
-            let station_id = station_ids[node_id];
+            let station_id = station_ids[&s.node_id];
             tx.execute(
                 "INSERT INTO stop_version
                     (stop_version_id, stop_id, station_id, stop_code, stop_name, direction, latitude, longitude, valid_from, created_at)
@@ -364,11 +379,11 @@ pub fn run(conn: &Connection, batch_id: i64) -> Result<Summary> {
                     rm_db::mint(&tx, "stop_version")?,
                     id,
                     station_id,
-                    sid.to_string(),
-                    st_name,
-                    direction,
-                    st_lat,
-                    st_lon,
+                    s.sid.to_string(),
+                    s.name,
+                    s.direction,
+                    s.lat,
+                    s.lon,
                     valid_from,
                     now
                 ],

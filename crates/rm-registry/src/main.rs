@@ -27,11 +27,6 @@ fn main() -> anyhow::Result<()> {
         None => rm_db::latest_open_batch(&conn)?
             .ok_or_else(|| anyhow::anyhow!("no OPEN batch; pass --batch"))?,
     };
-    let s = rm_registry::run(&conn, batch)?;
-    println!(
-        "batch {} registry: {} directions, {} traversals, {} segments, {} skipped pairs",
-        s.batch_id, s.directions, s.traversals, s.segments, s.skipped_pairs
-    );
     let b = rm_registry::bearing::run(&conn, batch)?;
     println!(
         "batch {} bearings: {} stops ({} OSM, {} polyline, {} skipped), {} stations",
@@ -41,6 +36,19 @@ fn main() -> anyhow::Result<()> {
         b.stops_polyline,
         b.stops_skipped,
         b.stations
+    );
+    let sp = rm_registry::split::run(&conn)?;
+    if sp.stops_moved > 0 {
+        rm_registry::bearing::stations(&conn)?;
+    }
+    println!(
+        "batch {} split: {} stations split, {} created, {} stops moved",
+        batch, sp.stations_split, sp.stations_created, sp.stops_moved
+    );
+    let s = rm_registry::run(&conn, batch)?;
+    println!(
+        "batch {} registry: {} directions, {} traversals, {} segments, {} skipped pairs",
+        s.batch_id, s.directions, s.traversals, s.segments, s.skipped_pairs
     );
     Ok(())
 }
