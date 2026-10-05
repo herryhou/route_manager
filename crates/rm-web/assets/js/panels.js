@@ -61,74 +61,33 @@ export function filterRoutes(routes, q) {
   );
 }
 
-/// Tabbed detail panel: each { key, title } is one tab; content panes stay in
-/// the DOM (listeners intact) so flipping back needs no refetch. Re-showing a
-/// key replaces its content and activates it.
-export function showDetail(html, { key = 'main', title = 'detail' } = {}) {
-  const el = document.getElementById('detail');
-  let strip = el.querySelector('.detail-tabs');
-  if (!strip) {
-    el.replaceChildren();
-    strip = document.createElement('div');
-    strip.className = 'detail-tabs';
-    const closeAll = document.createElement('button');
-    closeAll.className = 'close';
-    closeAll.title = 'close panel';
-    closeAll.textContent = '✕';
-    closeAll.addEventListener('click', hideDetail);
-    strip.append(closeAll);
-    el.append(strip);
+/// Detail panel = two stacked panes, latest only (no tabs): context on top
+/// (route stops / outliers / segment), point detail below (stop drill-down).
+/// Re-showing a pane replaces its content and re-wires listeners.
+const PANE_KINDS = ['context', 'point'];
+
+function paneEl(kind) {
+  return document.getElementById('detail').querySelector(`.dpane-${kind}`);
+}
+
+export function showPane(kind, html, title) {
+  const pane = paneEl(kind);
+  document.getElementById('detail').hidden = false;
+  pane.hidden = false;
+  pane.querySelector('.dpane-title').textContent = title;
+  pane.querySelector('.dpane-close').onclick = () => closePane(kind);
+  const body = pane.querySelector('.dpane-body');
+  body.innerHTML = html;
+  body.scrollTop = 0;
+  return body;
+}
+
+export function closePane(kind) {
+  const pane = paneEl(kind);
+  pane.hidden = true;
+  if (PANE_KINDS.every((k) => paneEl(k).hidden)) {
+    document.getElementById('detail').hidden = true;
   }
-  let pane = el.querySelector(`[data-pane="${key}"]`);
-  if (pane) {
-    pane.replaceChildren();
-  } else {
-    pane = document.createElement('div');
-    pane.dataset.pane = key;
-    pane.hidden = true;
-    el.append(pane);
-    const tab = document.createElement('button');
-    tab.className = 'detail-tab';
-    tab.dataset.key = key;
-    const label = document.createElement('span');
-    label.textContent = title;
-    const x = document.createElement('span');
-    x.className = 'tab-x';
-    x.textContent = '✕';
-    tab.append(label, x);
-    tab.addEventListener('click', (e) => {
-      if (e.target === x) closeDetailTab(key);
-      else activateDetailTab(key);
-    });
-    strip.insertBefore(tab, strip.querySelector('.close'));
-  }
-  pane.innerHTML = html;
-  activateDetailTab(key);
-  return pane;
-}
-
-function activateDetailTab(key) {
-  const el = document.getElementById('detail');
-  el.hidden = false;
-  for (const p of el.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== key;
-  for (const t of el.querySelectorAll('.detail-tab')) t.classList.toggle('active', t.dataset.key === key);
-}
-
-function closeDetailTab(key) {
-  const el = document.getElementById('detail');
-  const pane = el.querySelector(`[data-pane="${key}"]`);
-  const wasActive = !pane?.hidden;
-  pane?.remove();
-  el.querySelector(`.detail-tab[data-key="${key}"]`)?.remove();
-  const remaining = [...el.querySelectorAll('.detail-tab')];
-  if (!remaining.length) hideDetail();
-  else if (wasActive) activateDetailTab(remaining[remaining.length - 1].dataset.key);
-}
-
-export function hideDetail() {
-  const el = document.getElementById('detail');
-  el.replaceChildren();
-  el.hidden = true;
 }
 
 export function kv(pairs) {
@@ -192,7 +151,7 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
     <div class="view-stops">${rows}</div>
     <div class="view-qa" hidden>${profileSvg(stops.stops ?? [])}</div>
   `;
-  const pane = showDetail(html, { key: `route-${d.route_id}`, title: d.route_code });
+  const pane = showPane('context', html, d.route_code);
   pane.querySelectorAll('.tabs:not(.view-tabs) button').forEach((b) =>
     b.addEventListener('click', () => onDirection(Number(b.dataset.dir)))
   );
@@ -251,7 +210,7 @@ export function segmentPanel(d, { onPickRoute }) {
         <td style="text-align:right">${w.length_m.toFixed(0)}m</td></tr>`
     )
     .join('');
-  const pane = showDetail(`
+  const pane = showPane('context', `
     <h2>Segment <small class="muted">${d.segment_id.slice(0, 12)}…</small></h2>
     ${kv([
       ['length', `${d.length_m.toFixed(0)} m`],
@@ -263,7 +222,7 @@ export function segmentPanel(d, { onPickRoute }) {
     <table class="kv"><tr><td>#</td><td>name</td><td>highway</td><td style="text-align:right">len</td></tr>${ways}</table>
     <h3>Routes (${(d.routes ?? []).length})</h3>
     <div class="segment-routes"></div>
-  `, { key: `segment-${d.segment_id}`, title: `seg ${d.segment_id.slice(0, 6)}` });
+  `, `seg ${d.segment_id.slice(0, 6)}`);
   pane.querySelector('.segment-routes').append(routeChips(d.routes ?? [], onPickRoute));
 }
 
@@ -279,11 +238,11 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
       </div>`
     )
     .join('');
-  const pane = showDetail(`
+  const pane = showPane('context', `
     <h2>Outliers <small class="muted">${(rows ?? []).length}</small></h2>
     <p class="muted">click to locate; route code opens the route</p>
     ${items || '<p class="muted">none</p>'}
-  `, { key: 'outliers', title: 'outliers' });
+  `, 'outliers');
   pane.querySelectorAll('.outlier-row').forEach((row, i) => {
     row.addEventListener('click', () => onPick(rows[i]));
     row.querySelector('.route-code').addEventListener('click', (e) => {
@@ -293,29 +252,96 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
   });
 }
 
-/// Compact stop popup (map marker click): stop summary + routes, then its station block.
+/// North-up bearing dial — magnified version of the map's dot+arrow glyph.
+/// Single arrow = stop (direction of travel); axis = station (headings fold
+/// onto one axis, so the arrow is double-headed); spread draws the member-
+/// deviation wedge, warn-tinted past the rm-verify 45° threshold.
+function dialSvg(b, { axis = false, spread = null, color = 'var(--accent)' } = {}) {
+  const C = 22, R = 18;
+  const pol = (deg, r) => {
+    const t = (deg * Math.PI) / 180;
+    return `${(C + r * Math.sin(t)).toFixed(1)},${(C - r * Math.cos(t)).toFixed(1)}`;
+  };
+  let wedge = '';
+  if (b != null && spread != null) {
+    const s = Math.min(Math.max(spread, 0.6), 89);
+    wedge = `<path d="M${C},${C} L${pol(b - s, R)} A${R},${R} 0 0 1 ${pol(b + s, R)} Z"
+      fill="${spread > 45 ? 'var(--warn)' : color}" opacity="0.16"/>`;
+  }
+  const c = b == null ? 'var(--muted)' : color;
+  const glyph = b == null ? '' : `<g transform="rotate(${b} ${C} ${C})">
+    ${axis ? `<line x1="${C}" y1="${C + 12}" x2="${C}" y2="${C - 9}" stroke="${c}" stroke-width="2"/>` : ''}
+    <line x1="${C}" y1="${C}" x2="${C}" y2="${C - 9}" stroke="${c}" stroke-width="2"/>
+    <path d="M${C},${C - 16} L${C - 3.4},${C - 8.5} L${C},${C - 10.5} L${C + 3.4},${C - 8.5} Z" fill="${c}"/>
+    ${axis ? `<path d="M${C},${C + 16} L${C - 3.4},${C + 8.5} L${C},${C + 10.5} L${C + 3.4},${C + 8.5} Z" fill="${c}"/>` : ''}
+  </g>`;
+  return `<svg class="pp-dial" viewBox="0 0 44 44" width="36" height="36" role="img"
+    aria-label="${b == null ? 'no bearing' : `bearing ${Math.round(b)}°`}">
+    <circle cx="${C}" cy="${C}" r="${R}" fill="white" stroke="var(--border)"/>
+    <line x1="${C}" y1="1.5" x2="${C}" y2="4" stroke="var(--muted)" stroke-width="1.5"/>
+    ${wedge}${glyph}
+    <circle cx="${C}" cy="${C}" r="2" fill="${c}"/>
+  </svg>`;
+}
+
+// Direction variants repeat route_code — popups show one chip per code+name.
+const uniqRoutes = (rs) => [...new Map((rs ?? []).map((r) => [`${r.route_code}|${r.subroute_name ?? ''}`, r])).values()];
+
+/// Station card shared by both popups: axis dial + name + degrees (spread
+/// only when it trips the rm-verify 45° warn threshold), member stop codes
+/// (top-level only), station-serving route chips.
+function stationCard({ station, bearing, routes, stops }, { nested = false, onPickRoute }) {
+  const el = document.createElement('div');
+  el.className = nested ? 'pp-station' : '';
+  const spread = bearing?.max_spread_deg;
+  const spreadTxt = spread != null && spread > 45
+    ? ` · <span class="pp-hot">spread ${Math.round(spread)}°</span>`
+    : '';
+  // Direction variants repeat the same stop_code — unique codes only.
+  const uniqCodes = [...new Map((stops ?? []).map((s) => [s.stop_code, s])).values()];
+  const codes = uniqCodes.length
+    ? `<div class="pp-meta">stops ${uniqCodes.map((s) =>
+        `<span class="pp-code" title="${s.stop_name}">#${s.stop_code}</span>`).join(' ')}</div>`
+    : '';
+  el.innerHTML = `
+    <div class="pp-head">
+      ${dialSvg(bearing?.bearing_deg, { axis: true, spread, color: 'var(--amber)' })}
+      <div>
+        <div class="pp-title">${station.station_name} <span class="pp-code">#${station.station_id}</span></div>
+        <div class="pp-meta">${bearing ? `axis <b>${Math.round(bearing.bearing_deg)}°</b>${spreadTxt}` : 'no bearing'}</div>
+      </div>
+    </div>
+    ${codes}
+    <div class="pp-chips"></div>
+  `;
+  el.querySelector('.pp-chips').append(routeChips(uniqRoutes(routes), onPickRoute));
+  return el;
+}
+
+/// Compact stop popup (map marker click / route-panel click): stop dial +
+/// routes, then its station card.
 export function stopPopupEl(d, { onDetails, onPickRoute }) {
   const wrap = document.createElement('div');
   wrap.className = 'stop-popup';
-  const bearing = d.bearing
-    ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}`
-    : '—';
-  const stBearing = d.station_bearing
-    ? `${Math.round(d.station_bearing.bearing_deg)}° · spread ${Math.round(d.station_bearing.max_spread_deg)}° · ${d.station_bearing.member_count} members`
-    : '—';
+  const b = d.bearing;
   wrap.innerHTML = `
-    <div class="popup-title">${d.stop.stop_name} <small class="muted">#${d.stop.stop_code}</small></div>
-    <div class="muted">bearing ${bearing}</div>
-    <div class="popup-routes muted">stop routes (${(d.routes_by_stop ?? []).length})</div>
-    <div class="chips-stop"></div>
-    <div class="popup-title">${d.station.station_name} <small class="muted">#${d.station.station_id}</small></div>
-    <div class="muted">bearing ${stBearing}</div>
-    <div class="muted">group ${d.group?.station_group_name ?? '—'}</div>
-    <div class="popup-routes muted">station routes (${(d.routes_by_station ?? []).length})</div>
-    <div class="chips-station"></div>
+    <div class="pp-head">
+      ${dialSvg(b?.bearing_deg, { color: 'var(--accent)' })}
+      <div>
+        <div class="pp-title">${d.stop.stop_name} <span class="pp-code">#${d.stop.stop_code}</span></div>
+        <div class="pp-meta">${b ? `<b>${Math.round(b.bearing_deg)}°</b>` : 'no bearing'}</div>
+      </div>
+    </div>
+    <div class="pp-chips"></div>
+    <div data-station></div>
   `;
-  wrap.querySelector('.chips-stop').append(routeChips(d.routes_by_stop ?? [], onPickRoute));
-  wrap.querySelector('.chips-station').append(routeChips(d.routes_by_station ?? [], onPickRoute));
+  wrap.querySelector('.pp-chips').append(routeChips(uniqRoutes(d.routes_by_stop), onPickRoute));
+  wrap.querySelector('[data-station]').append(
+    stationCard(
+      { station: d.station, group: d.group, bearing: d.station_bearing, routes: d.routes_by_station },
+      { nested: true, onPickRoute }
+    )
+  );
   const btn = document.createElement('button');
   btn.className = 'popup-details';
   btn.textContent = 'more details…';
@@ -324,29 +350,48 @@ export function stopPopupEl(d, { onDetails, onPickRoute }) {
   return wrap;
 }
 
-/// Compact station popup (viewport station marker click).
+/// Compact station popup (search list / viewport station marker click).
 export function stationPopupEl(d, { onPickRoute }) {
   const wrap = document.createElement('div');
   wrap.className = 'stop-popup';
-  const bearing = d.bearing
-    ? `${Math.round(d.bearing.bearing_deg)}° · spread ${Math.round(d.bearing.max_spread_deg)}° · ${d.bearing.member_count} members`
-    : '—';
-  wrap.innerHTML = `
-    <div class="popup-title">${d.station.station_name} <small class="muted">#${d.station.station_id}</small></div>
-    <div class="muted">bearing ${bearing}</div>
-    <div class="muted">group ${d.group.station_group_name}</div>
-    <div class="muted">stops (${(d.stops ?? []).length}): ${(d.stops ?? []).map((s) => s.stop_code).join(' ')}</div>
-    <div class="popup-routes muted">routes (${(d.routes ?? []).length})</div>
-  `;
-  const chips = document.createElement('div');
-  chips.append(routeChips(d.routes ?? [], onPickRoute));
-  wrap.append(chips);
+  wrap.append(
+    stationCard(
+      { station: d.station, group: d.group, bearing: d.bearing, routes: d.routes, stops: d.stops },
+      { onPickRoute }
+    )
+  );
   return wrap;
+}
+
+/// Station detail panel (point pane): axis/spread kv, member stops, routes.
+export function stationPanel(d, { onPickRoute }) {
+  const stops = d.stops ?? [];
+  const rows = stops
+    .map((s) => `<div class="stop-row" title="${s.stop_name}">
+        <span class="stop-seq">#${s.stop_code}</span>
+        <span class="stop-name">${s.stop_name}</span>
+      </div>`)
+    .join('');
+  const pane = showPane('point', `
+    <h2>${d.station.station_name} <small class="muted">#${d.station.station_id}</small></h2>
+    ${kv([
+      ['axis', d.bearing ? `${Math.round(d.bearing.bearing_deg)}°` : '—'],
+      ['spread', d.bearing ? `${Math.round(d.bearing.max_spread_deg)}°` : '—'],
+      ['members', d.bearing?.member_count ?? stops.length],
+      ['group', d.group ? d.group.station_group_name : '—'],
+    ])}
+    <h3>Stops (${stops.length})</h3>
+    ${rows}
+    <h3>Routes (${uniqRoutes(d.routes).length})</h3>
+    <div class="station-routes"></div>
+  `, `站 ${d.station.station_id}`);
+  pane.querySelector('.station-routes').append(routeChips(uniqRoutes(d.routes), onPickRoute));
+  return pane;
 }
 
 /// Stop drill-down panel: stop → station → group + serving routes.
 export function stopPanel(d, { onPickRoute }) {
-  const pane = showDetail(`
+  const pane = showPane('point', `
     <h2>${d.stop.stop_name} <small class="muted">#${d.stop.stop_code}</small></h2>
     ${kv([
       ['stop', `${d.stop.stop_name} (${d.stop.stop_code})`],
@@ -365,7 +410,7 @@ export function stopPanel(d, { onPickRoute }) {
     <div class="routes-station-chips"></div>
     <h3>Routes serving group (${(d.routes_by_group ?? []).length})</h3>
     <div class="routes-group-chips"></div>
-  `, { key: `stop-${d.stop.stop_version_id}`, title: `#${d.stop.stop_code}` });
+  `, `#${d.stop.stop_code}`);
   pane.querySelector('.group-chips').append(
     ...d.group_members.map((m) => {
       const el = document.createElement('span');

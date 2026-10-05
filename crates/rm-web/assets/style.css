@@ -5,6 +5,7 @@
   --text: #26261f;
   --muted: #6b6b60;
   --accent: #2563eb;
+  --amber: #f59e0b;
   --good: #2e9e44;
   --warn: #d19a00;
   --bad: #cf3e3e;
@@ -233,8 +234,64 @@ body {
   flex: none;
   background: var(--panel);
   border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* display:flex above would override the hidden attribute — restore it. */
+#detail[hidden] {
+  display: none;
+}
+
+/* Two stacked panes: context (route/outliers/segment) 2/3, point detail 1/3. */
+.dpane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dpane[hidden] {
+  display: none;
+}
+
+.dpane-context {
+  flex: 2;
+}
+
+.dpane-point {
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+
+.dpane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--bg);
+  flex: none;
+}
+
+.dpane-close {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 0 2px;
+}
+
+.dpane-close:hover {
+  color: var(--bad);
+}
+
+.dpane-body {
+  flex: 1;
   overflow-y: auto;
-  padding: 10px 12px;
+  padding: 8px 12px;
 }
 
 #detail h2 {
@@ -278,56 +335,6 @@ body {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
-}
-
-/* Top-level detail panel tabs: one per opened route/stop/segment/outliers. */
-.detail-tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  margin: -10px -12px 8px;
-  padding: 8px 12px 6px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-}
-
-.detail-tabs .close {
-  margin-left: auto;
-}
-
-.detail-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  border-radius: 6px;
-  padding: 3px 8px;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.detail-tab.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-.detail-tab .tab-x {
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.detail-tab .tab-x:hover {
-  color: #c0392b;
-}
-
-.detail-tab.active .tab-x {
-  color: #fff;
 }
 
 .stop-row {
@@ -438,6 +445,12 @@ table.kv td:first-child {
   overflow: visible;
 }
 
+/* Clickable variant: glyph itself is the stop/station click target. */
+.bearing-wrap.bearing-click {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
 .bearing {
   position: relative;
   width: 24px;
@@ -468,30 +481,78 @@ table.kv td:first-child {
   stroke-width: 0.4;
   stroke-linejoin: round;
 }
-/* Compact stop popup (marker click) — summary + routes + details link. */
+/* Stop/station popups: bearing dial + name header, chips, nested station card. */
 .stop-popup {
   font-size: 12px;
   max-width: 280px;
 }
 
-.stop-popup .popup-title {
+.stop-popup b {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
   font-weight: 700;
-  margin-bottom: 2px;
 }
 
-.stop-popup .popup-routes {
+.pp-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.pp-head .pp-dial {
+  flex: none;
+  display: block;
+}
+
+.pp-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.pp-code {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-meta {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 1px;
+}
+
+.pp-hot {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.pp-chips {
+  display: flex;
+  flex-wrap: wrap;
   margin-top: 6px;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  font-size: 10px;
+}
+
+/* Nested station card inside a stop popup — chips invert bg to stay visible. */
+.pp-station {
+  margin-top: 9px;
+  padding: 8px 9px 5px;
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.pp-station .chip-route {
+  background: var(--panel);
 }
 
 .stop-popup .popup-details {
-  margin-top: 8px;
+  display: block;
+  width: 100%;
+  margin-top: 9px;
   border: 1px solid var(--border);
   background: var(--panel);
   border-radius: 6px;
-  padding: 2px 10px;
+  padding: 3px 10px;
   cursor: pointer;
   font-size: 12px;
 }

@@ -60,7 +60,7 @@ export function drawRoute(pathFc, stopsJson, { onStopClick }) {
     // }
 
     if (bearingsOn && s.bearing != null) {
-      drawBearing(s.lat, s.lon, s.bearing, layers.routeStops);
+      drawBearing(s.lat, s.lon, s.bearing, layers.routeStops, () => onStopClick(s, m));
     }
   }
 }
@@ -165,7 +165,10 @@ export function drawStopsLayer(fc, { onStopClick, onStationClick }) {
     if (!isStation) m.on('click', () => onStopClick(p.id, m));
     else if (onStationClick) m.on('click', () => onStationClick(p.id, m));
     m.addTo(layers.stopsLayer);
-    if (bearingsOn && p.bearing != null) drawBearing(lat, lon, p.bearing, layers.stopsLayer);
+    if (bearingsOn && p.bearing != null) {
+      const click = !isStation ? () => onStopClick(p.id, m) : () => onStationClick(p.id, m);
+      drawBearing(lat, lon, p.bearing, layers.stopsLayer, click);
+    }
   }
 }
 
@@ -180,8 +183,12 @@ export function clearStopsLayer() {
  * - the dot is 5 px to the right
  * - the arrow is 9 px to the right
  * - the arrow points north
+ *
+ * With onClick the glyph is the click target: the tiny stop dot underneath is
+ * near-unclickable, and the glyph's visual dot sits 5 px off the true center,
+ * so clicks aimed at what's visible would otherwise miss.
  */
-export function drawBearing(lat, lon, deg, layer) {
+export function drawBearing(lat, lon, deg, layer, onClick) {
   const bearing = ((Number(deg) % 360) + 360) % 360;
 
   const html = `
@@ -197,14 +204,16 @@ export function drawBearing(lat, lon, deg, layer) {
     </div>
   `;
 
-  return L.marker([lat, lon], {
+  const m = L.marker([lat, lon], {
     icon: L.divIcon({
-      className: "bearing-wrap",
+      className: "bearing-wrap" + (onClick ? " bearing-click" : ""),
       html,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
     }),
-    interactive: false,
+    interactive: !!onClick,
     keyboard: false,
   }).addTo(layer);
+  if (onClick) m.on('click', onClick);
+  return m;
 }

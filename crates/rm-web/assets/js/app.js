@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -101,33 +101,35 @@ async function loadRaw(routeId, dir) {
   }
 }
 
-/// Compact popup on the clicked marker; "more details" opens the side panel.
+/// Compact popup on the clicked marker; point pane mirrors the detail.
 async function openStopPopup(stopVersionId, marker) {
   try {
     const d = await api.stopDetail(stopVersionId);
+    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
     const el = stopPopupEl(d, {
       onDetails: () => {
         map.closePopup();
         selectStop(stopVersionId);
       },
-      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
+      onPickRoute,
     });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
+    stopPanel(d, { onPickRoute });
   } catch (e) {
     status(`stop load failed: ${e.message}`);
   }
 }
 
-/// Compact popup on a viewport station marker.
+/// Compact popup on a viewport station marker; point pane mirrors the detail.
 async function openStationPopup(stationId, marker) {
   try {
     const d = await api.stationDetail(stationId);
-    const el = stationPopupEl(d, {
-      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
-    });
+    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
+    const el = stationPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
+    stationPanel(d, { onPickRoute });
   } catch (e) {
     status(`station load failed: ${e.message}`);
   }
@@ -147,17 +149,19 @@ async function selectStation(stationId) {
     }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([st.lat, st.lon], { animate: true });
+    stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0) });
     location.hash = `#station=${stationId}`;
   } catch (e) {
     status(`station load failed: ${e.message}`);
   }
 }
 
-/// Route-panel stop click: ring marker + compact popup, same pattern as selectStation.
+/// Route-panel stop click: ring marker + compact popup + point pane, selectStation pattern.
 async function popupStop(stopVersionId) {
   try {
     const d = await api.stopDetail(stopVersionId);
     const s = d.stop;
+    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
     clearHighlight();
     const m = L.circleMarker([s.lat, s.lon], {
       radius: 10, color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.15,
@@ -167,10 +171,11 @@ async function popupStop(stopVersionId) {
         map.closePopup();
         selectStop(stopVersionId);
       },
-      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
+      onPickRoute,
     }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([s.lat, s.lon], { animate: true });
+    stopPanel(d, { onPickRoute });
   } catch (e) {
     status(`stop load failed: ${e.message}`);
   }
