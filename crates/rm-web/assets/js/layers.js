@@ -48,7 +48,7 @@ export function drawRoute(pathFc, stopsJson, { onStopClick, onPathClick }) {
         : { color: '#2563eb', weight: 4 },
   })
     .bindTooltip((l) => pieceTip(l.feature.properties))
-    .on('click', (e) => onPathClick(e.layer.feature.properties))
+    .on('click', (e) => onPathClick(e.layer.feature))
     .addTo(layers.routePath);
 
   for (const s of stopsJson.stops ?? []) {
@@ -102,12 +102,13 @@ export function highlightGroup(members) {
   }
 }
 
-/// Red indicator polyline for the pane-selected segment. Own group so the
-/// stop/group rings in layers.highlight survive its clears.
-export function drawSegmentHighlight(geometry) {
+/// Red indicator polyline for the pane-selected segment / path piece / way
+/// run. Own group so the stop/group rings in layers.highlight survive its
+/// clears.
+export function drawSegmentHighlight(geometry, label = 'selected segment') {
   clearSegmentHighlight();
   L.geoJSON(geometry, { style: { color: '#cf3e3e', weight: 5, opacity: 0.9 } })
-    .bindTooltip('selected segment', { direction: 'top' })
+    .bindTooltip(label, { direction: 'top' })
     .addTo(layers.segHighlight);
 }
 

@@ -75,7 +75,17 @@ async function selectRoute(r, dir = 0) {
     ]);
     if (selectedRoute?.route_id !== route_id || selectedRoute.dir !== dir) return; // stale
     const onStopClick = (stop, marker) => openStopPopup(stop.stop_version_id, marker);
-    const onPathClick = (props) => pathPiecePanel(props, { onPickSegment: selectSegment });
+    // Path click: point pane + red highlight of that piece / way run, same
+    // selectSegment pattern (pane change hook clears it).
+    const onPathClick = (feature) => {
+      pathPiecePanel(feature.properties, { onPickSegment: selectSegment });
+      if (feature.geometry) {
+        drawSegmentHighlight(
+          feature.geometry,
+          feature.properties.osm_way_id != null ? 'selected way' : 'selected piece'
+        );
+      }
+    };
     lastRouteDraw = { p, s, onStopClick, onPathClick };
     drawRoute(p, s, { onStopClick, onPathClick });
     if (document.getElementById('layer-raw').checked) loadRaw(route_id, dir);
