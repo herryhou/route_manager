@@ -136,7 +136,6 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
     })
     .join('');
   const html = `
-    <h2>Route ${d.route_code} <small class="muted">${d.subroute_name ?? ''}</small></h2>
     <div class="tabs">${dirBtns}</div>
     ${kv([
       ['providers', d.providers.join(', ')],
@@ -151,7 +150,7 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
     <div class="view-stops">${rows}</div>
     <div class="view-qa" hidden>${profileSvg(stops.stops ?? [])}</div>
   `;
-  const pane = showPane('context', html, d.route_code);
+  const pane = showPane('context', html, `Route ${d.route_code} ${d.subroute_name ?? ''}`.trim());
   pane.querySelectorAll('.tabs:not(.view-tabs) button').forEach((b) =>
     b.addEventListener('click', () => onDirection(Number(b.dataset.dir)))
   );
@@ -211,7 +210,6 @@ export function segmentPanel(d, { onPickRoute }) {
     )
     .join('');
   const pane = showPane('context', `
-    <h2>Segment <small class="muted">${d.segment_id.slice(0, 12)}…</small></h2>
     ${kv([
       ['length', `${d.length_m.toFixed(0)} m`],
       ['ways', d.way_count],
@@ -222,7 +220,7 @@ export function segmentPanel(d, { onPickRoute }) {
     <table class="kv"><tr><td>#</td><td>name</td><td>highway</td><td style="text-align:right">len</td></tr>${ways}</table>
     <h3>Routes (${(d.routes ?? []).length})</h3>
     <div class="segment-routes"></div>
-  `, `seg ${d.segment_id.slice(0, 6)}`);
+  `, `Segment ${d.segment_id.slice(0, 12)}…`);
   pane.querySelector('.segment-routes').append(routeChips(d.routes ?? [], onPickRoute));
 }
 
@@ -239,10 +237,9 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
     )
     .join('');
   const pane = showPane('context', `
-    <h2>Outliers <small class="muted">${(rows ?? []).length}</small></h2>
     <p class="muted">click to locate; route code opens the route</p>
     ${items || '<p class="muted">none</p>'}
-  `, 'outliers');
+  `, `Outliers (${(rows ?? []).length})`);
   pane.querySelectorAll('.outlier-row').forEach((row, i) => {
     row.addEventListener('click', () => onPick(rows[i]));
     row.querySelector('.route-code').addEventListener('click', (e) => {
@@ -290,9 +287,8 @@ const uniqRoutes = (rs) => [...new Map((rs ?? []).map((r) => [`${r.route_code}|$
 /// Station card shared by both popups: axis dial + name + degrees (spread
 /// only when it trips the rm-verify 45° warn threshold), member stop codes
 /// (top-level only), station-serving route chips.
-function stationCard({ station, bearing, routes, stops }, { nested = false, onPickRoute }) {
+function stationCard({ station, bearing, routes, stops }, { onPickRoute }) {
   const el = document.createElement('div');
-  el.className = nested ? 'pp-station' : '';
   const spread = bearing?.max_spread_deg;
   const spreadTxt = spread != null && spread > 45
     ? ` · <span class="pp-hot">spread ${Math.round(spread)}°</span>`
@@ -318,35 +314,22 @@ function stationCard({ station, bearing, routes, stops }, { nested = false, onPi
   return el;
 }
 
-/// Compact stop popup (map marker click / route-panel click): stop dial +
-/// routes, then its station card.
-export function stopPopupEl(d, { onDetails, onPickRoute }) {
+/// Compact stop popup (map marker click / route-panel click): dial + name,
+/// route chips under a 經過路線 label — full detail lives in the point pane.
+export function stopPopupEl(d, { onPickRoute }) {
   const wrap = document.createElement('div');
   wrap.className = 'stop-popup';
-  const b = d.bearing;
   wrap.innerHTML = `
     <div class="pp-head">
-      ${dialSvg(b?.bearing_deg, { color: 'var(--accent)' })}
+      ${dialSvg(d.bearing?.bearing_deg, { color: 'var(--accent)' })}
       <div>
         <div class="pp-title">${d.stop.stop_name} <span class="pp-code">#${d.stop.stop_code}</span></div>
-        <div class="pp-meta">${b ? `<b>${Math.round(b.bearing_deg)}°</b>` : 'no bearing'}</div>
       </div>
     </div>
+    <div class="pp-label">經過路線</div>
     <div class="pp-chips"></div>
-    <div data-station></div>
   `;
   wrap.querySelector('.pp-chips').append(routeChips(uniqRoutes(d.routes_by_stop), onPickRoute));
-  wrap.querySelector('[data-station]').append(
-    stationCard(
-      { station: d.station, group: d.group, bearing: d.station_bearing, routes: d.routes_by_station },
-      { nested: true, onPickRoute }
-    )
-  );
-  const btn = document.createElement('button');
-  btn.className = 'popup-details';
-  btn.textContent = 'more details…';
-  btn.addEventListener('click', onDetails);
-  wrap.append(btn);
   return wrap;
 }
 
@@ -373,7 +356,6 @@ export function stationPanel(d, { onPickRoute }) {
       </div>`)
     .join('');
   const pane = showPane('point', `
-    <h2>${d.station.station_name} <small class="muted">#${d.station.station_id}</small></h2>
     ${kv([
       ['axis', d.bearing ? `${Math.round(d.bearing.bearing_deg)}°` : '—'],
       ['spread', d.bearing ? `${Math.round(d.bearing.max_spread_deg)}°` : '—'],
@@ -384,7 +366,7 @@ export function stationPanel(d, { onPickRoute }) {
     ${rows}
     <h3>Routes (${uniqRoutes(d.routes).length})</h3>
     <div class="station-routes"></div>
-  `, `站 ${d.station.station_id}`);
+  `, `${d.station.station_name} #${d.station.station_id}`);
   pane.querySelector('.station-routes').append(routeChips(uniqRoutes(d.routes), onPickRoute));
   return pane;
 }
@@ -392,7 +374,6 @@ export function stationPanel(d, { onPickRoute }) {
 /// Stop drill-down panel: stop → station → group + serving routes.
 export function stopPanel(d, { onPickRoute }) {
   const pane = showPane('point', `
-    <h2>${d.stop.stop_name} <small class="muted">#${d.stop.stop_code}</small></h2>
     ${kv([
       ['stop', `${d.stop.stop_name} (${d.stop.stop_code})`],
       ['bearing', d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'],
@@ -410,7 +391,7 @@ export function stopPanel(d, { onPickRoute }) {
     <div class="routes-station-chips"></div>
     <h3>Routes serving group (${(d.routes_by_group ?? []).length})</h3>
     <div class="routes-group-chips"></div>
-  `, `#${d.stop.stop_code}`);
+  `, `${d.stop.stop_name} #${d.stop.stop_code}`);
   pane.querySelector('.group-chips').append(
     ...d.group_members.map((m) => {
       const el = document.createElement('span');

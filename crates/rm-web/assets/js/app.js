@@ -106,13 +106,7 @@ async function openStopPopup(stopVersionId, marker) {
   try {
     const d = await api.stopDetail(stopVersionId);
     const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
-    const el = stopPopupEl(d, {
-      onDetails: () => {
-        map.closePopup();
-        selectStop(stopVersionId);
-      },
-      onPickRoute,
-    });
+    const el = stopPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
     stopPanel(d, { onPickRoute });
@@ -166,13 +160,7 @@ async function popupStop(stopVersionId) {
     const m = L.circleMarker([s.lat, s.lon], {
       radius: 10, color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.15,
     }).addTo(layers.highlight);
-    m.bindPopup(stopPopupEl(d, {
-      onDetails: () => {
-        map.closePopup();
-        selectStop(stopVersionId);
-      },
-      onPickRoute,
-    }), { maxWidth: 300 }).openPopup();
+    m.bindPopup(stopPopupEl(d, { onPickRoute }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([s.lat, s.lon], { animate: true });
     stopPanel(d, { onPickRoute });
