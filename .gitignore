@@ -3,3 +3,4 @@ data/
 *.db
 qa/
 .playwright-cli/
+.codegraph/
