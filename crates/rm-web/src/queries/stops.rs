@@ -65,6 +65,27 @@ fn incident_segments(conn: &Connection, station_id: i64) -> Result<Vec<Value>> {
     Ok(it.collect::<Result<_, _>>()?)
 }
 
+/// Member stations of a group (current versions), self included — callers
+/// filter the station they're showing to get the "other stations" chips.
+fn group_members(conn: &Connection, group_id: i64) -> Result<Vec<Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT st.station_id, stv.station_name, stv.latitude, stv.longitude
+         FROM station_version stv
+         JOIN station st ON st.station_id = stv.station_id
+         WHERE stv.station_group_id = ?1 AND stv.valid_to IS NULL",
+    )?;
+    let it = stmt.query_map([group_id], |r| {
+        Ok(json!({
+            "station_id": r.get::<_, i64>(0)?,
+            "station_name": r.get::<_, String>(1)?,
+            "lat": r.get::<_, f64>(2)?,
+            "lon": r.get::<_, f64>(3)?,
+        }))
+    });
+    let rows: Vec<Value> = it?.collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
 /// `GET /api/stops/{stop_version_id}` — stop → station → group + serving routes.
 pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> {
     let found = match conn.query_row(
@@ -114,23 +135,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
     let (_, _, _, _, _, station_id, _, _, _, group_id, _, _, _, _, _, _, _) = &found;
     let segments = incident_segments(conn, *station_id)?;
 
-    let members: Vec<Value> = {
-        let mut stmt = conn.prepare(
-            "SELECT st.station_id, stv.station_name, stv.latitude, stv.longitude
-             FROM station_version stv
-             JOIN station st ON st.station_id = stv.station_id
-             WHERE stv.station_group_id = ?1 AND stv.valid_to IS NULL",
-        )?;
-        let it = stmt.query_map([group_id], |r| {
-            Ok(json!({
-                "station_id": r.get::<_, i64>(0)?,
-                "station_name": r.get::<_, String>(1)?,
-                "lat": r.get::<_, f64>(2)?,
-                "lon": r.get::<_, f64>(3)?,
-            }))
-        })?;
-        it.collect::<Result<_, _>>()?
-    };
+    let members = group_members(conn, *group_id)?;
 
     let routes_by_stop =
         serving_routes_where(conn, "rsv.stop_version_id = ?1", &[&stop_version_id])?;
@@ -274,6 +279,7 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
         "stops": stops,
         "segments": segments,
         "routes": routes,
+        "group_members": group_members(conn, found.4)?,
     })))
 }
 

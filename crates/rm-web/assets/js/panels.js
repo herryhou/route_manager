@@ -430,9 +430,25 @@ export function stationPopupEl(d, { onPickRoute }) {
   return wrap;
 }
 
-/// Station detail panel (point pane): axis/spread kv, incident segments, member
-/// stops, routes.
-export function stationPanel(d, { onPickRoute, onPickSegment }) {
+/// Chips for the other stations of this station's group — clickable, opening
+/// that station's detail (self filtered out).
+function otherStationChips(members, selfId, onPickStation) {
+  const wrap = document.createElement('span');
+  for (const m of members ?? []) {
+    if (m.station_id === selfId) continue;
+    const el = document.createElement('span');
+    el.className = 'chip-route';
+    el.textContent = `站 ${m.station_id}`;
+    el.title = m.station_name;
+    el.addEventListener('click', () => onPickStation(m.station_id));
+    wrap.append(el);
+  }
+  return wrap;
+}
+
+/// Station detail panel (point pane): axis/spread kv, other group stations,
+/// incident segments, member stops, routes.
+export function stationPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
   const stops = d.stops ?? [];
   const rows = stops
     .map((s) => `<div class="stop-row" title="${s.stop_name}">
@@ -440,6 +456,7 @@ export function stationPanel(d, { onPickRoute, onPickSegment }) {
         <span class="stop-name">${s.stop_name}</span>
       </div>`)
     .join('');
+  const others = (d.group_members ?? []).filter((m) => m.station_id !== d.station.station_id);
   const pane = showPane('point', `
     ${kv([
     ['axis', d.bearing ? `${Math.round(d.bearing.bearing_deg)}°` : '—'],
@@ -447,6 +464,8 @@ export function stationPanel(d, { onPickRoute, onPickSegment }) {
     ['members', d.bearing?.member_count ?? stops.length],
     ['group', d.group ? d.group.station_group_name : '—'],
   ])}
+    <h3>其它 Stations (${others.length})</h3>
+    <div class="other-station-chips"></div>
     <h3>Segments (${(d.segments ?? []).length})</h3>
     <div class="segment-rows"></div>
     <h3>Stops (${stops.length})</h3>
@@ -454,13 +473,16 @@ export function stationPanel(d, { onPickRoute, onPickSegment }) {
     <h3>Routes (${uniqRoutes(d.routes).length})</h3>
     <div class="station-routes"></div>
   `, `${d.station.station_name} #${d.station.station_id}`);
+  pane.querySelector('.other-station-chips').append(
+    otherStationChips(d.group_members, d.station.station_id, onPickStation)
+  );
   pane.querySelector('.segment-rows').append(segmentRows(d.segments, { onPick: onPickSegment }));
   pane.querySelector('.station-routes').append(routeChips(uniqRoutes(d.routes), onPickRoute));
   return pane;
 }
 
 /// Stop drill-down panel: stop → station → group + incident segments + serving routes.
-export function stopPanel(d, { onPickRoute, onPickSegment }) {
+export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
   const pane = showPane('point', `
     ${kv([
     ['stop', `${d.stop.stop_name} (${d.stop.stop_code})`],
@@ -471,7 +493,7 @@ export function stopPanel(d, { onPickRoute, onPickSegment }) {
       : '—'],
     ['group', `${d.group.station_group_name} · ${d.group.source}`],
   ])}
-    <h3>Group members (${(d.group_members ?? []).length} stations)</h3>
+    <h3>其它 Stations (${(d.group_members ?? []).filter((m) => m.station_id !== d.station.station_id).length})</h3>
     <div class="group-chips"></div>
     <h3>Segments (${(d.segments ?? []).length})</h3>
     <div class="segment-rows"></div>
@@ -479,23 +501,15 @@ export function stopPanel(d, { onPickRoute, onPickSegment }) {
     <div class="routes-stop-chips"></div>
     <h3>Routes serving station (${(d.routes_by_station ?? []).length})</h3>
     <div class="routes-station-chips"></div>
-    <h3>Routes serving group (${(d.routes_by_group ?? []).length})</h3>
-    <div class="routes-group-chips"></div>
+
   `, `${d.stop.stop_name} #${d.stop.stop_code}`);
   pane.querySelector('.segment-rows').append(segmentRows(d.segments, { onPick: onPickSegment }));
   pane.querySelector('.group-chips').append(
-    ...d.group_members.map((m) => {
-      const el = document.createElement('span');
-      el.className = 'chip-route';
-      el.textContent = `站 ${m.station_id}`;
-      el.title = m.station_name;
-      return el;
-    })
+    otherStationChips(d.group_members, d.station.station_id, onPickStation)
   );
   for (const [cls, routes] of [
     ['routes-stop-chips', d.routes_by_stop],
     ['routes-station-chips', d.routes_by_station],
-    ['routes-group-chips', d.routes_by_group],
   ]) {
     pane.querySelector(`.${cls}`).append(routeChips(routes, onPickRoute));
   }
