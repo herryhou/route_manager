@@ -30,6 +30,36 @@ fn serving_routes_where(
     Ok(it.collect::<Result<_, _>>()?)
 }
 
+/// Segments incident to a station (either endpoint), shortest first — the
+/// other endpoint named, `is_start` says whether this station is the start.
+fn incident_segments(conn: &Connection, station_id: i64) -> Result<Vec<Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT segment_id, length_m, way_count,
+                CASE WHEN start_station_id = ?1 THEN end_station_id
+                     ELSE start_station_id END,
+                (SELECT station_name FROM station_version
+                 WHERE station_id = CASE WHEN seg_segment.start_station_id = ?1
+                                         THEN seg_segment.end_station_id
+                                         ELSE seg_segment.start_station_id END
+                   AND valid_to IS NULL),
+                start_station_id = ?1
+         FROM seg_segment
+         WHERE start_station_id = ?1 OR end_station_id = ?1
+         ORDER BY length_m",
+    )?;
+    let it = stmt.query_map([station_id], |r| {
+        Ok(json!({
+            "segment_id": r.get::<_, String>(0)?,
+            "length_m": r.get::<_, f64>(1)?,
+            "way_count": r.get::<_, i64>(2)?,
+            "other_station_id": r.get::<_, i64>(3)?,
+            "other_station_name": r.get::<_, Option<String>>(4)?,
+            "is_start": r.get::<_, bool>(5)?,
+        }))
+    })?;
+    Ok(it.collect::<Result<_, _>>()?)
+}
+
 /// `GET /api/stops/{stop_version_id}` — stop → station → group + serving routes.
 pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> {
     let found = match conn.query_row(
@@ -77,6 +107,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
     };
 
     let (_, _, _, _, _, station_id, _, _, _, group_id, _, _, _, _, _, _, _) = &found;
+    let segments = incident_segments(conn, *station_id)?;
 
     let members: Vec<Value> = {
         let mut stmt = conn.prepare(
@@ -148,6 +179,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
             None => Value::Null,
         },
         "group_members": members,
+        "segments": segments,
         "routes_by_stop": routes_by_stop,
         "routes_by_station": routes_by_station,
         "routes_by_group": routes_by_group,
@@ -212,6 +244,7 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
                                    WHERE station_id = ?1 AND valid_to IS NULL)",
         &[&station_id],
     )?;
+    let segments = incident_segments(conn, station_id)?;
 
     Ok(Some(json!({
         "station": {
@@ -234,6 +267,7 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
             None => Value::Null,
         },
         "stops": stops,
+        "segments": segments,
         "routes": routes,
     })))
 }

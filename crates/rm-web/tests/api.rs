@@ -201,6 +201,11 @@ async fn route_path_stops_and_drilldown() {
         !d["routes_by_stop"].as_array().unwrap().is_empty(),
         "route 1 serves this stop"
     );
+    assert_eq!(
+        d["segments"],
+        serde_json::json!([]),
+        "no registry run → no incident segments"
+    );
 
     // station detail
     let st_id = d["station"]["station_id"].as_i64().unwrap();
@@ -460,6 +465,65 @@ async fn segments_bbox_and_detail() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+/// Stop/station detail carries the registry segments incident to the stop's
+/// station: node 44 is the start endpoint of exactly the 44→46 and 44→50 segments.
+#[tokio::test]
+async fn stop_and_station_detail_list_incident_segments() {
+    let (_dir, db) = fixture_db_with_segments();
+    let app = router_with(AppState::new(db));
+
+    let v = get_json(&app, "/api/routes").await;
+    let r2 = v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route_code"] == serde_json::json!("2"))
+        .unwrap();
+    let id2 = r2["route_id"].as_i64().unwrap();
+
+    let s = get_json(&app, &format!("/api/routes/{id2}/directions/0/stops")).await;
+    let stops = s["stops"].as_array().unwrap();
+    assert_eq!(stops.len(), 3, "route 2 rides the road with 3 stops: {s}");
+
+    let sv_id = stops[0]["stop_version_id"].as_i64().unwrap(); // node 44
+    let d = get_json(&app, &format!("/api/stops/{sv_id}")).await;
+    let segs = d["segments"].as_array().expect("segments in stop detail");
+    assert_eq!(segs.len(), 2, "node 44 ends exactly 2 of 3 segments: {d}");
+    for seg in segs {
+        assert!(seg["segment_id"].is_string(), "{seg}");
+        assert!(seg["length_m"].as_f64().unwrap() > 0.0, "{seg}");
+        assert!(seg["way_count"].as_i64().is_some(), "{seg}");
+        assert!(seg["other_station_id"].is_i64(), "{seg}");
+        assert!(
+            seg["other_station_name"]
+                .as_str()
+                .is_some_and(|n| !n.is_empty()),
+            "{seg}"
+        );
+        assert_eq!(
+            seg["is_start"],
+            serde_json::json!(true),
+            "44 is the start of both its segments: {seg}"
+        );
+    }
+
+    // station detail mirrors the incident list for its own station
+    let st_id = d["station"]["station_id"].as_i64().unwrap();
+    let st = get_json(&app, &format!("/api/stations/{st_id}")).await;
+    assert_eq!(
+        st["segments"].as_array().expect("segments in station detail").len(),
+        2,
+        "{st}"
+    );
+
+    // every listed segment_id resolves through the segment detail endpoint
+    for seg in segs {
+        let sid = seg["segment_id"].as_str().unwrap();
+        let sd = get_json(&app, &format!("/api/segments/{sid}")).await;
+        assert_eq!(sd["segment_id"], serde_json::json!(sid));
+    }
 }
 
 #[tokio::test]

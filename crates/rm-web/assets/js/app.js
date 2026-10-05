@@ -110,7 +110,7 @@ async function openStopPopup(stopVersionId, marker) {
     const el = stopPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
-    stopPanel(d, { onPickRoute });
+    stopPanel(d, { onPickRoute, onPickSegment: selectSegment });
   } catch (e) {
     status(`stop load failed: ${e.message}`);
   }
@@ -124,7 +124,7 @@ async function openStationPopup(stationId, marker) {
     const el = stationPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
-    stationPanel(d, { onPickRoute });
+    stationPanel(d, { onPickRoute, onPickSegment: selectSegment });
   } catch (e) {
     status(`station load failed: ${e.message}`);
   }
@@ -144,7 +144,7 @@ async function selectStation(stationId) {
     }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([st.lat, st.lon], { animate: true });
-    stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0) });
+    stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickSegment: selectSegment });
     location.hash = `#station=${stationId}`;
   } catch (e) {
     status(`station load failed: ${e.message}`);
@@ -164,7 +164,7 @@ async function popupStop(stopVersionId) {
     m.bindPopup(stopPopupEl(d, { onPickRoute }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([s.lat, s.lon], { animate: true });
-    stopPanel(d, { onPickRoute });
+    stopPanel(d, { onPickRoute, onPickSegment: selectSegment });
   } catch (e) {
     status(`stop load failed: ${e.message}`);
   }
@@ -174,7 +174,7 @@ async function selectStop(stopVersionId) {
   try {
     const d = await api.stopDetail(stopVersionId);
     highlightGroup(d.group_members);
-    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0) });
+    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickSegment: selectSegment });
     map.panTo([d.stop.lat, d.stop.lon], {
       animate: true,
     });

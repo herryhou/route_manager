@@ -111,6 +111,26 @@ export function routeChips(routes, onPick) {
   return wrap;
 }
 
+/// Incident-segment rows for stop/station panels: arrow says which end this
+/// station is (→ start / ← end), other station, length + way count.
+/// Click loads the full segment detail into the point pane.
+export function segmentRows(segments, { onPick }) {
+  const wrap = document.createElement('div');
+  const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);
+  for (const s of segments ?? []) {
+    const row = document.createElement('div');
+    row.className = 'stop-row seg-row';
+    row.innerHTML = `
+      <span class="stop-seq">${s.is_start ? '→' : '←'}</span>
+      <span class="stop-name">${s.other_station_name ?? `站 ${s.other_station_id}`}</span>
+      <span class="badge">${fmt(s.length_m)} · ${s.way_count} ways</span>`;
+    row.title = `${s.segment_id} · ${s.is_start ? 'to' : 'from'} 站 ${s.other_station_id}`;
+    row.addEventListener('click', () => onPick(s.segment_id));
+    wrap.append(row);
+  }
+  return wrap;
+}
+
 /// Route detail panel: header with direction toggle + ordered stop list.
 export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFlashStop }) {
   const dirBtns = (d.directions ?? [])
@@ -363,8 +383,9 @@ export function stationPopupEl(d, { onPickRoute }) {
   return wrap;
 }
 
-/// Station detail panel (point pane): axis/spread kv, member stops, routes.
-export function stationPanel(d, { onPickRoute }) {
+/// Station detail panel (point pane): axis/spread kv, incident segments, member
+/// stops, routes.
+export function stationPanel(d, { onPickRoute, onPickSegment }) {
   const stops = d.stops ?? [];
   const rows = stops
     .map((s) => `<div class="stop-row" title="${s.stop_name}">
@@ -379,17 +400,20 @@ export function stationPanel(d, { onPickRoute }) {
     ['members', d.bearing?.member_count ?? stops.length],
     ['group', d.group ? d.group.station_group_name : '—'],
   ])}
+    <h3>Segments (${(d.segments ?? []).length})</h3>
+    <div class="segment-rows"></div>
     <h3>Stops (${stops.length})</h3>
     ${rows}
     <h3>Routes (${uniqRoutes(d.routes).length})</h3>
     <div class="station-routes"></div>
   `, `${d.station.station_name} #${d.station.station_id}`);
+  pane.querySelector('.segment-rows').append(segmentRows(d.segments, { onPick: onPickSegment }));
   pane.querySelector('.station-routes').append(routeChips(uniqRoutes(d.routes), onPickRoute));
   return pane;
 }
 
-/// Stop drill-down panel: stop → station → group + serving routes.
-export function stopPanel(d, { onPickRoute }) {
+/// Stop drill-down panel: stop → station → group + incident segments + serving routes.
+export function stopPanel(d, { onPickRoute, onPickSegment }) {
   const pane = showPane('point', `
     ${kv([
     ['stop', `${d.stop.stop_name} (${d.stop.stop_code})`],
@@ -402,6 +426,8 @@ export function stopPanel(d, { onPickRoute }) {
   ])}
     <h3>Group members (${(d.group_members ?? []).length} stations)</h3>
     <div class="group-chips"></div>
+    <h3>Segments (${(d.segments ?? []).length})</h3>
+    <div class="segment-rows"></div>
     <h3>Routes serving this stop (${(d.routes_by_stop ?? []).length})</h3>
     <div class="routes-stop-chips"></div>
     <h3>Routes serving station (${(d.routes_by_station ?? []).length})</h3>
@@ -409,6 +435,7 @@ export function stopPanel(d, { onPickRoute }) {
     <h3>Routes serving group (${(d.routes_by_group ?? []).length})</h3>
     <div class="routes-group-chips"></div>
   `, `${d.stop.stop_name} #${d.stop.stop_code}`);
+  pane.querySelector('.segment-rows').append(segmentRows(d.segments, { onPick: onPickSegment }));
   pane.querySelector('.group-chips').append(
     ...d.group_members.map((m) => {
       const el = document.createElement('span');
