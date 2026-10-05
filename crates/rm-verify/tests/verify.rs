@@ -25,6 +25,7 @@ fn fixture_expectations() -> Expectations {
         single_dir: Some(1),
         no_polyline: None, // depends on empty-string rows, not asserted here
         main_side_groups: Some(1),
+        shared_pair: None,  // fixture registers no segments
     }
 }
 
@@ -140,7 +141,16 @@ fn shared_pair_joins_through_route_version() {
     .unwrap();
     let qa = tempfile::tempdir().unwrap();
 
-    let report = rm_verify::run(&conn, 1, &Expectations::default(), qa.path()).unwrap();
+    let report = rm_verify::run(
+        &conn,
+        1,
+        &Expectations {
+            shared_pair: Some(("tcg:1", "tcg:9221")),
+            ..Expectations::default()
+        },
+        qa.path(),
+    )
+    .unwrap();
 
     let pair = report
         .checks

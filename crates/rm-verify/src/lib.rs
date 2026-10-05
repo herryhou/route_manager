@@ -19,6 +19,9 @@ pub struct Expectations {
     pub single_dir: Option<i64>,
     pub no_polyline: Option<i64>,
     pub main_side_groups: Option<i64>,
+    /// Sanity pair for the shared-segment check (two route ext_uids that must
+    /// share at least one segment). None skips the check.
+    pub shared_pair: Option<(&'static str, &'static str)>,
 }
 
 impl Expectations {
@@ -35,6 +38,23 @@ impl Expectations {
         single_dir: Some(23),
         no_polyline: Some(17),
         main_side_groups: Some(99),
+        shared_pair: Some(("tcg:1", "tcg:9221")),
+    };
+
+    /// Verified targets from the 2026-10-05 Tainan capture (小黃巴士 excluded).
+    pub const TAINAN: Expectations = Expectations {
+        routes: Some(113),
+        stations: Some(2_295),
+        stop_rows: Some(8_707),
+        sids: Some(8_707),
+        stops: Some(8_707),
+        groups: Some(2_295),
+        providers: Some(0),
+        cycled: Some(3),
+        single_dir: Some(5),
+        no_polyline: Some(1),
+        main_side_groups: Some(0),
+        shared_pair: Some(("tcg:2101", "tcg:2102")), // 101/102 share 28 segments
     };
 }
 
@@ -397,23 +417,33 @@ pub fn run(
             bad_seg == 0,
             format!("{bad_seg} bad seg_segment rows"),
         ));
-        let pair = n(
-            conn,
-            "SELECT COUNT(*) FROM seg_traversal t1
-             JOIN seg_traversal t2 ON t2.segment_id = t1.segment_id
-             JOIN route_version rv1 ON rv1.route_version_id = t1.route_version_id
-             JOIN route r1 ON r1.route_id = rv1.route_id
-             JOIN route_version rv2 ON rv2.route_version_id = t2.route_version_id
-             JOIN route r2 ON r2.route_id = rv2.route_id
-             WHERE r1.ext_uid = 'tcg:1' AND r2.ext_uid = 'tcg:9221'",
-            &[],
-        )?;
-        checks.push(check(
-            "seg:shared-pair",
-            "routes tcg:1 & tcg:9221 share >= 1 segment",
-            pair >= 1,
-            format!("{pair} shared segment_ids"),
-        ));
+        match exp.shared_pair {
+            Some((uid_a, uid_b)) => {
+                let pair = n(
+                    conn,
+                    "SELECT COUNT(*) FROM seg_traversal t1
+                     JOIN seg_traversal t2 ON t2.segment_id = t1.segment_id
+                     JOIN route_version rv1 ON rv1.route_version_id = t1.route_version_id
+                     JOIN route r1 ON r1.route_id = rv1.route_id
+                     JOIN route_version rv2 ON rv2.route_version_id = t2.route_version_id
+                     JOIN route r2 ON r2.route_id = rv2.route_id
+                     WHERE r1.ext_uid = ?1 AND r2.ext_uid = ?2",
+                    &[&uid_a, &uid_b],
+                )?;
+                checks.push(check(
+                    "seg:shared-pair",
+                    &format!("routes {uid_a} & {uid_b} share >= 1 segment"),
+                    pair >= 1,
+                    format!("{pair} shared segment_ids"),
+                ));
+            }
+            None => checks.push(check(
+                "seg:shared-pair",
+                "shared-segment sanity pair",
+                true,
+                "no shared-pair configured".to_string(),
+            )),
+        }
     }
 
     // ---- matcher stats (informational) ----

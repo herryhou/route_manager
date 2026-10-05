@@ -16,6 +16,10 @@ struct Args {
     /// Directory for QA exports (report.json, segments.geojson, outlier_stops.csv)
     #[arg(long, default_value = "qa")]
     qa_dir: String,
+
+    /// Which city's verified count targets to check against
+    #[arg(long, default_value = "taichung")]
+    preset: String,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,12 +37,12 @@ fn main() -> anyhow::Result<()> {
         None => rm_db::latest_open_batch(&conn)?
             .ok_or_else(|| anyhow::anyhow!("no OPEN batch; pass --batch"))?,
     };
-    let report = rm_verify::run(
-        &conn,
-        batch,
-        &rm_verify::Expectations::REAL,
-        Path::new(&args.qa_dir),
-    )?;
+    let expect = match args.preset.as_str() {
+        "taichung" => rm_verify::Expectations::REAL,
+        "tainan" => rm_verify::Expectations::TAINAN,
+        other => anyhow::bail!("unknown preset {other:?} (taichung | tainan)"),
+    };
+    let report = rm_verify::run(&conn, batch, &expect, Path::new(&args.qa_dir))?;
 
     for c in &report.checks {
         println!(

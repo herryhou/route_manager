@@ -4,6 +4,20 @@ Verdict: **可以轉入** — via a Tainan→Taichung-shape converter script plu
 small changes, none structural. The pipeline's staging schema needs no new
 tables; every Tainan field maps onto an existing one.
 
+> **Executed 2026-10-05** (this plan, verbatim): `tools/organize_tainan.py`
+> builds `capture/` (113 routes — 小黃巴士 52 excluded by type name; their
+> pathList typeid is 71-76, **not** the 7 that `pathTypeList` implies),
+> pipeline ran against `data/tainan.db` (independent DB, `tcg:` prefix kept)
+> with `data/TW-TNN-202610040000.osm.pbf`, and `rm-verify --preset tainan`
+> passes all checks. Results: 2,295 stations (name+80 m clusters, `T%06d`
+> synthetic ids), 8,707 stops, 225/226 directions matched (miss =
+> 1805 dir 1, no return geometry), 4,990 segments, 1,696 shared by >1 route,
+> snap p50 3.1 m. One code change was needed beyond the converter:
+> `rm-verify` expectations and the `seg:shared-pair` check were Taichung-
+> hardcoded — now `Expectations::TAINAN` + `--preset tainan` (101/102 share
+> 28 segments as the sanity pair). 74 stations warn on bearing spread >45°
+> (warn-only; 3.2% vs Taichung's 0.5%).
+
 ## What was captured
 
 `tools/fetch_tainan.sh` (165 routes, 3.6 MB, ~500 requests):

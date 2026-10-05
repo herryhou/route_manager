@@ -34,8 +34,8 @@ def encode_polyline(pts):
     def varint(v):
         out = []
         while v >= 0x20:
-            out.append(chr((v & 0x1f) | 0x20)); v >>= 5
-        out.append(chr(v)); return ''.join(out)
+            out.append(chr(((v & 0x1f) | 0x20) + 63)); v >>= 5
+        out.append(chr(v + 63)); return ''.join(out)
     def zigzag(v): return ((v << 1) ^ (v >> 63)) & 0xFFFFFFFFFFFFFFFF
     s, plat, plon = [], 0, 0
     for lat, lon in pts:
