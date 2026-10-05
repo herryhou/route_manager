@@ -347,6 +347,29 @@ function dialSvg(b, { spread = null, color = 'var(--accent)' } = {}) {
 // Direction variants repeat route_code — popups show one chip per code+name.
 const uniqRoutes = (rs) => [...new Map((rs ?? []).map((r) => [`${r.route_code}|${r.subroute_name ?? ''}`, r])).values()];
 
+/// Smaller angle between two bearings, [0, 180]; Infinity when either is null.
+const angDiffDeg = (a, b) => {
+  if (a == null || b == null) return Infinity;
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+};
+
+/// Stop-popup chip pick: one chip per route, opening the direction that serves
+/// the clicked pole — the member row whose bearing matches the stop's own
+/// heading; the opposite carriageway is the route's other direction. Without
+/// bearings this degenerates to first-row-wins.
+const poleSideRoutes = (rows, bearing) => {
+  const byRoute = new Map();
+  for (const r of rows ?? []) {
+    const k = `${r.route_code}|${r.subroute_name ?? ''}`;
+    const prev = byRoute.get(k);
+    if (!prev || angDiffDeg(r.bearing, bearing) < angDiffDeg(prev.bearing, bearing)) {
+      byRoute.set(k, r);
+    }
+  }
+  return [...byRoute.values()];
+};
+
 /// Station card shared by both popups: arrow dial + name (spread text only
 /// when it trips the rm-verify 45° warn threshold), station-serving chips.
 function stationCard({ station, bearing, routes, stops }, { onPickRoute }) {
@@ -387,9 +410,9 @@ export function stopPopupEl(d, { onPickRoute }) {
     <div class="pp-label"><h3>經過路線</h3></div>
     <div class="pp-chips"></div>
   `;
-  const routes = uniqRoutes(d.routes_by_station);
+  const routes = poleSideRoutes(d.routes_by_station, d.bearing?.bearing_deg);
   wrap.querySelector('.pp-chips').append(
-    routeChips(routes.length ? routes : uniqRoutes(d.routes_by_stop), onPickRoute)
+    routeChips(routes.length ? routes : poleSideRoutes(d.routes_by_stop, d.bearing?.bearing_deg), onPickRoute)
   );
   return wrap;
 }

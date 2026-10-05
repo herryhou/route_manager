@@ -10,11 +10,13 @@ fn serving_routes_where(
     params: &[&dyn rusqlite::ToSql],
 ) -> Result<Vec<Value>> {
     let sql = format!(
-        "SELECT DISTINCT r.route_id, r.route_code, sv.subroute_name, rsv.direction
+        "SELECT DISTINCT r.route_id, r.route_code, sv.subroute_name, rsv.direction,
+                sb.bearing_deg
          FROM route_stop_version rsv
          JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
          JOIN route r ON r.route_id = rv.route_id
+         LEFT JOIN stop_bearing sb ON sb.stop_version_id = rsv.stop_version_id
          WHERE {where_sql}
          ORDER BY r.route_id, rsv.direction"
     );
@@ -25,6 +27,9 @@ fn serving_routes_where(
             "route_code": r.get::<_, String>(1)?,
             "subroute_name": r.get::<_, Option<String>>(2)?,
             "direction": r.get::<_, i64>(3)?,
+            // member pole's heading — lets the client disambiguate which of a
+            // route's two directions serves the clicked side of the road
+            "bearing": r.get::<_, Option<f64>>(4)?,
         }))
     })?;
     Ok(it.collect::<Result<_, _>>()?)
