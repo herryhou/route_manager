@@ -173,6 +173,10 @@ async fn route_path_stops_and_drilldown() {
         assert!((23.0..25.0).contains(&lat), "lat second, got {cs:?}");
         assert!(f["properties"]["length_m"].is_f64());
         assert!(f["properties"]["geometry_method"].is_string());
+        assert!(
+            f["properties"]["segment_id"].is_null(),
+            "no registry run → no traversal segment: {f}"
+        );
     }
 
     // stops: ordered, with projection QA fields
@@ -442,6 +446,9 @@ async fn segments_bbox_and_detail() {
         .unwrap();
     let d = get_json(&app, &format!("/api/segments/{seg_id}")).await;
     assert_eq!(d["segment_id"], serde_json::json!(seg_id));
+    let cs = d["geometry"]["coordinates"].as_array().expect("geometry");
+    assert_eq!(d["geometry"]["type"], serde_json::json!("LineString"));
+    assert!(cs.len() >= 2, "highlight polyline needs ≥2 vertices: {d}");
     let ways = d["ways"].as_array().unwrap();
     assert!(!ways.is_empty(), "{d}");
     assert_eq!(ways[0]["osm_way_id"].as_i64().unwrap(), 100);
@@ -524,6 +531,42 @@ async fn stop_and_station_detail_list_incident_segments() {
         let sd = get_json(&app, &format!("/api/segments/{sid}")).await;
         assert_eq!(sd["segment_id"], serde_json::json!(sid));
     }
+}
+
+/// Path pieces carry the seg_traversal segment for their stop pair, so the
+/// piece panel can drill into the canonical corridor.
+#[tokio::test]
+async fn route_path_pieces_link_traversal_segments() {
+    let (_dir, db) = fixture_db_with_segments();
+    let app = router_with(AppState::new(db));
+
+    let v = get_json(&app, "/api/routes").await;
+    let id2 = v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route_code"] == serde_json::json!("2"))
+        .unwrap()["route_id"]
+        .as_i64()
+        .unwrap();
+
+    let p = get_json(&app, &format!("/api/routes/{id2}/directions/0/path")).await;
+    let feats = p["features"].as_array().expect("route 2 path pieces");
+    let mut linked = 0;
+    for f in feats {
+        let sid = f["properties"]["segment_id"].as_str();
+        if let Some(sid) = sid {
+            linked += 1;
+            let d = get_json(&app, &format!("/api/segments/{sid}")).await;
+            assert_eq!(d["segment_id"], serde_json::json!(sid), "{f}");
+            assert_eq!(
+                d["geometry"]["type"],
+                serde_json::json!("LineString"),
+                "linked segment has highlight geometry: {d}"
+            );
+        }
+    }
+    assert!(linked > 0, "registry fixture links ≥1 piece: {p}");
 }
 
 #[tokio::test]

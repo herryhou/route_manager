@@ -80,6 +80,7 @@ export function showPane(kind, html, title) {
   const body = pane.querySelector('.dpane-body');
   body.innerHTML = html;
   body.scrollTop = 0;
+  paneChangeHook?.(kind);
   return body;
 }
 
@@ -89,6 +90,14 @@ export function closePane(kind) {
   if (PANE_KINDS.every((k) => paneEl(k).hidden)) {
     document.getElementById('detail').hidden = true;
   }
+  paneChangeHook?.(kind);
+}
+
+/// app.js hook: fires with the pane kind whenever a pane is shown or closed,
+/// so map state tied to pane content (segment highlight) can follow it.
+let paneChangeHook = null;
+export function setPaneChangeHook(fn) {
+  paneChangeHook = fn;
 }
 
 export function kv(pairs) {
@@ -221,34 +230,45 @@ export function profileSvg(stops) {
     </svg>`;
 }
 
-/// Segment detail panel: corridor card + ways table + traversing routes.
-export function segmentPanel(d, { onPickRoute }) {
+/// Segment detail panel: corridor card with clickable endpoints + ways table +
+/// traversing routes.
+export function segmentPanel(d, { onPickRoute, onPickStation }) {
   const ways = (d.ways ?? [])
     .map(
       (w) => `<tr><td>${w.ordinal}</td><td>${w.name ?? '—'}</td><td>${w.highway ?? '—'}</td>
         <td style="text-align:right">${w.length_m.toFixed(0)}m</td></tr>`
     )
     .join('');
+  const stCell = (st) =>
+    `<td class="st-pick" data-sid="${st.station_id}" title="open station detail">${st.station_name ?? st.station_id}</td>`;
   const pane = showPane('point', `
-    ${kv([
-    ['start', `${d.start_station.station_name ?? d.start_station.station_id}`],
-    ['end', `${d.end_station.station_name ?? d.end_station.station_id}`],
-    ['length', `${d.length_m.toFixed(0)} m`],
-  ])}
+    <table class="kv">
+      <tr><td>start</td>${stCell(d.start_station)}</tr>
+      <tr><td>end</td>${stCell(d.end_station)}</tr>
+      <tr><td>length</td><td>${d.length_m.toFixed(0)} m</td></tr>
+    </table>
     <h3>Ways (${(d.ways ?? []).length})</h3>
     <table class="kv"><tr><td>#</td><td>name</td><td>highway</td><td style="text-align:right">len</td></tr>${ways}</table>
     <h3>Routes (${(d.routes ?? []).length})</h3>
     <div class="segment-routes"></div>
   `, `Segment ${d.segment_id.slice(0, 12)}…`);
+  pane.querySelectorAll('.st-pick').forEach((el) =>
+    el.addEventListener('click', () => onPickStation(Number(el.dataset.sid)))
+  );
   pane.querySelector('.segment-routes').append(routeChips(d.routes ?? [], onPickRoute));
 }
 
 /// Route path piece detail (point pane, polyline click): provider draft piece
 /// or OSM way run — shape depends on the route-geom select the map drew.
-export function pathPiecePanel(p) {
+/// Draft pieces carry their seg_traversal segment as a drill-through.
+export function pathPiecePanel(p, { onPickSegment }) {
   const fmt = (m) => `${(m ?? 0).toFixed(0)}m`;
   const isWay = p.osm_way_id != null;
-  showPane(
+  const segRow = p.segment_id
+    ? `<tr><td>segment</td><td><span class="st-pick" data-seg="${p.segment_id}"
+        title="open segment detail">${p.segment_id.slice(0, 12)}…</span></td></tr>`
+    : '';
+  const pane = showPane(
     'point',
     isWay
       ? kv([
@@ -259,13 +279,17 @@ export function pathPiecePanel(p) {
         ['chainage', `${fmt(p.cum_start_m)} → ${fmt(p.cum_end_m)}`],
         ['run length', fmt((p.cum_end_m ?? 0) - (p.cum_start_m ?? 0))],
       ])
-      : kv([
-        ['ordinal', p.ordinal],
-        ['method', p.geometry_method],
-        ['length', fmt(p.length_m)],
-        ['stop span', `${p.from_seq} → ${p.to_seq}`],
-      ]),
+      : `<table class="kv">
+        <tr><td>ordinal</td><td>${p.ordinal}</td></tr>
+        <tr><td>method</td><td>${p.geometry_method}</td></tr>
+        <tr><td>length</td><td>${fmt(p.length_m)}</td></tr>
+        <tr><td>stop span</td><td>${p.from_seq} → ${p.to_seq}</td></tr>
+        ${segRow}
+      </table>`,
     isWay ? `Way ${p.name ?? `#${p.osm_way_id}`}` : `Piece #${p.ordinal} ${p.geometry_method ?? ''}`.trim()
+  );
+  pane.querySelectorAll('[data-seg]').forEach((el) =>
+    el.addEventListener('click', () => onPickSegment(el.dataset.seg))
   );
 }
 

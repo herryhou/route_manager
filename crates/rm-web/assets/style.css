@@ -435,7 +435,7 @@ table.kv td:first-child {
 
 /* Dim basemap tiles so routes/stops stand out. */
 .leaflet-tile-pane {
-  opacity: 0.8;
+  opacity: 0.7;
 }
 
 /* Bearing markers: dot+arrow group, rotated around the stop point.
@@ -547,4 +547,15 @@ table.kv td:first-child {
      stays on screen, head stays pinned, chips scroll. */
   max-height: 132px;
   overflow-y: auto;
+}
+
+/* Segment panel endpoint stations: clickable drill-through to station detail */
+.st-pick {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.st-pick:hover {
+  opacity: 0.75;
 }

@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel, pathPiecePanel } from './panels.js';
-import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn } from './layers.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel, pathPiecePanel, setPaneChangeHook } from './panels.js';
+import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawSegmentHighlight, clearSegmentHighlight } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -75,7 +75,7 @@ async function selectRoute(r, dir = 0) {
     ]);
     if (selectedRoute?.route_id !== route_id || selectedRoute.dir !== dir) return; // stale
     const onStopClick = (stop, marker) => openStopPopup(stop.stop_version_id, marker);
-    const onPathClick = (props) => pathPiecePanel(props);
+    const onPathClick = (props) => pathPiecePanel(props, { onPickSegment: selectSegment });
     lastRouteDraw = { p, s, onStopClick, onPathClick };
     drawRoute(p, s, { onStopClick, onPathClick });
     if (document.getElementById('layer-raw').checked) loadRaw(route_id, dir);
@@ -252,10 +252,16 @@ async function refreshSegments() {
   }
 }
 
+/// Segment drill-down: point pane + red highlight polyline, kept until the
+/// point pane is closed or replaced (pane change hook clears it).
 async function selectSegment(segmentId) {
   try {
     const d = await api.segmentDetail(segmentId);
-    segmentPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0) });
+    segmentPanel(d, {
+      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
+      onPickStation: selectStation,
+    });
+    if (d.geometry) drawSegmentHighlight(d.geometry);
     location.hash = `#segment=${segmentId}`;
   } catch (e) {
     status(`segment load failed: ${e.message}`);
@@ -274,6 +280,9 @@ function parseHash() {
 }
 
 async function boot() {
+  setPaneChangeHook((kind) => {
+    if (kind === 'point') clearSegmentHighlight();
+  });
   const search = document.getElementById('route-search');
   search.addEventListener('input', () => {
     refreshList(search.value);

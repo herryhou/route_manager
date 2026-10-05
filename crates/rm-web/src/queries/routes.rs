@@ -239,10 +239,14 @@ pub fn detail(conn: &Connection, route_id: i64) -> Result<Option<Value>> {
 pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
     let mut stmt = conn.prepare(
         "SELECT gd.ordinal, gd.encoded_polyline, gd.length_m, gd.geometry_method,
-                gd.from_route_stop_version_id, gd.to_route_stop_version_id
+                gd.from_route_stop_version_id, gd.to_route_stop_version_id,
+                t.segment_id
          FROM seg_geometry_draft gd
          JOIN subroute_version sv ON sv.subroute_version_id = gd.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         LEFT JOIN seg_traversal t
+           ON t.from_route_stop_version_id = gd.from_route_stop_version_id
+          AND t.to_route_stop_version_id = gd.to_route_stop_version_id
          WHERE rv.route_id = ?1 AND gd.direction = ?2
          ORDER BY gd.ordinal",
     )?;
@@ -254,12 +258,13 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
             r.get::<_, String>(3)?,
             r.get::<_, i64>(4)?,
             r.get::<_, i64>(5)?,
+            r.get::<_, Option<String>>(6)?,
         ))
     })?;
 
     let mut features = Vec::new();
     for row in it {
-        let (ordinal, encoded, length_m, method, from_rsv, to_rsv) = row?;
+        let (ordinal, encoded, length_m, method, from_rsv, to_rsv, segment_id) = row?;
         let pts = polyline::decode(&encoded)?;
         if pts.len() < 2 {
             continue; // degenerate piece — nothing to draw
@@ -273,6 +278,7 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
                 "geometry_method": method,
                 "from_seq": from_seq,
                 "to_seq": to_seq,
+                "segment_id": segment_id,
             }),
         ));
     }

@@ -14,6 +14,7 @@ export function initLayers(map) {
   layers.routeStops = L.layerGroup().addTo(map);
   layers.highlight = L.layerGroup().addTo(map);
   layers.segments = L.layerGroup().addTo(map);
+  layers.segHighlight = L.layerGroup().addTo(map);
   layers.stopsLayer = L.layerGroup().addTo(map);
   layers.raw = L.layerGroup().addTo(map);
 }
@@ -99,6 +100,19 @@ export function highlightGroup(members) {
       .bindTooltip(`group: ${m.station_name}`, { direction: 'top' })
       .addTo(layers.highlight);
   }
+}
+
+/// Red indicator polyline for the pane-selected segment. Own group so the
+/// stop/group rings in layers.highlight survive its clears.
+export function drawSegmentHighlight(geometry) {
+  clearSegmentHighlight();
+  L.geoJSON(geometry, { style: { color: '#cf3e3e', weight: 5, opacity: 0.9 } })
+    .bindTooltip('selected segment', { direction: 'top' })
+    .addTo(layers.segHighlight);
+}
+
+export function clearSegmentHighlight() {
+  layers.segHighlight.clearLayers();
 }
 
 export function flashStop(lat, lon) {

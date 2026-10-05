@@ -261,20 +261,28 @@ mod tests {
     }
 }
 
-/// `GET /api/segments/{segment_id}` — ways composition + traversing routes.
+/// `GET /api/segments/{segment_id}` — geometry + ways composition + traversing routes.
 pub fn detail(conn: &Connection, segment_id: &str) -> Result<Option<Value>> {
     let found = match conn.query_row(
-        "SELECT segment_id, length_m, way_count, start_station_id, end_station_id
+        "SELECT segment_id, length_m, way_count, start_station_id, end_station_id, encoded_polyline
          FROM seg_segment WHERE segment_id = ?1",
         [segment_id],
-        |r| -> rusqlite::Result<(String, f64, i64, i64, i64)> {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        |r| -> rusqlite::Result<(String, f64, i64, i64, i64, String)> {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
         },
     ) {
         Ok(row) => row,
         Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
         Err(e) => return Err(e.into()),
     };
+    let pts = polyline::decode(&found.5)?;
 
     let station_name = |id: i64| -> Result<String> {
         Ok(conn.query_row(
@@ -326,6 +334,7 @@ pub fn detail(conn: &Connection, segment_id: &str) -> Result<Option<Value>> {
 
     Ok(Some(json!({
         "segment_id": found.0,
+        "geometry": geojson::line_string(&pts),
         "length_m": found.1,
         "way_count": found.2,
         "start_station": {
