@@ -282,7 +282,16 @@ pub fn detail(conn: &Connection, segment_id: &str) -> Result<Option<Value>> {
         Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
         Err(e) => return Err(e.into()),
     };
-    let pts = polyline::decode(&found.5)?;
+    // Geometry: stitched OSM way node runs (same shape as /api/segments?geom=osm),
+    // so the panel highlight draws the ways the segment is made of — not the
+    // provider-cut src polyline. Provider polyline only as way-less fallback.
+    let runs = osm_runs_by_segment(conn, &[found.0.clone()])?;
+    let pieces = stitch_way_pieces(runs.get(&found.0).map(|v| v.as_slice()).unwrap_or(&[]));
+    let geometry = match pieces.len() {
+        0 => geojson::line_string(&polyline::decode(&found.5)?),
+        1 => geojson::line_string(&pieces[0]),
+        _ => geojson::multi_line_string(&pieces),
+    };
 
     let station_name = |id: i64| -> Result<String> {
         Ok(conn.query_row(
@@ -334,7 +343,7 @@ pub fn detail(conn: &Connection, segment_id: &str) -> Result<Option<Value>> {
 
     Ok(Some(json!({
         "segment_id": found.0,
-        "geometry": geojson::line_string(&pts),
+        "geometry": geometry,
         "length_m": found.1,
         "way_count": found.2,
         "start_station": {
