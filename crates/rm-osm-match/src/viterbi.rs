@@ -29,6 +29,13 @@ pub struct MatchOutput {
     pub snap_p50_m: f64,
     pub snap_p95_m: f64,
     pub snap_max_m: f64,
+    /// matched-path node points vs the polyline: (p50, p95, max) distance
+    /// in metres to the nearest polyline segment — the path→polyline side
+    /// of match quality (snap stats cover polyline→path). 0 when the
+    /// matched path is degenerate.
+    pub dev_p50_m: f64,
+    pub dev_p95_m: f64,
+    pub dev_max_m: f64,
     pub outliers: usize, // matched points snapping worse than OUTLIER_M
     pub gap_repairs: usize,
 }
@@ -347,6 +354,39 @@ struct Piece {
     ce: f64,
 }
 
+/// Percentile (p50, p95, max) distance in metres from each matched-path
+/// point to the nearest polyline segment. None when either side is
+/// degenerate (fewer than two points).
+fn path_deviation(path: &[LatLng], polyline: &[LatLng]) -> Option<(f64, f64, f64)> {
+    if path.len() < 2 || polyline.len() < 2 {
+        return None;
+    }
+    let mut dists: Vec<f64> = path
+        .iter()
+        .map(|p| {
+            polyline
+                .windows(2)
+                .map(|w| rm_core::geo::point_to_segment_m(*p, w[0], w[1]).1)
+                .fold(f64::INFINITY, f64::min)
+        })
+        .collect();
+    dists.sort_by(|a, b| a.total_cmp(b));
+    let n = dists.len();
+    Some((
+        dists[n * 50 / 100],
+        dists[(n * 95 / 100).min(n - 1)],
+        dists[n - 1],
+    ))
+}
+
+/// Append a path node position, dropping consecutive duplicates so runs
+/// sharing a boundary node contribute it once.
+fn push_path_pt(path: &mut Vec<LatLng>, p: LatLng) {
+    if path.last().map(|l| l.lat == p.lat && l.lon == p.lon) != Some(true) {
+        path.push(p);
+    }
+}
+
 /// Match `pts` (a decoded direction polyline) using `ctx`'s graph. The ctx
 /// (A* cache + scratch) is reused across directions by the caller; results
 /// are unaffected by prior cache contents.
@@ -491,6 +531,7 @@ pub fn match_path(
 
     // extraction: pieces per transition, then merge
     let mut pieces: Vec<Piece> = Vec::new();
+    let mut path_pts: Vec<LatLng> = Vec::new();
     for w in 1..matched.len() {
         let i_prev = matched[w - 1];
         let i = matched[w];
@@ -536,12 +577,15 @@ pub fn match_path(
             }
             let cs = c0 + gps * n0 / step.net_m;
             let ce = c0 + gps * (n0 + plen) / step.net_m;
+            let (en, xn) = (entry_of(ctx.g, &st), exit_of(ctx.g, &st));
+            push_path_pt(&mut path_pts, ctx.g.node_pos(en));
+            push_path_pt(&mut path_pts, ctx.g.node_pos(xn));
             pieces.push(Piece {
                 seg: st.seg,
                 way_id: ctx.g.seg(st.seg).way_id,
                 forward: st.forward,
-                entry_node: ctx.g.node_osm_id(entry_of(ctx.g, &st)),
-                exit_node: ctx.g.node_osm_id(exit_of(ctx.g, &st)),
+                entry_node: ctx.g.node_osm_id(en),
+                exit_node: ctx.g.node_osm_id(xn),
                 cs,
                 ce,
             });
@@ -577,6 +621,11 @@ pub fn match_path(
     }
     out.matched_length_m = runs.iter().map(|r| r.cum_end_m - r.cum_start_m).sum();
     out.runs = runs;
+    if let Some((p50, p95, max)) = path_deviation(&path_pts, pts) {
+        out.dev_p50_m = p50;
+        out.dev_p95_m = p95;
+        out.dev_max_m = max;
+    }
     out
 }
 
@@ -653,6 +702,67 @@ mod tests {
         assert!((out.matched_length_m - total).abs() < 5.0);
         assert_eq!(out.gap_repairs, 0);
         assert!(out.snap_max_m < 1.0);
+    }
+
+    /// straight match: path nodes sit on the polyline — dev near zero
+    #[test]
+    fn straight_match_dev_near_zero() {
+        let g = RoadGraph::build(
+            vec![node(1, 0, 0), node(2, 1, 0), node(3, 2, 0)],
+            &[WayInput {
+                way_id: 100,
+                oneway: 0,
+                node_ids: vec![1, 2, 3],
+            }],
+        );
+        let pts = vec![
+            LatLng {
+                lat: 24.1400,
+                lon: 120.6800,
+            },
+            LatLng {
+                lat: 24.1400 + D,
+                lon: 120.6800,
+            },
+            LatLng {
+                lat: 24.1400 + 2.0 * D,
+                lon: 120.6800,
+            },
+        ];
+        let out = run_match(&g, &pts);
+        assert!(out.dev_max_m < 1.0, "dev_max {}", out.dev_max_m);
+        assert!(out.dev_p95_m < 1.0, "dev_p95 {}", out.dev_p95_m);
+    }
+
+    /// two-point simplified polyline over a dogleg way: snap stats stay
+    /// clean (endpoints project fine) but the mid node is far off the
+    /// polyline — dev must flag it
+    #[test]
+    fn detour_behind_simplified_polyline_shows_large_dev() {
+        // way 1 - 2 - 3: node 2 one block east of the straight 1-3 line
+        let g = RoadGraph::build(
+            vec![node(1, 0, 0), node(2, 0, 1), node(3, 2, 0)],
+            &[WayInput {
+                way_id: 100,
+                oneway: 0,
+                node_ids: vec![1, 2, 3],
+            }],
+        );
+        let pts = vec![
+            LatLng {
+                lat: 24.1400,
+                lon: 120.6800,
+            },
+            LatLng {
+                lat: 24.1400 + 2.0 * D,
+                lon: 120.6800,
+            },
+        ];
+        let out = run_match(&g, &pts);
+        assert!(out.snap_max_m < 10.0, "snap_max {}", out.snap_max_m);
+        // node 2 sits ~D of longitude (~101 m) off the 1-3 polyline segment
+        assert!(out.dev_max_m > 80.0, "dev_max {}", out.dev_max_m);
+        assert!(out.dev_p95_m > 80.0, "dev_p95 {}", out.dev_p95_m);
     }
 
     /// L-shape across two ways sharing node 2

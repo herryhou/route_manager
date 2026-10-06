@@ -18,7 +18,7 @@ written by `rm-osm-prepare`. Writes, in one transaction:
 | Output | Meaning |
 |---|---|
 | `seg_match_way` | ordered way runs per (subroute_version_id, direction): `osm_way_id`, entry/exit OSM node, chainage span `cum_start_m`..`cum_end_m` |
-| `seg_match_stat` | per (route_version_id, direction): stop count, path vs matched length, snap distance p50/p95/max, outliers, gap repairs |
+| `seg_match_stat` | per (route_version_id, direction): stop count, path vs matched length, snap distance p50/p95/max (polyline→path), path deviation p50/p95/max (matched-path nodes → src polyline, `dev_*`), outliers, gap repairs |
 
 Both tables are `DELETE`d first — the stage is a full rebuild, so
 rerunning on the same inputs writes the same rows.

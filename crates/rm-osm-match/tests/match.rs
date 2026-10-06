@@ -110,9 +110,10 @@ fn matches_direction_to_way_runs_and_stats() {
     assert!(run_row.4 < 5.0, "cum_start {}", run_row.4);
     assert!((run_row.5 - 222.4).abs() < 5.0, "cum_end {}", run_row.5);
 
-    let stat: (i64, f64, f64, f64, f64, i64, i64) = conn
+    let stat: (i64, f64, f64, f64, f64, i64, i64, f64, f64) = conn
         .query_row(
-            "SELECT stops, path_length_m, matched_length_m, snap_dist_p50, snap_dist_max, outliers, gap_repairs
+            "SELECT stops, path_length_m, matched_length_m, snap_dist_p50, snap_dist_max, outliers, gap_repairs,
+                    dev_p50_m, dev_max_m
              FROM seg_match_stat WHERE route_version_id = ?1 AND direction = 0",
             [rv_id],
             |r| {
@@ -124,6 +125,8 @@ fn matches_direction_to_way_runs_and_stats() {
                     r.get(4)?,
                     r.get(5)?,
                     r.get(6)?,
+                    r.get(7)?,
+                    r.get(8)?,
                 ))
             },
         )
@@ -135,6 +138,9 @@ fn matches_direction_to_way_runs_and_stats() {
     assert!(stat.4 < 1.0, "max {}", stat.4);
     assert_eq!(stat.5, 0);
     assert_eq!(stat.6, 0);
+    // path nodes lie on the straight polyline — deviation ~0
+    assert!(stat.7 < 1.0, "dev_p50 {}", stat.7);
+    assert!(stat.8 < 1.0, "dev_max {}", stat.8);
 
     // degenerate directions leave no way rows
     let n: i64 = conn

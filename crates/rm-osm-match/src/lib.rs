@@ -107,8 +107,9 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
         let mut ins_stat = tx.prepare(
             "INSERT INTO seg_match_stat
                 (route_version_id, direction, stops, path_length_m, matched_length_m,
-                 snap_dist_p50, snap_dist_p95, snap_dist_max, outliers, gap_repairs)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 snap_dist_p50, snap_dist_p95, snap_dist_max, outliers, gap_repairs,
+                 dev_p50_m, dev_p95_m, dev_max_m)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )?;
         for oc in outcomes {
             let m = match oc.result {
@@ -152,6 +153,9 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                 m.snap_max_m,
                 m.outliers as i64,
                 m.gap_repairs as i64,
+                m.dev_p50_m,
+                m.dev_p95_m,
+                m.dev_max_m,
             ])?;
         }
     }
