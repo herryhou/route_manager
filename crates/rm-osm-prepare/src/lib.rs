@@ -3,6 +3,7 @@
 //! ways first (collecting referenced node ids), then nodes (coords).
 //! Re-runnable: the osm_* tables are rewritten atomically in one tx.
 
+pub mod clip;
 pub mod filter;
 pub mod stitch;
 
@@ -29,8 +30,9 @@ struct WayRow {
     refs: Vec<i64>,
 }
 
-/// Load `pbf` into the osm_* tables (atomic rewrite).
-pub fn run(conn: &Connection, pbf: &Path) -> Result<Summary> {
+/// Load `pbf` into the osm_* tables (atomic rewrite). With `clip`, keep
+/// only ways touching that bbox (whole, so edge connectivity survives).
+pub fn run(conn: &Connection, pbf: &Path, clip_box: Option<clip::Bbox>) -> Result<Summary> {
     use osmpbf::{Element, ElementReader};
 
     let mut ways: Vec<WayRow> = Vec::new();
@@ -84,11 +86,26 @@ pub fn run(conn: &Connection, pbf: &Path) -> Result<Summary> {
         })
         .context("read nodes")?;
 
-    // stitch dangling busway ends (nodes pass done: coords known)
+    // coords of every referenced node, for clip decisions and stitching
     let node_pos: HashMap<i64, LatLng> = nodes
         .iter()
         .map(|&(id, lat, lon)| (id, LatLng::new(lat, lon)))
         .collect();
+
+    // optional bbox clip: drop ways with no node inside, then the nodes
+    // only the dropped ways referenced (kept ways stay whole, so edge
+    // connectivity survives)
+    let (mut ways, keep_ids) = match clip_box {
+        Some(b) => clip::clip(ways, |w: &WayRow| &w.refs, &node_pos, &b),
+        None => (ways, want),
+    };
+    let nodes: Vec<(i64, f64, f64)> = match clip_box {
+        Some(_) => nodes
+            .into_iter()
+            .filter(|(id, _, _)| keep_ids.contains(id))
+            .collect(),
+        None => nodes,
+    };
     let connectors = stitch::stitch_busway_ends(
         &ways
             .iter()
@@ -151,7 +168,7 @@ pub fn run(conn: &Connection, pbf: &Path) -> Result<Summary> {
     }
     {
         let mut m = tx.prepare("INSERT INTO osm_meta (key, value) VALUES (?1, ?2)")?;
-        for (k, v) in [
+        let mut meta: Vec<(&str, String)> = vec![
             (
                 "pbf_file",
                 pbf.file_name()
@@ -164,7 +181,18 @@ pub fn run(conn: &Connection, pbf: &Path) -> Result<Summary> {
             ("highway_whitelist", filter::HIGHWAY_WHITELIST.join(",")),
             ("way_count", summary.ways.to_string()),
             ("node_count", summary.nodes.to_string()),
-        ] {
+        ];
+        let mut clip_str: Option<(&str, String)> = None;
+        if let Some(b) = clip_box {
+            clip_str = Some((
+                "clip_bbox",
+                format!("{},{},{},{}", b.south, b.west, b.north, b.east),
+            ));
+        }
+        if let Some(entry) = clip_str {
+            meta.push(entry);
+        }
+        for (k, v) in meta {
             m.execute(rusqlite::params![k, v])?;
         }
     }

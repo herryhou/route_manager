@@ -10,14 +10,21 @@ drive on, and stores them once for every route direction matched after it.
 Input is the PBF extract (`--pbf`, default
 `assets/Taichung/data/TW-TXG-202610020300.osm.pbf`); `--db` selects the database
 (default `data/taichung.db`). There is no `--batch` — nothing here is
-batch-scoped. Writes, in one transaction:
+batch-scoped. `--clip "south,west,north,east"` (degrees) keeps only ways
+touching that bbox — a way crossing the edge stays whole, so connectivity
+across the boundary survives; the 2026-10-06 city runs use the full-Taiwan
+PBF with a route-bbox + 10 km clip, which reproduces the unclipped match
+bit-for-bit at a quarter of the size (a plain `DELETE` of unreferenced ways
+would instead starve the matcher's A* gap repair and degrade re-matching).
+SQLite never shrinks on rewrite, so reclaim the space once with
+`sqlite3 <db> 'VACUUM;'` after switching extracts. Writes, in one transaction:
 
 | Output | Meaning |
 |---|---|
 | `osm_way` | one kept way: `highway` class, folded `oneway`, `name` |
 | `osm_way_node` | a way's node refs in travel order (1-based `ordinal`) |
 | `osm_node` | coordinates, only for nodes referenced by a kept way |
-| `osm_meta` | provenance: pbf file name, sha256, import time, whitelist, counts |
+| `osm_meta` | provenance: pbf file name, sha256, import time, whitelist, counts, `clip_bbox` when clipped |
 
 ## What counts as a road
 
