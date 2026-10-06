@@ -249,13 +249,13 @@ export function segmentPanel(d, { onPickRoute, onPickStation }) {
     </table>
     <h3>Ways (${(d.ways ?? []).length})</h3>
     <table class="kv"><tr><td>#</td><td>name</td><td>highway</td><td style="text-align:right">len</td></tr>${ways}</table>
-    <h3>Routes (${(d.routes ?? []).length})</h3>
+    <h3>Routes (${uniqRoutes(d.routes).length})</h3>
     <div class="segment-routes"></div>
   `, `Segment ${d.segment_id.slice(0, 12)}…`);
   pane.querySelectorAll('.st-pick').forEach((el) =>
     el.addEventListener('click', () => onPickStation(Number(el.dataset.sid)))
   );
-  pane.querySelector('.segment-routes').append(routeChips(d.routes ?? [], onPickRoute));
+  pane.querySelector('.segment-routes').append(routeChips(uniqRoutes(d.routes), onPickRoute));
 }
 
 /// Route path piece detail (point pane, polyline click): provider draft piece
@@ -344,31 +344,8 @@ function dialSvg(b, { spread = null, color = 'var(--accent)' } = {}) {
   </svg>`;
 }
 
-// Direction variants repeat route_code — popups show one chip per code+name.
+// Direction variants repeat route_code — popups/panels show one chip per code+name.
 const uniqRoutes = (rs) => [...new Map((rs ?? []).map((r) => [`${r.route_code}|${r.subroute_name ?? ''}`, r])).values()];
-
-/// Smaller angle between two bearings, [0, 180]; Infinity when either is null.
-const angDiffDeg = (a, b) => {
-  if (a == null || b == null) return Infinity;
-  const d = Math.abs(a - b) % 360;
-  return d > 180 ? 360 - d : d;
-};
-
-/// Stop-popup chip pick: one chip per route, opening the direction that serves
-/// the clicked pole — the member row whose bearing matches the stop's own
-/// heading; the opposite carriageway is the route's other direction. Without
-/// bearings this degenerates to first-row-wins.
-const poleSideRoutes = (rows, bearing) => {
-  const byRoute = new Map();
-  for (const r of rows ?? []) {
-    const k = `${r.route_code}|${r.subroute_name ?? ''}`;
-    const prev = byRoute.get(k);
-    if (!prev || angDiffDeg(r.bearing, bearing) < angDiffDeg(prev.bearing, bearing)) {
-      byRoute.set(k, r);
-    }
-  }
-  return [...byRoute.values()];
-};
 
 /// Station card shared by both popups: arrow dial + name (spread text only
 /// when it trips the rm-verify 45° warn threshold), station-serving chips.
@@ -410,10 +387,8 @@ export function stopPopupEl(d, { onPickRoute }) {
     <div class="pp-label"><h3>經過路線</h3></div>
     <div class="pp-chips"></div>
   `;
-  const routes = poleSideRoutes(d.routes_by_station, d.bearing?.bearing_deg);
-  wrap.querySelector('.pp-chips').append(
-    routeChips(routes.length ? routes : poleSideRoutes(d.routes_by_stop, d.bearing?.bearing_deg), onPickRoute)
-  );
+  const routes = uniqRoutes(d.routes_by_station?.length ? d.routes_by_station : d.routes_by_stop);
+  wrap.querySelector('.pp-chips').append(routeChips(routes, onPickRoute));
   return wrap;
 }
 
@@ -497,9 +472,9 @@ export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
     <div class="group-chips"></div>
     <h3>Segments (${(d.segments ?? []).length})</h3>
     <div class="segment-rows"></div>
-    <h3>Routes serving this stop (${(d.routes_by_stop ?? []).length})</h3>
+    <h3>Routes serving this stop (${uniqRoutes(d.routes_by_stop).length})</h3>
     <div class="routes-stop-chips"></div>
-    <h3>Routes serving station (${(d.routes_by_station ?? []).length})</h3>
+    <h3>Routes serving station (${uniqRoutes(d.routes_by_station).length})</h3>
     <div class="routes-station-chips"></div>
 
   `, `${d.stop.stop_name} #${d.stop.stop_code}`);
@@ -508,8 +483,8 @@ export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
     otherStationChips(d.group_members, d.station.station_id, onPickStation)
   );
   for (const [cls, routes] of [
-    ['routes-stop-chips', d.routes_by_stop],
-    ['routes-station-chips', d.routes_by_station],
+    ['routes-stop-chips', uniqRoutes(d.routes_by_stop)],
+    ['routes-station-chips', uniqRoutes(d.routes_by_station)],
   ]) {
     pane.querySelector(`.${cls}`).append(routeChips(routes, onPickRoute));
   }
