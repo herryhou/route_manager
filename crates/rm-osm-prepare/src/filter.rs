@@ -3,7 +3,10 @@
 /// Road classes buses can use; links, bus lanes and the legacy
 /// bus_guideway included. `busway` is the live tag for median bus lanes
 /// (仁愛路/信義路/新生南路 counterflow lanes in Taipei); without it every
-/// eastbound 仁愛路 match detours through back alleys.
+/// eastbound 仁愛路 match detours through back alleys. `living_street`
+/// and `road` cover real drivable streets outside the main class system
+/// (shared-space lanes, unclassified-in-progress roads); `track` stays
+/// out — farm paths buses cannot use would only add A* noise.
 pub const HIGHWAY_WHITELIST: &[&str] = &[
     "motorway",
     "motorway_link",
@@ -17,6 +20,8 @@ pub const HIGHWAY_WHITELIST: &[&str] = &[
     "tertiary_link",
     "unclassified",
     "residential",
+    "living_street",
+    "road",
     "service",
     "bus_guideway",
     "busway",
@@ -53,6 +58,8 @@ mod tests {
             "service",
             "bus_guideway",
             "busway",
+            "living_street",
+            "road",
         ] {
             assert!(highway_allowed(Some(h)), "{h} should pass");
         }
