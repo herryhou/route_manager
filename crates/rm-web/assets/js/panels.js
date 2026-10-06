@@ -355,7 +355,7 @@ function stationCard({ station, bearing, routes, stops }, { onPickRoute }) {
   const spreadTxt = spread != null && spread > 45
     ? ` <span class="pp-hot">spread ${Math.round(spread)}°</span>`
     : '';
-  const subTitle = '<h3>經過路線:</h3>';
+  const subTitle = '<h3>:</h3>';
   el.innerHTML = `
     <div class="pp-head">
       ${dialSvg(bearing?.bearing_deg, { spread, color: 'var(--amber)' })}
@@ -458,16 +458,18 @@ export function stationPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
 
 /// Stop drill-down panel: stop → station → group + incident segments + serving routes.
 export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
+  const stCell = (st) =>
+    `<td class="st-pick" data-sid="${st.station_id}" title="open station detail">${st.station_name ?? st.station_id}</td>`;
   const pane = showPane('point', `
-    ${kv([
-    ['stop', `${d.stop.stop_name} (${d.stop.stop_code})`],
-    ['bearing', d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'],
-    ['station', d.station.station_name],
-    ['station bearing', d.station_bearing
+    <table class="kv">
+      <tr><td>stop</td><td>${d.stop.stop_name} (${d.stop.stop_code})</td></tr>
+      <tr><td>bearing</td><td>${d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'}</td></tr>
+      <tr><td>station</td>${stCell(d.station)}</tr>
+    <tr><td>station bearing</td><td>${d.station_bearing
       ? `${Math.round(d.station_bearing.bearing_deg)}° · spread ${Math.round(d.station_bearing.max_spread_deg)}° · ${d.station_bearing.member_count} members`
-      : '—'],
-    ['group', `${d.group.station_group_name} · ${d.group.source}`],
-  ])}
+      : '—'}</td></tr>
+    <tr><td>group</td><td>${d.group.station_group_name} · ${d.group.source}</td></tr>
+    </table>
     <h3>其它 Stations (${(d.group_members ?? []).filter((m) => m.station_id !== d.station.station_id).length})</h3>
     <div class="group-chips"></div>
     <h3>Segments (${(d.segments ?? []).length})</h3>
@@ -478,6 +480,9 @@ export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
     <div class="routes-station-chips"></div>
 
   `, `${d.stop.stop_name} #${d.stop.stop_code}`);
+  pane.querySelectorAll('.st-pick').forEach((el) =>
+    el.addEventListener('click', () => onPickStation(Number(el.dataset.sid)))
+  );
   pane.querySelector('.segment-rows').append(segmentRows(d.segments, { onPick: onPickSegment }));
   pane.querySelector('.group-chips').append(
     otherStationChips(d.group_members, d.station.station_id, onPickStation)
