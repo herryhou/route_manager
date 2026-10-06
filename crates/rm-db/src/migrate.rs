@@ -16,6 +16,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0005_bearing",
         include_str!("../migrations/0005_bearing.sql"),
     ),
+    (
+        "0006_match_dev",
+        include_str!("../migrations/0006_match_dev.sql"),
+    ),
+    (
+        "0007_current_views",
+        include_str!("../migrations/0007_current_views.sql"),
+    ),
 ];
 
 /// Apply pending migrations in order. Safe to call repeatedly.
@@ -64,7 +72,9 @@ mod tests {
                 "0002_identity",
                 "0003_segment",
                 "0004_osm",
-                "0005_bearing"
+                "0005_bearing",
+                "0006_match_dev",
+                "0007_current_views"
             ]
         );
     }

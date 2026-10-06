@@ -22,7 +22,7 @@ UPDATE is reserved for pointers/revision inside a publish transaction.
 
 ## Migrations
 
-Five SQL files under `migrations/`, embedded into the binary with
+Seven SQL files under `migrations/`, embedded into the binary with
 `include_str!` — no external migration tool, no migration command to
 forget. `migrate` creates `schema_migrations` if missing, applies each
 unrecorded file in order as one batch, and records version, name, and
@@ -38,10 +38,42 @@ deliberately never migrates.
 | `0003_segment` | `path_stop_projection`, `seg_geometry_draft`, `seg_match_way`, `seg_match_stat`, and the registry: `seg_segment` / `seg_segment_way` / `seg_traversal` |
 | `0004_osm` | road graph from the PBF extract: `osm_meta`, `osm_way`, `osm_way_node`, `osm_node` |
 | `0005_bearing` | `stop_bearing`, `station_bearing` — derived data rebuilt per run, never stored inside the immutable `*_version` tables |
+| `0006_match_dev` | path→polyline deviation percentiles (`dev_p50_m`, `dev_p95_m`, `dev_max_m`) on `seg_match_stat` |
+| `0007_current_views` | the `*_current` read views (see below) |
 
 Connections from `open` set `foreign_keys = ON`, WAL,
 `synchronous = NORMAL`, and a 30 s busy timeout (WAL is a no-op on
 `:memory:`).
+
+## Current-version views
+
+Reading the versioned model means joining: every stop/station/group
+lookup filters `valid_to IS NULL`, every route lookup follows
+`current_route_version_id`, and route stops need the four-table
+`route_stop_version → subroute_version → route_version → route` chain.
+Migration `0007_current_views` defines one view per concept so
+"current data" reads like a plain table:
+
+| View | Current rows from |
+|---|---|
+| `stop_current` | `stop_version` with `valid_to IS NULL` |
+| `station_current` | `station_version` with `valid_to IS NULL` |
+| `station_group_current` | `station_group_version` with `valid_to IS NULL` |
+| `route_current` | `route` joined to its `current_route_version_id` version |
+| `route_stop_current` | the route→version→subroute→stop chain, current version only |
+
+```sql
+-- ordered stops of a route's current version, with names
+SELECT stop_sequence, stop_name
+FROM route_stop_current rsc
+JOIN stop_current sc ON sc.stop_version_id = rsc.stop_version_id
+WHERE rsc.route_id = 1 AND rsc.direction = 0
+ORDER BY stop_sequence;
+```
+
+The views rely on the pipeline's at-most-one-open-version invariant and
+are read-only convenience — writers keep using the base tables, and
+existing queries were not rewritten to use them.
 
 ## ID minting
 
