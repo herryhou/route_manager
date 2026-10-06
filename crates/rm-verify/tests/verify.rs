@@ -216,6 +216,65 @@ fn bearing_spread_warns_but_does_not_fail() {
     }
 }
 
+#[test]
+fn match_dev_over_threshold_warns_but_does_not_fail() {
+    let (_dir, conn, batch) = setup();
+    // two matched directions: one strays 80 m off the src polyline (p95),
+    // one sits tight — only the first is flagged
+    let rv: i64 = conn
+        .query_row(
+            "SELECT rv.route_version_id FROM route r
+             JOIN route_version rv ON rv.route_id = r.route_id
+                  AND rv.route_version_id = r.current_route_version_id
+             WHERE r.ext_uid = 'tcg:2'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    conn.execute_batch(&format!(
+        "INSERT INTO seg_match_stat
+            (route_version_id, direction, stops, path_length_m, matched_length_m,
+             snap_dist_p50, snap_dist_p95, snap_dist_max, outliers, gap_repairs,
+             dev_p50_m, dev_p95_m, dev_max_m)
+         VALUES
+            ({rv}, 0, 1, 1000.0, 1000.0, 5.0, 10.0, 20.0, 0, 0, 40.0, 80.0, 90.0),
+            ({rv}, 1, 1, 1000.0, 1000.0, 5.0, 10.0, 20.0, 0, 0, 5.0, 10.0, 12.0);",
+    ))
+    .unwrap();
+    let qa = tempfile::tempdir().unwrap();
+
+    let report = rm_verify::run(&conn, batch, &fixture_expectations(), qa.path()).unwrap();
+
+    // warn-only: exit status unchanged
+    assert!(report.all_pass(), "deviation must not fail: {report:#?}");
+    let warn = report
+        .warnings
+        .iter()
+        .find(|w| w.id == "match:dev-p95")
+        .expect("match-dev warning present");
+    assert!(warn.detail.contains('1'), "one direction flagged: {warn:?}");
+    assert_eq!(
+        report.stats.get("dirs_dev_p95_over_50m"),
+        Some(&1.0),
+        "{:?}",
+        report.stats
+    );
+
+    // QA detail file lists only the offending direction, worst first
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(qa.path().join("match_dev_report.json")).unwrap(),
+    )
+    .unwrap();
+    let dirs = v["directions"].as_array().expect("directions array");
+    assert_eq!(dirs.len(), 1, "{dirs:?}");
+    assert_eq!(dirs[0]["direction"], 0);
+    assert_eq!(dirs[0]["dev_p95_m"], 80.0);
+    assert!(
+        dirs[0].get("route_code").is_some() && dirs[0].get("matched_ratio").is_some(),
+        "row carries route + ratio for triage: {dirs:?}"
+    );
+}
+
 /// Bump the id allocator past manually inserted rows so INV-04 stays quiet.
 fn bump_sequence(conn: &rusqlite::Connection, table: &str, next: i64) {
     conn.execute(

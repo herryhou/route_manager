@@ -17,6 +17,7 @@ type MatchAgg = (
     Option<i64>,
     Option<i64>,
     Option<i64>,
+    Option<i64>,
 );
 
 /// Overview: counts, match summary, outlier count, latest batch.
@@ -62,10 +63,12 @@ pub fn stats(conn: &Connection) -> Result<Value> {
         gap_repairs,
         p95_over_100,
         matched_under_half,
+        dev_over_50,
     ): MatchAgg = conn.query_row(
         "SELECT COUNT(*), SUM(matched_length_m), SUM(path_length_m), AVG(snap_dist_p50),
                 SUM(outliers), SUM(gap_repairs),
-                SUM(snap_dist_p95 > 100.0), SUM(matched_length_m < 0.5 * path_length_m)
+                SUM(snap_dist_p95 > 100.0), SUM(matched_length_m < 0.5 * path_length_m),
+                SUM(dev_p95_m > 50.0)
          FROM seg_match_stat",
         [],
         |r| -> rusqlite::Result<MatchAgg> {
@@ -78,6 +81,7 @@ pub fn stats(conn: &Connection) -> Result<Value> {
                 r.get(5)?,
                 r.get(6)?,
                 r.get(7)?,
+                r.get(8)?,
             ))
         },
     )?;
@@ -122,6 +126,7 @@ pub fn stats(conn: &Connection) -> Result<Value> {
             "gap_repairs": gap_repairs.unwrap_or(0),
             "directions_p95_over_100m": p95_over_100.unwrap_or(0),
             "directions_matched_under_half": matched_under_half.unwrap_or(0),
+            "directions_dev_p95_over_50m": dev_over_50.unwrap_or(0),
         },
         "outlier_stops": outlier_stops,
         "batch": batch.map(|(id, captured, valid, status)| json!({
@@ -170,4 +175,41 @@ pub fn outliers(conn: &Connection, min_snap: f64, limit: i64) -> Result<Value> {
     let rows: Vec<Value> = it.collect::<Result<_, _>>()?;
     let count = rows.len();
     Ok(json!({ "outliers": rows, "count": count }))
+}
+
+/// `GET /api/qa/matchdev?min_dev=&limit=` — directions whose matched OSM
+/// path strays from the src polyline (dev p95), worst first. Mirrors the
+/// rm-verify match_dev_report.json rows.
+pub fn matchdev(conn: &Connection, min_dev: f64, limit: i64) -> Result<Value> {
+    let mut stmt = conn.prepare(
+        "SELECT r.route_id, r.route_code, s.direction, s.stops,
+                CASE WHEN s.path_length_m > 0
+                     THEN s.matched_length_m / s.path_length_m END,
+                s.dev_p50_m, s.dev_p95_m, s.dev_max_m,
+                s.snap_dist_p95, s.gap_repairs, s.outliers
+         FROM seg_match_stat s
+         JOIN route_version rv ON rv.route_version_id = s.route_version_id
+         JOIN route r ON r.route_id = rv.route_id
+         WHERE s.dev_p95_m > ?1
+         ORDER BY s.dev_p95_m DESC
+         LIMIT ?2",
+    )?;
+    let it = stmt.query_map(rusqlite::params![min_dev, limit], |r| {
+        Ok(json!({
+            "route_id": r.get::<_, i64>(0)?,
+            "route_code": r.get::<_, String>(1)?,
+            "direction": r.get::<_, i64>(2)?,
+            "stops": r.get::<_, i64>(3)?,
+            "matched_ratio": r.get::<_, Option<f64>>(4)?,
+            "dev_p50_m": r.get::<_, f64>(5)?,
+            "dev_p95_m": r.get::<_, f64>(6)?,
+            "dev_max_m": r.get::<_, f64>(7)?,
+            "snap_dist_p95": r.get::<_, Option<f64>>(8)?,
+            "gap_repairs": r.get::<_, i64>(9)?,
+            "outliers": r.get::<_, i64>(10)?,
+        }))
+    })?;
+    let rows: Vec<Value> = it.collect::<Result<_, _>>()?;
+    let count = rows.len();
+    Ok(json!({ "directions": rows, "count": count }))
 }

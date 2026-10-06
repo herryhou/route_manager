@@ -10,6 +10,17 @@ export function snapColor(p50) {
   return '#cf3e3e';
 }
 
+// path-vs-polyline deviation p95 thresholds (mirror rm-verify DEV_P95_WARN_M)
+export const DEV_WARN = 50;   // m, flagged
+export const DEV_BAD = 100;   // m, serious
+
+export function devColor(p95) {
+  if (p95 == null) return '#9ca3af';       // no data
+  if (p95 < DEV_WARN) return '#2e9e44';
+  if (p95 < DEV_BAD) return '#d19a00';
+  return '#cf3e3e';
+}
+
 // matched_ratio thresholds: <0.9 amber, <0.5 red
 export function matchedBadge(ratio) {
   if (ratio == null) return { cls: 'nodata', text: 'no data' };

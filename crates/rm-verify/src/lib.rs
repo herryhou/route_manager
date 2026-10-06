@@ -28,7 +28,10 @@ impl Expectations {
     /// Verified targets from the real Taichung captures (M1 ledger).
     pub const REAL: Expectations = Expectations {
         routes: Some(392),
-        stations: Some(7_424),
+        // 7,424 pre-full-Taiwan-extract; +149 bearing splits after the
+        // 2026-10-06 re-match (full-TW graph gives more stops OSM-run
+        // bearings, so the split pass separates more axes).
+        stations: Some(7_573),
         stop_rows: Some(37_294),
         sids: Some(14_045),
         stops: Some(37_292),
@@ -44,7 +47,9 @@ impl Expectations {
     /// Verified targets from the 2026-10-05 Tainan capture (小黃巴士 excluded).
     pub const TAINAN: Expectations = Expectations {
         routes: Some(113),
-        stations: Some(4_116),
+        // 4,116 pre-full-Taiwan-extract; +9 bearing splits after the
+        // 2026-10-06 re-match.
+        stations: Some(4_125),
         stop_rows: Some(8_707),
         sids: Some(8_707),
         stops: Some(8_707),
@@ -55,6 +60,26 @@ impl Expectations {
         no_polyline: Some(1),
         main_side_groups: Some(0),
         shared_pair: Some(("tcg:2101", "tcg:2102")), // 101/102 share 28 segments
+    };
+
+    /// Verified targets from the 2026-10-06 Taipei capture (ebus.gov.taipei
+    /// ct=tpc, 406 routes; stop rows from live StopsOfRoute, geometry from
+    /// data.taipei GetBusShape). stations is post bearing-split (3,346
+    /// capture clusters + split children; 5,269 pre-full-Taiwan-extract,
+    /// +40 after the 2026-10-06 re-match).
+    pub const TAIPEI: Expectations = Expectations {
+        routes: Some(406),
+        stations: Some(5_309),
+        stop_rows: Some(28_216),
+        sids: Some(5_368), // UniStopId is globally consistent per pole
+        stops: Some(28_207),
+        groups: Some(3_346),
+        providers: Some(0),
+        cycled: Some(4),
+        single_dir: Some(11),
+        no_polyline: Some(11),
+        main_side_groups: Some(0),
+        shared_pair: Some(("tcg:0100064500", "tcg:0100064510")), // 64/64區 share 109 segments
     };
 }
 
@@ -542,6 +567,15 @@ pub fn run(
         }
     }
 
+    // ---- matched-path deviation (warn-only) ----
+    {
+        let (warn, dev_stats) = match_dev_warnings(conn)?;
+        stats.extend(dev_stats);
+        if let Some(warn) = warn {
+            warnings.push(warn);
+        }
+    }
+
     let report = Report {
         batch_id: batch,
         checks,
@@ -556,6 +590,7 @@ pub fn run(
     write_segments_geojson(conn, qa_dir)?;
     write_outlier_csv(conn, qa_dir)?;
     write_bearing_report(conn, qa_dir)?;
+    write_match_dev_report(conn, qa_dir)?;
     write_grouping_report(conn, qa_dir)?;
 
     Ok(report)
@@ -564,6 +599,94 @@ pub fn run(
 /// Warn threshold for a station's member bearing deviation from its axis
 /// (headings fold onto one axis ± 180°, so reverse travel never flags).
 pub const BEARING_SPREAD_WARN_DEG: f64 = 45.0;
+
+/// Warn threshold for a direction's path→polyline deviation p95 — how far
+/// the matched OSM path strays from the source polyline (detours through
+/// side streets that the polyline→path snap stats can miss when the source
+/// polyline is heavily simplified).
+pub const DEV_P95_WARN_M: f64 = 50.0;
+
+/// Directions whose matched path strays beyond [`DEV_P95_WARN_M`]. Never
+/// fails the run — see match_dev_report.json for per-direction detail.
+fn match_dev_warnings(conn: &Connection) -> anyhow::Result<(Option<Check>, BTreeMap<String, f64>)> {
+    let total = n(conn, "SELECT COUNT(*) FROM seg_match_stat", &[])?;
+    let violating = n(
+        conn,
+        "SELECT COUNT(*) FROM seg_match_stat WHERE dev_p95_m > ?1",
+        &[&DEV_P95_WARN_M],
+    )?;
+    let avg: Option<f64> =
+        conn.query_row("SELECT AVG(dev_p95_m) FROM seg_match_stat", [], |r| r.get(0))?;
+    let stats = BTreeMap::from([
+        ("dirs_matched".into(), total as f64),
+        ("dirs_dev_p95_over_50m".into(), violating as f64),
+        ("dev_p95_avg_m".into(), avg.unwrap_or(0.0)),
+    ]);
+    let warn = if violating > 0 {
+        Some(check(
+            "match:dev-p95",
+            "matched path follows the src polyline",
+            true,
+            format!(
+                "{violating} of {total} directions stray > {} m p95 (see match_dev_report.json)",
+                DEV_P95_WARN_M as i64
+            ),
+        ))
+    } else {
+        None
+    };
+    Ok((warn, stats))
+}
+
+/// Per-direction matched-path deviation detail for QA, worst first.
+fn write_match_dev_report(conn: &Connection, qa_dir: &Path) -> anyhow::Result<()> {
+    use serde_json::json;
+    let mut directions = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT r.route_code, r.ext_uid, s.direction, s.stops,
+                    s.path_length_m, s.matched_length_m,
+                    CASE WHEN s.path_length_m > 0
+                         THEN s.matched_length_m / s.path_length_m END,
+                    s.dev_p50_m, s.dev_p95_m, s.dev_max_m,
+                    s.snap_dist_p95, s.gap_repairs, s.outliers
+             FROM seg_match_stat s
+             JOIN route_version rv ON rv.route_version_id = s.route_version_id
+             JOIN route r ON r.route_id = rv.route_id
+             WHERE s.dev_p95_m > ?1
+             ORDER BY s.dev_p95_m DESC",
+        )?;
+        let rows = stmt.query_map([&DEV_P95_WARN_M], |r| {
+            Ok(json!({
+                "route_code": r.get::<_, String>(0)?,
+                "route": r.get::<_, String>(1)?,
+                "direction": r.get::<_, i64>(2)?,
+                "stops": r.get::<_, i64>(3)?,
+                "path_length_m": r.get::<_, f64>(4)?,
+                "matched_length_m": r.get::<_, f64>(5)?,
+                "matched_ratio": r.get::<_, Option<f64>>(6)?,
+                "dev_p50_m": r.get::<_, f64>(7)?,
+                "dev_p95_m": r.get::<_, f64>(8)?,
+                "dev_max_m": r.get::<_, f64>(9)?,
+                "snap_dist_p95": r.get::<_, Option<f64>>(10)?,
+                "gap_repairs": r.get::<_, i64>(11)?,
+                "outliers": r.get::<_, i64>(12)?,
+            }))
+        })?;
+        for row in rows {
+            directions.push(row?);
+        }
+    }
+    let report = json!({
+        "threshold_m": DEV_P95_WARN_M,
+        "directions": directions,
+    });
+    std::fs::write(
+        qa_dir.join("match_dev_report.json"),
+        serde_json::to_vec_pretty(&report)?,
+    )?;
+    Ok(())
+}
 
 /// Stations whose member stops disagree on bearing by more than the
 /// threshold. Never fails the run — see bearing_report.json for detail.

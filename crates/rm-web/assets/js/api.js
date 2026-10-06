@@ -28,3 +28,4 @@ export const stopsBbox = (bbox, kind) =>
 export const stopsSearch = (q) => fetchJson(`/api/stops?q=${encodeURIComponent(q)}`);
 export const stationsSearch = (q) => fetchJson(`/api/stations?q=${encodeURIComponent(q)}`);
 export const outliers = (minSnap = 50) => fetchJson(`/api/qa/outliers?min_snap=${minSnap}`);
+export const matchDevs = (minDev = 50) => fetchJson(`/api/qa/matchdev?min_dev=${minDev}`);

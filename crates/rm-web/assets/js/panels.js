@@ -318,6 +318,29 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
   });
 }
 
+/// Path-deviation list panel (topbar path dev chip): directions whose
+/// matched OSM path strays from the src polyline — open the route and
+/// compare the ways layer against the raw polyline layer.
+export function matchDevPanel(rows, { onOpenRoute }) {
+  const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);
+  const items = (rows ?? [])
+    .map(
+      (d) => `<div class="stop-row matchdev-row" title="dev p95 ${fmt(d.dev_p95_m)} · max ${fmt(d.dev_max_m)} · matched ${d.matched_ratio == null ? '—' : `${Math.round(d.matched_ratio * 100)}%`} · ${d.gap_repairs} gap repairs">
+        <span class="route-code">${d.route_code}</span>
+        <span class="stop-name">dir ${d.direction}${d.gap_repairs ? ` · ${d.gap_repairs} gaps` : ''}</span>
+        <span class="badge ${d.dev_p95_m >= 100 ? 'bad' : 'warn'}">${fmt(d.dev_p95_m)}</span>
+      </div>`
+    )
+    .join('');
+  const pane = showPane('context', `
+    <p class="muted">matched path off src polyline (p95); click a row to open the route — compare ways vs raw layers</p>
+    ${items || '<p class="muted">none</p>'}
+  `, `Path dev (${(rows ?? []).length})`);
+  pane.querySelectorAll('.matchdev-row').forEach((row, i) => {
+    row.addEventListener('click', () => onOpenRoute(rows[i]));
+  });
+}
+
 /// Solid bearing arrow — the map glyph's arrowhead (dot+arrow group),
 /// scaled up and rotated so 0° = north, 90° = east; spread draws the member-
 /// deviation wedge behind it, warn-tinted past the rm-verify 45° threshold.

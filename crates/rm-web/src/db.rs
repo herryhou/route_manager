@@ -13,6 +13,18 @@ pub fn ensure_schema(conn: &Connection) -> Result<()> {
         r.get::<_, i64>(0)
     })
     .context("DB predates the segment tables — re-run the pipeline (migrations 0003+)")?;
+    let dev_col: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('seg_match_stat')
+             WHERE name = 'dev_p95_m'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    anyhow::ensure!(
+        dev_col == 1,
+        "seg_match_stat has no dev columns — re-run the pipeline (migration 0006+)"
+    );
     Ok(())
 }
 

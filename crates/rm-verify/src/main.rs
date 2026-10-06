@@ -40,7 +40,8 @@ fn main() -> anyhow::Result<()> {
     let expect = match args.preset.as_str() {
         "taichung" => rm_verify::Expectations::REAL,
         "tainan" => rm_verify::Expectations::TAINAN,
-        other => anyhow::bail!("unknown preset {other:?} (taichung | tainan)"),
+        "taipei" => rm_verify::Expectations::TAIPEI,
+        other => anyhow::bail!("unknown preset {other:?} (taichung | tainan | taipei)"),
     };
     let report = rm_verify::run(&conn, batch, &expect, Path::new(&args.qa_dir))?;
 

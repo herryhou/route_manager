@@ -302,6 +302,67 @@ async fn qa_outliers_list() {
     assert_eq!(v["outliers"].as_array().unwrap().len(), 1, "{v}");
 }
 
+/// Like `fixture_db`, but with two hand-written match stats: one direction
+/// straying 80 m off the src polyline (p95), one sitting tight.
+fn fixture_db_with_dev() -> (tempfile::TempDir, std::path::PathBuf) {
+    let (dir, db) = fixture_db();
+    let conn = rm_db::open(&db).unwrap();
+    let rv: i64 = conn
+        .query_row(
+            "SELECT rv.route_version_id FROM route r
+             JOIN route_version rv ON rv.route_id = r.route_id
+                  AND rv.route_version_id = r.current_route_version_id
+             WHERE r.ext_uid = 'tcg:2'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    conn.execute_batch(&format!(
+        "INSERT INTO seg_match_stat
+            (route_version_id, direction, stops, path_length_m, matched_length_m,
+             snap_dist_p50, snap_dist_p95, snap_dist_max, outliers, gap_repairs,
+             dev_p50_m, dev_p95_m, dev_max_m)
+         VALUES
+            ({rv}, 0, 1, 1000.0, 1000.0, 5.0, 10.0, 20.0, 0, 0, 40.0, 80.0, 90.0),
+            ({rv}, 1, 1, 1000.0, 1000.0, 5.0, 10.0, 20.0, 0, 0, 5.0, 10.0, 12.0);",
+    ))
+    .unwrap();
+    (dir, db)
+}
+
+#[tokio::test]
+async fn qa_matchdev_lists_offenders_only() {
+    let (_dir, db) = fixture_db_with_dev();
+    let app = router_with(AppState::new(db));
+
+    let v = get_json(&app, "/api/qa/matchdev").await;
+    let dirs = v["directions"].as_array().unwrap();
+    assert_eq!(dirs.len(), 1, "only the straying direction: {v}");
+    assert_eq!(dirs[0]["route_code"], serde_json::json!("2"));
+    assert_eq!(dirs[0]["direction"].as_i64().unwrap(), 0);
+    assert_eq!(dirs[0]["dev_p95_m"].as_f64().unwrap(), 80.0);
+    assert!(
+        dirs[0]["route_id"].is_i64(),
+        "row carries route_id for click-through: {dirs:?}"
+    );
+    assert!(
+        dirs[0]["matched_ratio"].is_f64(),
+        "row carries matched ratio for triage: {dirs:?}"
+    );
+
+    // stats feeds the path-dev chip
+    let s = get_json(&app, "/api/stats").await;
+    assert_eq!(
+        s["match"]["directions_dev_p95_over_50m"].as_i64().unwrap(),
+        1,
+        "{s}"
+    );
+
+    // min_dev filters
+    let v = get_json(&app, "/api/qa/matchdev?min_dev=999999").await;
+    assert_eq!(v["directions"].as_array().unwrap().len(), 0, "{v}");
+}
+
 #[tokio::test]
 async fn unknown_api_path_is_404_json() {
     let res = app()

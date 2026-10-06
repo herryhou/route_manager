@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, segmentPanel, pathPiecePanel, setPaneChangeHook } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, segmentPanel, pathPiecePanel, setPaneChangeHook } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawSegmentHighlight, clearSegmentHighlight } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -211,6 +211,18 @@ async function openOutliers() {
   }
 }
 
+async function openMatchDevs() {
+  try {
+    const v = await api.matchDevs();
+    matchDevPanel(v.directions ?? [], {
+      onOpenRoute: (d) => selectRouteById(d.route_id, d.direction),
+    });
+    location.hash = '#matchdev';
+  } catch (e) {
+    status(`path dev load failed: ${e.message}`);
+  }
+}
+
 /// Viewport segments layer: checkbox + zoom ≥13 gated, debounced on moveend.
 /// Viewport stops/stations layer: checkbox + zoom gated
 /// (<12 off, 12–14 stations, ≥15 stops), debounced on moveend.
@@ -299,6 +311,7 @@ async function boot() {
     refreshStations(search.value);
   });
   document.getElementById('chip-outliers').addEventListener('click', openOutliers);
+  document.getElementById('chip-matchdev').addEventListener('click', openMatchDevs);
   const segToggle = document.getElementById('layer-segments');
   segToggle.addEventListener('change', () => {
     if (segToggle.checked) refreshSegments();
@@ -341,6 +354,7 @@ async function boot() {
     setChip('chip-segments', c.segments ?? '—');
     setChip('chip-match', `${s.match?.directions_with_stats ?? '—'}/${s.match?.directions_total ?? '—'}`);
     setChip('chip-outliers', s.outlier_stops ?? '—');
+    setChip('chip-matchdev', s.match?.directions_dev_p95_over_50m ?? '—');
     if (s.batch) {
       status(`batch ${s.batch.batch_id} · captured ${s.batch.captured_at} · ${s.batch.status}`);
     }

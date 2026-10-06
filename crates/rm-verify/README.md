@@ -19,6 +19,7 @@ Verifies one batch over every layer, staging `src_*` tables through
 | `segments.geojson` | one `LineString` per `seg_segment` with `segment_id`, `length_m`, `way_count`, `routes` |
 | `outlier_stops.csv` | `path_stop_projection` rows snapped > 50 m or method `OUTLIER`, worst first |
 | `bearing_report.json` | stations over the 45° spread threshold with member bearings, plus the OSM/POLYLINE source mix |
+| `match_dev_report.json` | directions whose matched OSM path strays > 50 m (p95) from the src polyline, worst first, with matched ratio / gap repairs |
 | `grouping_report.json` | groups over the chain-drift thresholds with their member stations |
 
 ## What gets checked
@@ -70,6 +71,14 @@ Some classes are deliberately exempt:
   `report.json` and a row in `bearing_report.json` — the exit status is
   unchanged, because reverse travel on the same road (one axis ± 180°) is
   legitimate and headings fold onto the axis before comparing.
+- **Matched-path deviation** — a direction whose matched OSM path strays
+  more than `DEV_P95_WARN_M` (50 m) p95 from the src polyline warns and
+  lands in `match_dev_report.json` (`match:dev-p95`). The snap stats
+  measure polyline→path and stay clean when the source polyline is
+  heavily simplified, so this path→polyline side catches detours through
+  side streets; source polyline quality is a data issue, so it never
+  fails the run. rm-web's "path dev" chip lists the same rows live for
+  eyeballing ways-vs-raw on the map.
 - **Chain drift** — grouping unions same-name stations at < 80 m hops,
   so a long chain can drift past any real interchange. A group over
   `GROUP_DIAMETER_WARN_M` (300 m) diameter or `GROUP_MEMBERS_WARN`
