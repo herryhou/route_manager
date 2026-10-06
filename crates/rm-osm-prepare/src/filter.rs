@@ -1,6 +1,9 @@
 //! Highway whitelist + oneway tag interpretation (pure, unit-tested).
 
-/// Road classes buses can use; links and bus_guideway included.
+/// Road classes buses can use; links, bus lanes and the legacy
+/// bus_guideway included. `busway` is the live tag for median bus lanes
+/// (仁愛路/信義路/新生南路 counterflow lanes in Taipei); without it every
+/// eastbound 仁愛路 match detours through back alleys.
 pub const HIGHWAY_WHITELIST: &[&str] = &[
     "motorway",
     "motorway_link",
@@ -16,6 +19,7 @@ pub const HIGHWAY_WHITELIST: &[&str] = &[
     "residential",
     "service",
     "bus_guideway",
+    "busway",
 ];
 
 /// True when the way's `highway` tag is whitelisted (None = untagged).
@@ -48,6 +52,7 @@ mod tests {
             "residential",
             "service",
             "bus_guideway",
+            "busway",
         ] {
             assert!(highway_allowed(Some(h)), "{h} should pass");
         }

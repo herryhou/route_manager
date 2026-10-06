@@ -4,11 +4,14 @@
 //! Re-runnable: the osm_* tables are rewritten atomically in one tx.
 
 pub mod filter;
+pub mod stitch;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use rm_core::LatLng;
 use rusqlite::Connection;
 
 #[derive(Debug, Default, PartialEq)]
@@ -80,6 +83,32 @@ pub fn run(conn: &Connection, pbf: &Path) -> Result<Summary> {
             _ => {}
         })
         .context("read nodes")?;
+
+    // stitch dangling busway ends (nodes pass done: coords known)
+    let node_pos: HashMap<i64, LatLng> = nodes
+        .iter()
+        .map(|&(id, lat, lon)| (id, LatLng::new(lat, lon)))
+        .collect();
+    let connectors = stitch::stitch_busway_ends(
+        &ways
+            .iter()
+            .map(|w| stitch::Way {
+                id: w.id,
+                highway: w.highway.clone(),
+                refs: w.refs.clone(),
+            })
+            .collect::<Vec<_>>(),
+        &node_pos,
+    );
+    for c in &connectors {
+        ways.push(WayRow {
+            id: c.id,
+            highway: "busway".to_string(),
+            oneway: 0,
+            name: "busway connector (synthetic)".to_string(),
+            refs: vec![c.from_node, c.to_node],
+        });
+    }
 
     let summary = Summary {
         ways: ways.len(),
