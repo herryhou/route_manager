@@ -1,1 +1,297 @@
-[{"dept":"白河","dest":"甘宅內角","endTime":"1645","goback":"0","routeid":"1704","routename":"黃14-1","startTime":"0740","stop":[{"lat":"23.347580","locationid":"7465","lon":"120.413665","stopid":"20730","stopname":"白河站"},{"lat":"23.351139","locationid":"7000","lon":"120.416278","stopid":"20732","stopname":"白河分局"},{"lat":"23.35557","locationid":"7001","lon":"120.41969","stopid":"20733","stopname":"舊地政"},{"lat":"23.361867","locationid":"7002","lon":"120.424311","stopid":"20734","stopname":"白河國中"},{"lat":"23.36468","locationid":"7003","lon":"120.4285","stopid":"20735","stopname":"三間厝"},{"lat":"23.36593","locationid":"7004","lon":"120.43419","stopid":"20736","stopname":"溪洲路口"},{"lat":"23.36808","locationid":"7005","lon":"120.43821","stopid":"20737","stopname":"埤子頭"},{"lat":"23.376528","locationid":"1582","lon":"120.4443","stopid":"20738","stopname":"竹門活動中心"},{"lat":"23.376447","locationid":"8920","lon":"120.438953","stopid":"20739","stopname":"竹圍子"},{"lat":"23.376423","locationid":"8918","lon":"120.437342","stopid":"20740","stopname":"番子園"},{"lat":"23.382972","locationid":"1294","lon":"120.432773","stopid":"20741","stopname":"美雅傢俱"},{"lat":"23.38281","locationid":"8728","lon":"120.436688","stopid":"20742","stopname":"過溝仔"},{"lat":"23.382722","locationid":"8663","lon":"120.438917","stopid":"20743","stopname":"甘宅"},{"lat":"23.38562","locationid":"8665","lon":"120.437415","stopid":"20744","stopname":"埤角"},{"lat":"23.390202","locationid":"8667","lon":"120.433722","stopid":"20745","stopname":"大厝"},{"lat":"23.391467","locationid":"8669","lon":"120.432763","stopid":"20746","stopname":"草店活動中心"},{"lat":"23.396568","locationid":"8671","lon":"120.428393","stopid":"20747","stopname":"關帝廟"},{"lat":"23.39592","locationid":"8673","lon":"120.424795","stopid":"20748","stopname":"大埔(白河)"},{"lat":"23.397848","locationid":"8675","lon":"120.437635","stopid":"20749","stopname":"內角"}]},{"dept":"白河","dest":"甘宅內角","endTime":"1710","goback":"1","routeid":"1704","routename":"黃14-1","startTime":"0805","stop":[{"lat":"23.397848","locationid":"8676","lon":"120.437635","stopid":"20750","stopname":"內角"},{"lat":"23.39592","locationid":"8674","lon":"120.424795","stopid":"20751","stopname":"大埔(白河)"},{"lat":"23.396422","locationid":"8672","lon":"120.428337","stopid":"20752","stopname":"關帝廟"},{"lat":"23.391375","locationid":"8670","lon":"120.43265","stopid":"20753","stopname":"草店活動中心"},{"lat":"23.39007","locationid":"8668","lon":"120.433708","stopid":"20754","stopname":"大厝"},{"lat":"23.385559","locationid":"8666","lon":"120.437394","stopid":"20755","stopname":"埤角"},{"lat":"23.383283","locationid":"8664","lon":"120.438925","stopid":"20756","stopname":"甘宅"},{"lat":"23.38286","locationid":"8729","lon":"120.436732","stopid":"20757","stopname":"過溝仔"},{"lat":"23.383177","locationid":"1295","lon":"120.43276","stopid":"20758","stopname":"美雅傢俱"},{"lat":"23.376289","locationid":"8919","lon":"120.437236","stopid":"20759","stopname":"番子園"},{"lat":"23.376352","locationid":"8921","lon":"120.438893","stopid":"20760","stopname":"竹圍子"},{"lat":"23.376482","locationid":"1583","lon":"120.444315","stopid":"20761","stopname":"竹門活動中心"},{"lat":"23.36809","locationid":"7038","lon":"120.43813","stopid":"20762","stopname":"埤子頭"},{"lat":"23.366046","locationid":"7039","lon":"120.434163","stopid":"20763","stopname":"溪洲路口"},{"lat":"23.36478","locationid":"7040","lon":"120.42859","stopid":"20764","stopname":"三間厝"},{"lat":"23.361866","locationid":"7041","lon":"120.424209","stopid":"20765","stopname":"白河國中"},{"lat":"23.3557","locationid":"7042","lon":"120.41959","stopid":"20766","stopname":"舊地政"},{"lat":"23.351095","locationid":"7043","lon":"120.416119","stopid":"20767","stopname":"白河分局"},{"lat":"23.350324","locationid":"1731","lon":"120.415488","stopid":"20768","stopname":"中山、中興路口"},{"lat":"23.347580","locationid":"7465","lon":"120.413665","stopid":"20769","stopname":"白河站"}]}]
+[
+    {
+        "dept": "白河",
+        "dest": "甘宅內角",
+        "endTime": "1645",
+        "goback": "0",
+        "routeid": "1704",
+        "routename": "黃14-1",
+        "startTime": "0740",
+        "stop": [
+            {
+                "lat": "23.347580",
+                "locationid": "7465",
+                "lon": "120.413665",
+                "stopid": "20730",
+                "stopname": "白河站"
+            },
+            {
+                "lat": "23.351139",
+                "locationid": "7000",
+                "lon": "120.416278",
+                "stopid": "20732",
+                "stopname": "白河分局"
+            },
+            {
+                "lat": "23.35557",
+                "locationid": "7001",
+                "lon": "120.41969",
+                "stopid": "20733",
+                "stopname": "舊地政"
+            },
+            {
+                "lat": "23.361867",
+                "locationid": "7002",
+                "lon": "120.424311",
+                "stopid": "20734",
+                "stopname": "白河國中"
+            },
+            {
+                "lat": "23.36468",
+                "locationid": "7003",
+                "lon": "120.4285",
+                "stopid": "20735",
+                "stopname": "三間厝"
+            },
+            {
+                "lat": "23.36593",
+                "locationid": "7004",
+                "lon": "120.43419",
+                "stopid": "20736",
+                "stopname": "溪洲路口"
+            },
+            {
+                "lat": "23.36808",
+                "locationid": "7005",
+                "lon": "120.43821",
+                "stopid": "20737",
+                "stopname": "埤子頭"
+            },
+            {
+                "lat": "23.376528",
+                "locationid": "1582",
+                "lon": "120.4443",
+                "stopid": "20738",
+                "stopname": "竹門活動中心"
+            },
+            {
+                "lat": "23.376447",
+                "locationid": "8920",
+                "lon": "120.438953",
+                "stopid": "20739",
+                "stopname": "竹圍子"
+            },
+            {
+                "lat": "23.376423",
+                "locationid": "8918",
+                "lon": "120.437342",
+                "stopid": "20740",
+                "stopname": "番子園"
+            },
+            {
+                "lat": "23.382972",
+                "locationid": "1294",
+                "lon": "120.432773",
+                "stopid": "20741",
+                "stopname": "美雅傢俱"
+            },
+            {
+                "lat": "23.38281",
+                "locationid": "8728",
+                "lon": "120.436688",
+                "stopid": "20742",
+                "stopname": "過溝仔"
+            },
+            {
+                "lat": "23.382722",
+                "locationid": "8663",
+                "lon": "120.438917",
+                "stopid": "20743",
+                "stopname": "甘宅"
+            },
+            {
+                "lat": "23.38562",
+                "locationid": "8665",
+                "lon": "120.437415",
+                "stopid": "20744",
+                "stopname": "埤角"
+            },
+            {
+                "lat": "23.390202",
+                "locationid": "8667",
+                "lon": "120.433722",
+                "stopid": "20745",
+                "stopname": "大厝"
+            },
+            {
+                "lat": "23.391467",
+                "locationid": "8669",
+                "lon": "120.432763",
+                "stopid": "20746",
+                "stopname": "草店活動中心"
+            },
+            {
+                "lat": "23.396568",
+                "locationid": "8671",
+                "lon": "120.428393",
+                "stopid": "20747",
+                "stopname": "關帝廟"
+            },
+            {
+                "lat": "23.39592",
+                "locationid": "8673",
+                "lon": "120.424795",
+                "stopid": "20748",
+                "stopname": "大埔(白河)"
+            },
+            {
+                "lat": "23.397848",
+                "locationid": "8675",
+                "lon": "120.437635",
+                "stopid": "20749",
+                "stopname": "內角"
+            }
+        ]
+    },
+    {
+        "dept": "白河",
+        "dest": "甘宅內角",
+        "endTime": "1710",
+        "goback": "1",
+        "routeid": "1704",
+        "routename": "黃14-1",
+        "startTime": "0805",
+        "stop": [
+            {
+                "lat": "23.397848",
+                "locationid": "8676",
+                "lon": "120.437635",
+                "stopid": "20750",
+                "stopname": "內角"
+            },
+            {
+                "lat": "23.39592",
+                "locationid": "8674",
+                "lon": "120.424795",
+                "stopid": "20751",
+                "stopname": "大埔(白河)"
+            },
+            {
+                "lat": "23.396422",
+                "locationid": "8672",
+                "lon": "120.428337",
+                "stopid": "20752",
+                "stopname": "關帝廟"
+            },
+            {
+                "lat": "23.391375",
+                "locationid": "8670",
+                "lon": "120.43265",
+                "stopid": "20753",
+                "stopname": "草店活動中心"
+            },
+            {
+                "lat": "23.39007",
+                "locationid": "8668",
+                "lon": "120.433708",
+                "stopid": "20754",
+                "stopname": "大厝"
+            },
+            {
+                "lat": "23.385559",
+                "locationid": "8666",
+                "lon": "120.437394",
+                "stopid": "20755",
+                "stopname": "埤角"
+            },
+            {
+                "lat": "23.383283",
+                "locationid": "8664",
+                "lon": "120.438925",
+                "stopid": "20756",
+                "stopname": "甘宅"
+            },
+            {
+                "lat": "23.38286",
+                "locationid": "8729",
+                "lon": "120.436732",
+                "stopid": "20757",
+                "stopname": "過溝仔"
+            },
+            {
+                "lat": "23.383177",
+                "locationid": "1295",
+                "lon": "120.43276",
+                "stopid": "20758",
+                "stopname": "美雅傢俱"
+            },
+            {
+                "lat": "23.376289",
+                "locationid": "8919",
+                "lon": "120.437236",
+                "stopid": "20759",
+                "stopname": "番子園"
+            },
+            {
+                "lat": "23.376352",
+                "locationid": "8921",
+                "lon": "120.438893",
+                "stopid": "20760",
+                "stopname": "竹圍子"
+            },
+            {
+                "lat": "23.376482",
+                "locationid": "1583",
+                "lon": "120.444315",
+                "stopid": "20761",
+                "stopname": "竹門活動中心"
+            },
+            {
+                "lat": "23.36809",
+                "locationid": "7038",
+                "lon": "120.43813",
+                "stopid": "20762",
+                "stopname": "埤子頭"
+            },
+            {
+                "lat": "23.366046",
+                "locationid": "7039",
+                "lon": "120.434163",
+                "stopid": "20763",
+                "stopname": "溪洲路口"
+            },
+            {
+                "lat": "23.36478",
+                "locationid": "7040",
+                "lon": "120.42859",
+                "stopid": "20764",
+                "stopname": "三間厝"
+            },
+            {
+                "lat": "23.361866",
+                "locationid": "7041",
+                "lon": "120.424209",
+                "stopid": "20765",
+                "stopname": "白河國中"
+            },
+            {
+                "lat": "23.3557",
+                "locationid": "7042",
+                "lon": "120.41959",
+                "stopid": "20766",
+                "stopname": "舊地政"
+            },
+            {
+                "lat": "23.351095",
+                "locationid": "7043",
+                "lon": "120.416119",
+                "stopid": "20767",
+                "stopname": "白河分局"
+            },
+            {
+                "lat": "23.350324",
+                "locationid": "1731",
+                "lon": "120.415488",
+                "stopid": "20768",
+                "stopname": "中山、中興路口"
+            },
+            {
+                "lat": "23.347580",
+                "locationid": "7465",
+                "lon": "120.413665",
+                "stopid": "20769",
+                "stopname": "白河站"
+            }
+        ]
+    }
+]
