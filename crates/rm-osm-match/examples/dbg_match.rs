@@ -28,7 +28,8 @@ fn main() -> anyhow::Result<()> {
         }
     }
     eprintln!("points with no candidates: {nocand}/{}", pts.len());
-    let m = viterbi::match_path(&g, &pts, &em, &BasicTransition::default());
+    let mut ctx = rm_osm_match::viterbi::Ctx::new(&g);
+    let m = viterbi::match_path(&mut ctx, &pts, &em, &BasicTransition::default());
     eprintln!(
         "matched_pts={} runs={} path={:.0} matched={:.0} p50={:.1} p95={:.1} gaps={}",
         m.matched_points,

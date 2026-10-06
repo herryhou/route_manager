@@ -74,11 +74,11 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
     }
     let outcomes: Vec<Outcome> = jobs
         .into_par_iter()
-        .map(|job| {
+        .map_init(|| viterbi::Ctx::new(&graph), |ctx, job| {
             let result = (|| {
                 let pts = rm_core::polyline::decode(&job.encoded)?;
                 Ok(viterbi::match_path(
-                    &graph,
+                    ctx,
                     &pts,
                     &NewsonKrummEmission::default(),
                     &BasicTransition::default(),

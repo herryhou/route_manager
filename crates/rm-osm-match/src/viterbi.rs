@@ -2,8 +2,9 @@
 //! runs with cumulative chainage along the path.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::graph::RoadGraph;
+use crate::graph::{point_xy_m, RoadGraph};
 use crate::models::{EmissionModel, TransitionCtx, TransitionModel};
 use rm_core::LatLng;
 
@@ -49,18 +50,38 @@ const MOTION_TOLERANCE_M: f64 = 5.0; // reverse jitter forgiven on same state
 const ASTAR_EXPANSION_CAP: usize = 4000;
 
 /// cached A* result: network length + directed segs traversed
-type AstarPath = Option<(f64, Vec<(u32, bool)>)>;
+struct AstarResult {
+    len_m: f64,
+    segs: Vec<(u32, bool)>,
+}
+type AstarPath = Option<Arc<AstarResult>>;
 
-struct Ctx<'a> {
+/// Matcher scratch reused across directions: A* result cache plus
+/// generation-stamped search arrays (a slot holds this call's value iff its
+/// stamp == epoch), so per-search setup is O(1) instead of O(nodes).
+pub struct Ctx<'a> {
     g: &'a RoadGraph,
     astar_cache: HashMap<(u32, u32), AstarPath>,
-    /// A* scratch, generation-stamped so per-call setup is O(1) instead of
-    /// O(nodes): a slot holds this call's value iff its stamp == epoch.
     epoch: u32,
     stamp: Vec<u32>,
     dist: Vec<f64>,
     came: Vec<(u32, u32, bool)>, // node -> (prev, seg, forward)
     popped: Vec<u32>,            // epoch of last expansion
+}
+
+impl<'a> Ctx<'a> {
+    pub fn new(g: &'a RoadGraph) -> Ctx<'a> {
+        let n = g.nodes.len();
+        Ctx {
+            g,
+            astar_cache: HashMap::new(),
+            epoch: 0,
+            stamp: vec![0; n],
+            dist: vec![0.0; n],
+            came: vec![(0, 0, false); n],
+            popped: vec![0; n],
+        }
+    }
 }
 
 fn entry_of(g: &RoadGraph, s: &State) -> u32 {
@@ -98,16 +119,26 @@ pub fn debug_candidates(g: &RoadGraph, p: LatLng, em: &dyn EmissionModel) -> usi
 
 fn candidates(g: &RoadGraph, p: LatLng, em: &dyn EmissionModel) -> Vec<State> {
     let radius = em.search_radius_m();
+    let (px, py) = point_xy_m(p);
     let mut out = Vec::new();
     for idx in g.segments_near(p, radius) {
         let seg = g.seg(idx);
         let (proj, dist) =
             rm_core::geo::point_to_segment_m(p, g.node_pos(seg.a), g.node_pos(seg.b));
+        let _ = proj; // only the distance is needed here
         if dist > radius {
             continue;
         }
-        let len = seg.length_m.max(1e-9);
-        let t = (rm_core::geo::haversine_m(g.node_pos(seg.a), proj) / len).clamp(0.0, 1.0);
+        // planar position along the seg (same value the projection computed
+        // internally, without a second haversine)
+        let (ax, ay) = g.xy[seg.a as usize];
+        let (bx, by) = g.xy[seg.b as usize];
+        let len2 = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+        let t = if len2 == 0.0 {
+            0.0
+        } else {
+            (((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / len2).clamp(0.0, 1.0)
+        };
         // directed states honoring oneway
         if seg.oneway != -1 {
             out.push(State {
@@ -151,7 +182,7 @@ fn turn_cos(g: &RoadGraph, s1: &State, s2: &State) -> f64 {
 }
 
 /// A* over directed adjacency (oneway honored); returns length + seg path.
-fn astar(ctx: &mut Ctx, start: u32, goal: u32) -> Option<(f64, Vec<(u32, bool)>)> {
+fn astar(ctx: &mut Ctx, start: u32, goal: u32) -> AstarPath {
     use std::cmp::Reverse;
     if let Some(v) = ctx.astar_cache.get(&(start, goal)) {
         return v.clone();
@@ -159,7 +190,9 @@ fn astar(ctx: &mut Ctx, start: u32, goal: u32) -> Option<(f64, Vec<(u32, bool)>)
     let g = ctx.g;
     ctx.epoch += 1;
     let epoch = ctx.epoch;
-    let goal_pos = g.node_pos(goal);
+    // planar goal coords: cheap lower-bound heuristic (scaled slightly
+    // down to stay admissible against great-circle edge lengths)
+    let (gx, gy) = g.xy[goal as usize];
     // f64 is not Ord; distances are non-negative so bit patterns order correctly
     let mut heap: std::collections::BinaryHeap<Reverse<(u64, u32)>> =
         std::collections::BinaryHeap::new();
@@ -195,7 +228,8 @@ fn astar(ctx: &mut Ctx, start: u32, goal: u32) -> Option<(f64, Vec<(u32, bool)>)
                 ctx.stamp[v as usize] = epoch;
                 ctx.dist[v as usize] = nd;
                 ctx.came[v as usize] = (u, seg_idx, forward);
-                let h = rm_core::geo::haversine_m(g.node_pos(v), goal_pos);
+                let (vx, vy) = g.xy[v as usize];
+                let h = 0.999 * ((vx - gx) * (vx - gx) + (vy - gy) * (vy - gy)).sqrt();
                 heap.push(Reverse(((nd + h).to_bits(), v)));
             }
         }
@@ -210,7 +244,10 @@ fn astar(ctx: &mut Ctx, start: u32, goal: u32) -> Option<(f64, Vec<(u32, bool)>)
             cur = prev;
         }
         segs_rev.reverse();
-        Some((ctx.dist[goal as usize], segs_rev))
+        Some(Arc::new(AstarResult {
+            len_m: ctx.dist[goal as usize],
+            segs: segs_rev,
+        }))
     } else {
         None
     };
@@ -224,7 +261,8 @@ struct NetStep {
     turn_cos: f64,
     multi_hop: bool,
     /// full directed segs traversed between exit(s1) and entry(s2)
-    intermediate: Vec<(u32, bool)>,
+    /// (shared A* cache entry; None when no intermediate segs)
+    intermediate: Option<Arc<AstarResult>>,
 }
 
 /// Max plausible network detour for a repair: base allowance plus a factor
@@ -248,7 +286,7 @@ fn evaluate(ctx: &mut Ctx, s1: &State, s2: &State, gps_m: f64) -> Option<NetStep
                 uturn: motion < -MOTION_TOLERANCE_M,
                 turn_cos: 1.0,
                 multi_hop: false,
-                intermediate: Vec::new(),
+                intermediate: None,
             });
         }
         // opposite directions on the same segment: U-turn through an end
@@ -262,7 +300,7 @@ fn evaluate(ctx: &mut Ctx, s1: &State, s2: &State, gps_m: f64) -> Option<NetStep
             uturn: true,
             turn_cos: -1.0,
             multi_hop: false,
-            intermediate: Vec::new(),
+            intermediate: None,
         });
     }
     let exit1 = exit_of(g, s1);
@@ -273,17 +311,19 @@ fn evaluate(ctx: &mut Ctx, s1: &State, s2: &State, gps_m: f64) -> Option<NetStep
             uturn: false,
             turn_cos: turn_cos(g, s1, s2),
             multi_hop: false,
-            intermediate: Vec::new(),
+            intermediate: None,
         });
     }
     // straight-line span already exceeds any plausible detour: reject
-    // before paying for A*
-    let span = rm_core::geo::haversine_m(g.node_pos(exit1), g.node_pos(entry2));
+    // before paying for A* (planar distance: threshold check, not a length)
+    let (ex, ey) = g.xy[exit1 as usize];
+    let (nx, ny) = g.xy[entry2 as usize];
+    let span = ((ex - nx) * (ex - nx) + (ey - ny) * (ey - ny)).sqrt();
     if span > repair_bound(gps_m) {
         return None;
     }
-    let (astar_len, astar_segs) = astar(ctx, exit1, entry2)?;
-    let net = along_to_exit(g, s1) + astar_len + along_from_entry(g, s2);
+    let r = astar(ctx, exit1, entry2)?;
+    let net = along_to_exit(g, s1) + r.len_m + along_from_entry(g, s2);
     if net > repair_bound(gps_m) {
         return None;
     }
@@ -291,8 +331,8 @@ fn evaluate(ctx: &mut Ctx, s1: &State, s2: &State, gps_m: f64) -> Option<NetStep
         net_m: net,
         uturn: false,
         turn_cos: 1.0,
-        multi_hop: !astar_segs.is_empty(),
-        intermediate: astar_segs,
+        multi_hop: !r.segs.is_empty(),
+        intermediate: if r.segs.is_empty() { None } else { Some(r) },
     })
 }
 
@@ -307,13 +347,16 @@ struct Piece {
     ce: f64,
 }
 
-/// Match `pts` (a decoded direction polyline) onto `graph`.
+/// Match `pts` (a decoded direction polyline) using `ctx`'s graph. The ctx
+/// (A* cache + scratch) is reused across directions by the caller; results
+/// are unaffected by prior cache contents.
 pub fn match_path(
-    graph: &RoadGraph,
+    ctx: &mut Ctx,
     pts: &[LatLng],
     em: &dyn EmissionModel,
     tm: &dyn TransitionModel,
 ) -> MatchOutput {
+    let graph = ctx.g;
     let mut out = MatchOutput {
         path_length_m: rm_core::geo::path_length_m(pts),
         ..Default::default()
@@ -345,17 +388,6 @@ pub fn match_path(
         return out;
     }
 
-    let n_nodes = graph.nodes.len();
-    let mut ctx = Ctx {
-        g: graph,
-        astar_cache: HashMap::new(),
-        epoch: 0,
-        stamp: vec![0; n_nodes],
-        dist: vec![0.0; n_nodes],
-        came: vec![(0, 0, false); n_nodes],
-        popped: vec![0; n_nodes],
-    };
-
     // DP
     let mut dp: Vec<Vec<f64>> = Vec::with_capacity(matched.len());
     let mut parent: Vec<Vec<i32>> = Vec::with_capacity(matched.len());
@@ -377,16 +409,22 @@ pub fn match_path(
         let cur = &states_per_pt[i];
         let mut row = vec![f64::INFINITY; cur.len()];
         let mut prow = vec![-1i32; cur.len()];
+        // prev states in ascending dp order: transition cost is
+        // non-negative, so once base + e2 is at or above row[k], no later
+        // j can win either — break instead of paying evaluate (and its A*)
+        let mut order: Vec<u32> = (0..prev.len() as u32).collect();
+        order.sort_by(|&a, &b| {
+            dp[w - 1][a as usize].total_cmp(&dp[w - 1][b as usize])
+        });
         for (k, s2) in cur.iter().enumerate() {
             let e2 = em.emission_cost(s2.dist_m);
-            for (j, s1) in prev.iter().enumerate() {
-                let base = dp[w - 1][j];
-                // transition cost is non-negative, so base+e2 already at or
-                // above row[k] can never win: skip evaluate (and its A*)
+            for &j in &order {
+                let base = dp[w - 1][j as usize];
                 if base + e2 >= row[k] {
-                    continue;
+                    break;
                 }
-                let Some(step) = evaluate(&mut ctx, s1, s2, gps) else {
+                let s1 = &prev[j as usize];
+                let Some(step) = evaluate(ctx, s1, s2, gps) else {
                     continue;
                 };
                 let c = base
@@ -460,7 +498,7 @@ pub fn match_path(
         let s2 = states_per_pt[i][chosen[w]];
         // same displacement gps the DP judged this transition by
         let gps_step = rm_core::geo::haversine_m(pts[i_prev], pts[i]);
-        let Some(step) = evaluate(&mut ctx, &s1, &s2, gps_step) else {
+        let Some(step) = evaluate(ctx, &s1, &s2, gps_step) else {
             continue;
         };
         if step.multi_hop {
@@ -478,14 +516,16 @@ pub fn match_path(
             parts.push((s1, plen));
         } else {
             parts.push((s1, along_to_exit(ctx.g, &s1)));
-            for (seg_idx, forward) in &step.intermediate {
-                let st = State {
-                    seg: *seg_idx,
-                    forward: *forward,
-                    t: if *forward { 0.0 } else { 1.0 },
-                    dist_m: 0.0,
-                };
-                parts.push((st, ctx.g.seg(*seg_idx).length_m));
+            if let Some(inter) = &step.intermediate {
+                for &(seg_idx, forward) in &inter.segs {
+                    let st = State {
+                        seg: seg_idx,
+                        forward,
+                        t: if forward { 0.0 } else { 1.0 },
+                        dist_m: 0.0,
+                    };
+                    parts.push((st, ctx.g.seg(seg_idx).length_m));
+                }
             }
             parts.push((s2, along_from_entry(ctx.g, &s2)));
         }
@@ -557,8 +597,9 @@ mod tests {
     }
 
     fn run_match(g: &RoadGraph, pts: &[LatLng]) -> MatchOutput {
+        let mut ctx = Ctx::new(g);
         match_path(
-            g,
+            &mut ctx,
             pts,
             &NewsonKrummEmission::default(),
             &BasicTransition::default(),

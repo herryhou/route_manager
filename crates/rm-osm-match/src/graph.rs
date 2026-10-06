@@ -36,9 +36,24 @@ pub struct RoadGraph {
     pub segs: Vec<Seg>,
     cell_w: f64, // cells per degree, latitude axis
     cell_h: f64, // cells per degree, longitude axis
-    grid: HashMap<(i64, i64), Vec<u32>>,
+    /// flat cell grid (CSR): seg ids per cell over the seg bounding box
+    grid_origin: (i64, i64),
+    grid_rows: i64,
+    grid_cols: i64,
+    cell_starts: Vec<u32>,
+    cell_ids: Vec<u32>,
+    /// planar metre coords per node (same frame as [`point_xy_m`]) for
+    /// cheap distance math in hot loops
+    pub xy: Vec<(f64, f64)>,
     /// directed adjacency: node idx -> (to node idx, seg idx), oneway honored
     pub out_edges: Vec<Vec<(u32, u32)>>,
+}
+
+/// Planar metre coords of an arbitrary point, same frame as
+/// [`RoadGraph::xy`]. Consistent with the graph's fixed lon scale
+/// (LON_M_PER_DEG at ~24.1 deg latitude).
+pub fn point_xy_m(p: LatLng) -> (f64, f64) {
+    (p.lon * LON_M_PER_DEG, p.lat * LAT_M_PER_DEG)
 }
 
 /// Ways passed to [`RoadGraph::build`]: ordered node ids (travel order).
@@ -54,6 +69,11 @@ impl RoadGraph {
             nodes,
             ..Default::default()
         };
+        g.xy = g
+            .nodes
+            .iter()
+            .map(|n| (n.lon * LON_M_PER_DEG, n.lat * LAT_M_PER_DEG))
+            .collect();
         for (i, n) in g.nodes.iter().enumerate() {
             g.node_idx.insert(n.osm_id, i as u32);
         }
@@ -175,8 +195,19 @@ impl RoadGraph {
     fn index_grid(&mut self) {
         self.cell_w = LAT_M_PER_DEG / CELL_M;
         self.cell_h = LON_M_PER_DEG / CELL_M;
-        self.grid.clear();
-        for (idx, seg) in self.segs.iter().enumerate() {
+        if self.segs.is_empty() {
+            self.grid_origin = (0, 0);
+            self.grid_rows = 0;
+            self.grid_cols = 0;
+            self.cell_starts = vec![0];
+            self.cell_ids = Vec::new();
+            return;
+        }
+        // cell range (min_y..=max_y, min_x..=max_x) touched by each seg
+        let mut ranges: Vec<(i64, i64, i64, i64)> = Vec::with_capacity(self.segs.len());
+        let (mut y0, mut x0) = (i64::MAX, i64::MAX);
+        let (mut y1, mut x1) = (i64::MIN, i64::MIN);
+        for seg in &self.segs {
             let a = self.nodes[seg.a as usize];
             let b = self.nodes[seg.b as usize];
             let (ca0, cb0) = (
@@ -189,12 +220,58 @@ impl RoadGraph {
                     lon: b.lon,
                 }),
             );
-            for cy in ca0.0.min(cb0.0)..=ca0.0.max(cb0.0) {
-                for cx in ca0.1.min(cb0.1)..=ca0.1.max(cb0.1) {
-                    self.grid.entry((cy, cx)).or_default().push(idx as u32);
+            let r = (
+                ca0.0.min(cb0.0),
+                ca0.1.min(cb0.1),
+                ca0.0.max(cb0.0),
+                ca0.1.max(cb0.1),
+            );
+            y0 = y0.min(r.0);
+            x0 = x0.min(r.1);
+            y1 = y1.max(r.2);
+            x1 = x1.max(r.3);
+            ranges.push(r);
+        }
+        self.grid_origin = (y0, x0);
+        self.grid_rows = y1 - y0 + 1;
+        self.grid_cols = x1 - x0 + 1;
+        let n_cells = (self.grid_rows * self.grid_cols) as usize;
+        // counting sort into CSR layout: exclusive prefix gives cell starts
+        let mut counts = vec![0u32; n_cells];
+        for r in &ranges {
+            for cy in r.0..=r.2 {
+                for cx in r.1..=r.3 {
+                    counts[self.cell_slot(cy, cx).unwrap() as usize] += 1;
                 }
             }
         }
+        let mut starts = vec![0u32; n_cells + 1];
+        for i in 0..n_cells {
+            starts[i + 1] = starts[i] + counts[i];
+        }
+        let mut fill = starts[..n_cells].to_vec();
+        let mut ids = vec![0u32; starts[n_cells] as usize];
+        for (idx, r) in ranges.iter().enumerate() {
+            for cy in r.0..=r.2 {
+                for cx in r.1..=r.3 {
+                    let slot = self.cell_slot(cy, cx).unwrap() as usize;
+                    ids[fill[slot] as usize] = idx as u32;
+                    fill[slot] += 1;
+                }
+            }
+        }
+        self.cell_starts = starts;
+        self.cell_ids = ids;
+    }
+
+    #[inline]
+    fn cell_slot(&self, cy: i64, cx: i64) -> Option<usize> {
+        let dy = cy - self.grid_origin.0;
+        let dx = cx - self.grid_origin.1;
+        if dy < 0 || dx < 0 || dy >= self.grid_rows || dx >= self.grid_cols {
+            return None;
+        }
+        Some((dy * self.grid_cols + dx) as usize)
     }
 
     /// Segment indices whose cells lie within `radius_m` of `p`'s cell.
@@ -204,8 +281,12 @@ impl RoadGraph {
         let mut out = Vec::new();
         for dy in -ry..=ry {
             for dx in -ry..=ry {
-                if let Some(v) = self.grid.get(&(cy + dy, cx + dx)) {
-                    out.extend_from_slice(v);
+                if let Some(slot) = self.cell_slot(cy + dy, cx + dx) {
+                    let (s, e) = (
+                        self.cell_starts[slot] as usize,
+                        self.cell_starts[slot + 1] as usize,
+                    );
+                    out.extend_from_slice(&self.cell_ids[s..e]);
                 }
             }
         }
