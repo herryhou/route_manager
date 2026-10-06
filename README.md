@@ -23,9 +23,11 @@ crates/
 ## Run
 
 ```sh
-# 0. one-time: place captures under assets/Taichung/raw/ and the OSM extract
-#    under assets/Taichung/data/ (e.g. TW-TXG-202610020300.osm.pbf;
-#    untracked; see .gitignore) and pass --pbf to rm-osm-prepare
+# 0. one-time: place captures under assets/Taichung/raw/ and a Taiwan-wide
+#    OSM extract under assets/ (e.g. taiwan-261004.osm.pbf; untracked, see
+#    .gitignore), then pass it via --pbf to rm-osm-prepare, with
+#    --clip "south,west,north,east" (route bbox + ~10 km) to keep the DB
+#    compact — clipped matching is bit-for-bit identical to unclipped
 
 # 1. build
 cargo build --release
@@ -84,7 +86,9 @@ See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
 - 17 of 784 directions have no drawn polyline in the source data at all, so
   they match no way runs (surfaced as skipped pairs in the registry summary
   and `qa/report.json` stats); every direction with a polyline matches on the
-  2026-10 citywide extract.
+  full-Taiwan extract (clipped to the routes' bbox + 10 km). 1 of the 767
+  matched directions (352延) still strays > 50 m p95 from its polyline —
+  warn-only, in `qa/match_dev_report.json` and the rm-web matchdev chip.
 - Timetables/TRIP, GTFS export, re-import diffing (V2+ transitions) and the
   API server are out of scope; their tables exist but stay empty.
 

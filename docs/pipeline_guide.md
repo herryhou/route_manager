@@ -33,11 +33,11 @@ Finally **verify** (`rm-verify`) re-checks ~26 invariants and counts against kno
 ## What you get out
 
 - `data/taichung.db` — the whole model: routes, stops, stations, groups, OSM graph, match stats, segment registry
-- 35,876 stop-to-stop traversals, 10,631 unique segments, 5,897 shared by more than one route (routes 1 and 9221 share 22 — the built-in sanity pair)
+- 36,531 stop-to-stop traversals, 10,883 unique segments, 6,022 shared by more than one route (routes 1 and 9221 share 22 — the built-in sanity pair)
 
 ## Known limits
 
-With the 2026-10 citywide extract (`TW-TXG-202610020300.osm.pbf`), 767 of 784 directions match; the remaining 17 are routes with no drawn polyline at all, reported (not hidden) as skipped pairs. Timetables, GTFS export, and a second-import diff are deliberately out of scope for this version — the schema leaves room for them.
+With the full-Taiwan extract (clipped to the routes' bbox + 10 km; `taiwan-261004.osm.pbf`), 767 of 784 directions match; the remaining 17 are routes with no drawn polyline at all, reported (not hidden) as skipped pairs. One matched direction (352延) strays > 50 m p95 from its polyline — warn-only, in `qa/match_dev_report.json` and the rm-web matchdev chip. Timetables, GTFS export, and a second-import diff are deliberately out of scope for this version — the schema leaves room for them.
 
 See `README.md` for build/run instructions and command flags.
 
@@ -55,7 +55,7 @@ What you can do:
 
 - **Route browsing** — search the sidebar, click a route: its path (from the segment geometry) and stops draw on the map, with a stop list and direction toggle (去程/返程) in the panel.
 - **Stop drill-down** — click any stop: its station, station group (rings on the map), and every route serving it at stop / station / group level.
-- **QA review** — the *outliers* chip lists the worst stop placements (OUTLIER/NO_PATH or snap > 50 m); each route has a snap-distance profile chart; direction dots in the route list are colored by match quality.
+- **QA review** — the *outliers* chip lists the worst stop placements (OUTLIER/NO_PATH or snap > 50 m); the *matchdev* chip lists directions whose matched path strays > 50 m p95 from the source polyline (the detours snap stats can't see); each route has a snap-distance profile chart; direction dots in the route list are colored by match quality.
 - **Segment registry** — enable *segments*: canonical corridors colored by how many routes share them (zoom ≥ 13); click one for its ways and traversing routes.
 - **OSM overlay** — with a route selected, *OSM ways* draws the matched street ways (entry/exit-trimmed) under the route.
 - **Raw compare** — *Raw compare* draws the raw staging polyline and raw stop squares against the canonical view.
