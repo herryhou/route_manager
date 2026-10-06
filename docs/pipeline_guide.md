@@ -41,6 +41,21 @@ With the full-Taiwan extract (clipped to the routes' bbox + 10 km; `taiwan-26100
 
 See `README.md` for build/run instructions and command flags.
 
+## City extract clips (2026-10-06)
+
+Each city DB prepares from the same Taiwan-wide PBF with a route-bbox +
+10 km clip (derivation: decode all `src_route_point` polylines, take the
+min/max, pad 0.09° lat and 0.09°/cos(mid-lat) lon). Reproduce with:
+
+| City | `--db` | `--clip south,west,north,east` |
+|---|---|---|
+| Taichung | `data/taichung.db` | `23.89,120.41,24.53,121.42` |
+| Taipei | `data/taipei.db` | `24.85,121.30,25.30,121.77` |
+| Tainan | `assets/Tainan/data/tainan.db` | `22.47,119.99,23.56,120.69` |
+
+Each DB also carries its clip in `osm_meta.clip_bbox`. Re-derive the bbox
+when a city's route coverage changes (new routes may leave the old box).
+
 ## Browsing the result: rm-web
 
 `rm-web` is a read-only web viewer over the database the pipeline produces — no pipeline step is changed by using it.
