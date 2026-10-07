@@ -217,6 +217,88 @@ fn bearing_spread_warns_but_does_not_fail() {
 }
 
 #[test]
+fn segment_variant_spread_warns_and_reports() {
+    let (_dir, conn, batch) = setup();
+    // one pair-only segment with two path variants 250 m apart in length
+    let (st_a, st_b): (i64, i64) = conn
+        .query_row(
+            "SELECT MIN(station_id), MAX(station_id) FROM station",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let (rv, sv): (i64, i64) = conn
+        .query_row(
+            "SELECT rv.route_version_id, sv.subroute_version_id
+             FROM route_version rv
+             JOIN subroute_version sv ON sv.route_version_id = rv.route_version_id LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let mut rsvs: Vec<i64> = conn
+        .prepare("SELECT route_stop_version_id FROM route_stop_version ORDER BY 1")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    rsvs.truncate(4);
+    assert_eq!(rsvs.len(), 4, "fixture needs two stop pairs: {rsvs:?}");
+    let (rsv_a, rsv_b, rsv_c, rsv_d) = (rsvs[0], rsvs[1], rsvs[2], rsvs[3]);
+    conn.execute_batch(&format!(
+        "INSERT INTO osm_way (osm_way_id, highway, oneway, name)
+            VALUES (100, 'primary', 1, '主線');
+         INSERT INTO seg_segment
+            (segment_id, start_station_id, end_station_id, encoded_polyline,
+             length_m, way_count, variant_count, length_spread_m)
+         VALUES ('segx', {st_a}, {st_b}, '', 400.0, 1, 2, 250.0);
+         INSERT INTO seg_segment_way (segment_id, ordinal, osm_way_id, length_m)
+         VALUES ('segx', 1, 100, 400.0);
+         INSERT INTO seg_traversal
+            (route_version_id, subroute_version_id, direction,
+             from_route_stop_version_id, to_route_stop_version_id, segment_id, way_sig)
+         VALUES
+            ({rv}, {sv}, 0, {rsv_a}, {rsv_b}, 'segx', '100'),
+            ({rv}, {sv}, 0, {rsv_c}, {rsv_d}, 'segx', '100|300');",
+    ))
+    .unwrap();
+    let qa = tempfile::tempdir().unwrap();
+
+    let report = rm_verify::run(&conn, batch, &fixture_expectations(), qa.path()).unwrap();
+
+    assert!(report.all_pass(), "variant spread must not fail: {report:#?}");
+    let warn = report
+        .warnings
+        .iter()
+        .find(|w| w.id == "seg:variants")
+        .expect("seg-variants warning present");
+    assert!(warn.detail.contains("1 of 1"), "{warn:?}");
+    assert_eq!(
+        report.stats.get("seg_variant_pairs"),
+        Some(&1.0),
+        "{:?}",
+        report.stats
+    );
+
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(qa.path().join("segment_variant_report.json")).unwrap(),
+    )
+    .unwrap();
+    let pairs = v["pairs"].as_array().expect("pairs array");
+    assert_eq!(pairs.len(), 1, "{pairs:?}");
+    assert_eq!(pairs[0]["segment_id"], "segx");
+    assert_eq!(pairs[0]["length_spread_m"], 250.0);
+    let variants = pairs[0]["variants"].as_array().expect("variants array");
+    assert_eq!(variants.len(), 2, "{variants:?}");
+    assert_eq!(variants[0]["way_sig"], "100");
+    assert_eq!(variants[0]["ways"][0]["name"], "主線");
+    assert_eq!(variants[0]["traversals"], 1, "grouped per signature");
+    assert_eq!(variants[1]["way_sig"], "100|300");
+    assert_eq!(variants[1]["traversals"], 1);
+}
+
+#[test]
 fn match_dev_over_threshold_warns_but_does_not_fail() {
     let (_dir, conn, batch) = setup();
     // two matched directions: one strays 80 m off the src polyline (p95),
