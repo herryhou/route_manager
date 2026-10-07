@@ -113,16 +113,8 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
 
             for pair in stops.windows(2) {
                 let (a, b) = (&pair[0], &pair[1]);
-                let (lo, hi) = (a.chainage_m, b.chainage_m);
-                // ways covering (lo, hi) in travel order, with overlap lengths
-                let mut ways: Vec<(i64, f64)> = Vec::new();
-                for r in &runs {
-                    let s = r.cum_start_m.max(lo);
-                    let e = r.cum_end_m.min(hi);
-                    if e - s > 1e-6 {
-                        ways.push((r.way_id, e - s));
-                    }
-                }
+                let (lo, hi) = cut_window(a.chainage_m, b.chainage_m, &runs);
+                let ways = slice_ways(&runs, lo, hi);
                 if ways.is_empty() {
                     summary.skipped_pairs += 1;
                     continue;
@@ -169,6 +161,74 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
     Ok(summary)
 }
 
+/// Max distance from a stop projection to the nearest way-run junction for
+/// the segment cut to snap onto that junction.
+const SNAP_EPS_M: f64 = 20.0;
+
+/// Boundary-way overlap below this is matching noise around the cut, not
+/// travel: drop it so junction-adjacent stops hash the same way list.
+/// Covers residual cases where two junctions sit closer together than the
+/// projection jitter (e.g. a 5 m slip lane ahead of the main carriage).
+const SLIVER_M: f64 = 6.0;
+
+/// Segment cut window for a stop pair: each cut snaps down to the latest
+/// run junction at or below it (within SNAP_EPS_M), never forward, so
+/// routes covering the same ways slice at shared nodes instead of jittery
+/// per-route projections, and consecutive segments tile at the same
+/// junction. A window that snaps degenerate (lo >= hi, dense stops) keeps
+/// the raw projections.
+pub(crate) fn cut_window(lo_raw: f64, hi_raw: f64, runs: &[Run]) -> (f64, f64) {
+    let snap_down = |c: f64| -> f64 {
+        let mut best: Option<f64> = None;
+        for r in runs {
+            for b in [r.cum_start_m, r.cum_end_m] {
+                if b <= c && c - b < SNAP_EPS_M && best.is_none_or(|cur| b > cur) {
+                    best = Some(b);
+                }
+            }
+        }
+        best.unwrap_or(c)
+    };
+    let (lo, hi) = (snap_down(lo_raw), snap_down(hi_raw));
+    if lo < hi {
+        (lo, hi)
+    } else {
+        (lo_raw, hi_raw)
+    }
+}
+
+/// Ways covering (lo, hi) in travel order with their overlap lengths:
+/// zero-overlap runs excluded, consecutive repeats of a way merged (path
+/// re-entry), boundary slivers below SLIVER_M dropped. Never returns
+/// empty for a non-empty overlap set (sliver drop yields to it).
+pub(crate) fn slice_ways(runs: &[Run], lo: f64, hi: f64) -> Vec<(i64, f64)> {
+    let mut ways: Vec<(i64, f64)> = Vec::new();
+    for r in runs {
+        let s = r.cum_start_m.max(lo);
+        let e = r.cum_end_m.min(hi);
+        if e - s > 1e-6 {
+            match ways.last_mut() {
+                Some((w, l)) if *w == r.way_id => *l += e - s,
+                _ => ways.push((r.way_id, e - s)),
+            }
+        }
+    }
+    // boundary slivers are noise unless dropping them would empty the list
+    if ways.len() > 1 {
+        let head_sliver = ways.first().unwrap().1 < SLIVER_M;
+        let tail_sliver = ways.last().unwrap().1 < SLIVER_M;
+        if ways.len() - head_sliver as usize - tail_sliver as usize > 0 {
+            if head_sliver {
+                ways.remove(0);
+            }
+            if tail_sliver {
+                ways.pop();
+            }
+        }
+    }
+    ways
+}
+
 /// 1-based ordinal of a stop within its direction's stop list.
 fn pair_index(stops: &[StopPt], rsv_id: i64) -> i64 {
     stops
@@ -176,4 +236,99 @@ fn pair_index(stops: &[StopPt], rsv_id: i64) -> i64 {
         .position(|s| s.rsv_id == rsv_id)
         .map(|i| (i + 1) as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn way(way_id: i64, s: f64, e: f64) -> Run {
+        Run {
+            way_id,
+            cum_start_m: s,
+            cum_end_m: e,
+        }
+    }
+
+    #[test]
+    fn cut_window_snaps_down_to_latest_junction() {
+        let runs = [way(1, 0.0, 100.0), way(2, 100.0, 290.0)];
+        // both cuts snap down to the latest junction at-or-below them
+        assert_eq!(cut_window(105.0, 295.0, &runs), (100.0, 290.0));
+    }
+
+    #[test]
+    fn cut_window_beyond_eps_keeps_raw() {
+        let runs = [way(1, 100.0, 200.0)];
+        assert_eq!(cut_window(150.0, 180.0, &runs), (150.0, 180.0));
+    }
+
+    #[test]
+    fn cut_window_never_snaps_forward() {
+        // a junction just AHEAD of the cut is next segment's territory
+        let runs = [way(1, 100.0, 200.0), way(2, 200.0, 400.0)];
+        assert_eq!(cut_window(105.0, 390.0, &runs), (100.0, 390.0));
+    }
+
+    #[test]
+    fn cut_window_degenerate_snap_keeps_raw() {
+        // both stops snap down onto the same junction -> keep raw projections
+        let runs = [way(1, 0.0, 100.0), way(2, 100.0, 200.0)];
+        assert_eq!(cut_window(100.2, 100.8, &runs), (100.2, 100.8));
+    }
+
+    #[test]
+    fn slice_ways_collapses_consecutive_repeats() {
+        // 3648e5e8 shape: 1149579011 entered, left, re-entered
+        let runs = [
+            way(609374024, 0.0, 10.0),
+            way(711269513, 10.0, 30.0),
+            way(238995112, 30.0, 40.0),
+            way(1149579011, 40.0, 180.0),
+            way(1149579011, 180.0, 340.0),
+            way(1149579016, 340.0, 350.0),
+        ];
+        let ways = slice_ways(&runs, 0.0, 350.0);
+        assert_eq!(
+            ways,
+            vec![
+                (609374024, 10.0),
+                (711269513, 20.0),
+                (238995112, 10.0),
+                (1149579011, 300.0),
+                (1149579016, 10.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn slice_ways_drops_boundary_sliver() {
+        // 924d71d4 head shape: 2.5 m of 386971585 past the cut is noise
+        let runs = [way(386971585, 0.0, 2.5), way(609374024, 2.5, 40.0)];
+        assert_eq!(slice_ways(&runs, 0.0, 40.0), vec![(609374024, 37.5)]);
+    }
+
+    #[test]
+    fn slice_ways_drops_tail_sliver() {
+        // 015c78f8 tail shape: 0.4 m of the bridge way past the end stop
+        let runs = [way(1149579015, 0.0, 164.0), way(1149579012, 164.0, 181.0)];
+        assert_eq!(slice_ways(&runs, 0.0, 164.4), vec![(1149579015, 164.0)]);
+    }
+
+    #[test]
+    fn slice_ways_keeps_short_middle_way() {
+        // a genuinely crossed 2 m link mid-segment is travel, not noise
+        let runs = [way(1, 0.0, 10.0), way(2, 10.0, 12.0), way(3, 12.0, 40.0)];
+        assert_eq!(
+            slice_ways(&runs, 0.0, 40.0),
+            vec![(1, 10.0), (2, 2.0), (3, 28.0)]
+        );
+    }
+
+    #[test]
+    fn slice_ways_sliver_only_keeps_all() {
+        // dropping both boundary slivers would empty the list — keep them
+        let runs = [way(1, 0.0, 2.0), way(2, 2.0, 4.0)];
+        assert_eq!(slice_ways(&runs, 0.0, 4.0), vec![(1, 2.0), (2, 2.0)]);
+    }
 }
