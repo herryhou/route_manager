@@ -143,11 +143,17 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
         }
 
         // group cuts by segment id (station pair), preserving collection
-        // order inside each group so ties break to the earliest route
+        // order inside each group so ties break to the earliest route;
+        // groups themselves insert in first-seen order (stable rowids)
         let mut groups: std::collections::HashMap<String, Vec<usize>> =
             std::collections::HashMap::new();
+        let mut group_order: Vec<String> = Vec::new();
         for (i, c) in cuts.iter().enumerate() {
-            groups.entry(c.5.clone()).or_default().push(i);
+            if let std::collections::hash_map::Entry::Vacant(v) = groups.entry(c.5.clone()) {
+                v.insert(Vec::new());
+                group_order.push(c.5.clone());
+            }
+            groups.get_mut(&c.5).unwrap().push(i);
         }
 
         let mut ins_seg = tx.prepare(
@@ -169,7 +175,8 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
 
-        for (_, idxs) in &mut groups {
+        for seg in &group_order {
+            let idxs = &groups[seg];
             let group: Vec<Cut> = idxs.iter().map(|&i| cuts[i].8.clone()).collect();
             let (rep, variants, spread) = representative(&group);
             let first = &cuts[idxs[0]];

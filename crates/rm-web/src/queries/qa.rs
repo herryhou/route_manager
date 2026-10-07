@@ -92,6 +92,14 @@ pub fn stats(conn: &Connection) -> Result<Value> {
         |r| r.get(0),
     )?;
 
+    let (variant_pairs, variant_over_200): (i64, Option<i64>) = conn.query_row(
+        "SELECT COUNT(*), SUM(length_spread_m > 200.0)
+         FROM seg_segment WHERE variant_count > 1",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let variant_over_200 = variant_over_200.unwrap_or(0);
+
     let batch = match conn.query_row(
         "SELECT batch_id, captured_at, valid_from, status
          FROM import_batch ORDER BY batch_id DESC LIMIT 1",
@@ -129,10 +137,120 @@ pub fn stats(conn: &Connection) -> Result<Value> {
             "directions_dev_p95_over_50m": dev_over_50.unwrap_or(0),
         },
         "outlier_stops": outlier_stops,
+        "variants": {
+            "multi_variant_pairs": variant_pairs,
+            "over_200m": variant_over_200,
+        },
         "batch": batch.map(|(id, captured, valid, status)| json!({
             "batch_id": id, "captured_at": captured, "valid_from": valid, "status": status,
         })),
     }))
+}
+
+/// `GET /api/qa/variants?min_spread=&limit=` — station pairs whose routes
+/// share one segment id across several path variants, spread-descending.
+/// Mirrors the rm-verify segment_variant_report.json pairs.
+pub fn variants(conn: &Connection, min_spread: f64, limit: i64) -> Result<Value> {
+    let mut stmt = conn.prepare(
+        "SELECT sg.segment_id, sa.station_name, sb.station_name,
+                sg.variant_count, sg.length_spread_m, sg.length_m
+         FROM seg_segment sg
+         JOIN station_version sa ON sa.station_id = sg.start_station_id
+         JOIN station_version sb ON sb.station_id = sg.end_station_id
+         WHERE sg.variant_count > 1 AND sg.length_spread_m > ?1
+         ORDER BY sg.length_spread_m DESC
+         LIMIT ?2",
+    )?;
+    let it = stmt.query_map(rusqlite::params![min_spread, limit], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, i64>(3)?,
+            r.get::<_, f64>(4)?,
+            r.get::<_, f64>(5)?,
+        ))
+    })?;
+    let mut pairs = Vec::new();
+    for row in it {
+        let (seg, from, to, variant_count, spread, len) = row?;
+        let mut variants: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        {
+            let mut t = conn.prepare(
+                "SELECT t.way_sig, r.route_code FROM seg_traversal t
+                 JOIN route_version rv ON rv.route_version_id = t.route_version_id
+                 JOIN route r ON r.route_id = rv.route_id
+                 WHERE t.segment_id = ?1",
+            )?;
+            let rows = t.query_map([&seg], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (sig, code) = row?;
+                variants.entry(sig).or_default().push(code);
+            }
+        }
+        let way_ids: Vec<i64> = variants
+            .keys()
+            .flat_map(|s| s.split('|'))
+            .filter_map(|w| w.parse().ok())
+            .collect();
+        let mut names: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+        if !way_ids.is_empty() {
+            let ids = way_ids
+                .iter()
+                .map(|w| w.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            let mut w = conn.prepare(&format!(
+                "SELECT osm_way_id, name FROM osm_way WHERE osm_way_id IN ({ids})"
+            ))?;
+            let rows = w.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                let (id, name) = row?;
+                names.insert(id, name);
+            }
+        }
+        let mut list: Vec<Value> = variants
+            .iter()
+            .map(|(sig, routes)| {
+                let ways: Vec<Value> = sig
+                    .split('|')
+                    .filter_map(|w| w.parse::<i64>().ok())
+                    .map(|id| {
+                        json!({
+                            "osm_way_id": id,
+                            "name": names.get(&id).cloned().unwrap_or_default(),
+                        })
+                    })
+                    .collect();
+                json!({
+                    "way_sig": sig,
+                    "ways": ways,
+                    "traversals": routes.len(),
+                    "routes": routes,
+                })
+            })
+            .collect();
+        list.sort_by_key(|v| {
+            (
+                std::cmp::Reverse(v["traversals"].as_i64().unwrap_or(0)),
+                v["way_sig"].as_str().unwrap_or("").to_string(),
+            )
+        });
+        pairs.push(json!({
+            "segment_id": seg,
+            "from": from,
+            "to": to,
+            "variant_count": variant_count,
+            "length_spread_m": spread,
+            "representative_length_m": len,
+            "variants": list,
+        }));
+    }
+    let count = pairs.len();
+    Ok(json!({ "pairs": pairs, "count": count }))
 }
 
 /// `GET /api/qa/outliers?min_snap=&limit=` — worst projections first.

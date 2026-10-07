@@ -341,6 +341,36 @@ export function matchDevPanel(rows, { onOpenRoute }) {
   });
 }
 
+/// Segment-variant list panel (topbar seg variants chip): station pairs
+/// whose routes share one segment id across path variants — click a row
+/// to open the segment detail and see the majority geometry on the map.
+export function variantPanel(rows, { onOpenSegment }) {
+  const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);
+  const items = (rows ?? [])
+    .map((p) => {
+      const vs = (p.variants ?? [])
+        .map(
+          (v) => `<div class="variant-row muted" title="${(v.routes ?? []).join(', ')}">
+            ${v.traversals}× ${v.way_sig} · ${(v.ways ?? []).map((w) => w.name || w.osm_way_id).slice(0, 3).join('→')}${(v.ways ?? []).length > 3 ? '…' : ''}
+          </div>`
+        )
+        .join('');
+      return `<div class="stop-row variant-pair" title="${p.from} → ${p.to} · ${p.variant_count} variants · spread ${fmt(p.length_spread_m)}">
+        <span class="stop-name">${p.from} → ${p.to}</span>
+        <span class="badge ${p.length_spread_m >= 500 ? 'bad' : 'warn'}">${fmt(p.length_spread_m)}</span>
+        ${vs}
+      </div>`;
+    })
+    .join('');
+  const pane = showPane('context', `
+    <p class="muted">one segment per station pair; variants are way-list differences (dual carriageways, detours) — click to open the segment</p>
+    ${items || '<p class="muted">none</p>'}
+  `, `Seg variants (${(rows ?? []).length})`);
+  pane.querySelectorAll('.variant-pair').forEach((row, i) => {
+    row.addEventListener('click', () => onOpenSegment(rows[i]));
+  });
+}
+
 /// Solid bearing arrow — the map glyph's arrowhead (dot+arrow group),
 /// scaled up and rotated so 0° = north, 90° = east; spread draws the member-
 /// deviation wedge behind it, warn-tinted past the rm-verify 45° threshold.
