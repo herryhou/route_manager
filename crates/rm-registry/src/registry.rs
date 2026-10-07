@@ -3,7 +3,7 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::hash::segment_id;
+use crate::hash::{pair_key, segment_id};
 
 #[derive(Debug, Default, Clone)]
 pub struct Summary {
@@ -106,7 +106,7 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                     continue;
                 }
 
-                let seg = segment_id(&a.station_ext_uid, &b.station_ext_uid);
+                let seg = pair_key(&a.station_ext_uid, &b.station_ext_uid);
                 let ordinal = pair_index(&stops, a.rsv_id);
 
                 // geometry draft for this stop pair, if present
@@ -136,13 +136,15 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                         ways,
                         enc,
                         len,
+                        a_ext_uid: a.station_ext_uid.clone(),
+                        b_ext_uid: b.station_ext_uid.clone(),
                     },
                 ));
                 summary.traversals += 1;
             }
         }
 
-        // group cuts by segment id (station pair), preserving collection
+        // group cuts by pair key (station pair), preserving collection
         // order inside each group so ties break to the earliest route;
         // groups themselves insert in first-seen order (stable rowids)
         let mut groups: std::collections::HashMap<String, Vec<usize>> =
@@ -158,9 +160,10 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
 
         let mut ins_seg = tx.prepare(
             "INSERT INTO seg_segment
-                (segment_id, start_station_id, end_station_id,
+                (segment_id, pair_key, corridor_key,
+                 start_station_id, end_station_id,
                  encoded_polyline, length_m, way_count, variant_count, length_spread_m)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )?;
         let mut ins_way = tx.prepare(
             "INSERT OR IGNORE INTO seg_segment_way
@@ -175,30 +178,52 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
 
-        for seg in &group_order {
-            let idxs = &groups[seg];
-            let group: Vec<Cut> = idxs.iter().map(|&i| cuts[i].8.clone()).collect();
-            let (rep, variants, spread) = representative(&group);
-            let first = &cuts[idxs[0]];
-            let rep_cut = &group[rep];
-            ins_seg.execute(rusqlite::params![
-                first.5,
-                first.6,
-                first.7,
-                rep_cut.enc,
-                rep_cut.len,
-                rep_cut.ways.len() as i64,
-                variants as i64,
-                spread
-            ])?;
-            for (i, (w, l)) in rep_cut.ways.iter().enumerate() {
-                ins_way.execute(rusqlite::params![first.5, (i + 1) as i64, w, l])?;
-            }
-            for &i in idxs.iter() {
-                let c = &cuts[i];
-                ins_trav.execute(rusqlite::params![
-                    c.0, c.1, c.2, c.3, c.4, c.5, c.8.way_sig
+        for pair in &group_order {
+            let idxs = &groups[pair];
+            // ascending draft length (stable: equal lengths keep collection
+            // order), then split into corridor clusters; clusters therefore
+            // write in ascending median-length order
+            let mut asc: Vec<usize> = idxs.clone();
+            asc.sort_by(|&i, &j| cuts[i].8.len.total_cmp(&cuts[j].8.len));
+            let lens: Vec<f64> = asc.iter().map(|&i| cuts[i].8.len).collect();
+            for (start, end) in cluster_ranges(&lens) {
+                // cluster cuts back in collection order so representative
+                // ties break to the earliest route
+                let mut cluster: Vec<usize> = asc[start..end].to_vec();
+                cluster.sort_unstable();
+                let group: Vec<Cut> = cluster.iter().map(|&i| cuts[i].8.clone()).collect();
+                let (rep, variants, spread) = representative(&group);
+                let first = &cuts[cluster[0]];
+                let rep_cut = &group[rep];
+                let ck = corridor_key(lower_median(&lens[start..end]));
+                let seg = segment_id(&rep_cut.a_ext_uid, &rep_cut.b_ext_uid, &ck);
+                ins_seg.execute(rusqlite::params![
+                    seg,
+                    pair,
+                    ck,
+                    first.6,
+                    first.7,
+                    rep_cut.enc,
+                    rep_cut.len,
+                    rep_cut.ways.len() as i64,
+                    variants as i64,
+                    spread
                 ])?;
+                for (i, (w, l)) in rep_cut.ways.iter().enumerate() {
+                    ins_way.execute(rusqlite::params![seg, (i + 1) as i64, w, l])?;
+                }
+                for &i in cluster.iter() {
+                    let c = &cuts[i];
+                    ins_trav.execute(rusqlite::params![
+                        c.0,
+                        c.1,
+                        c.2,
+                        c.3,
+                        c.4,
+                        seg,
+                        c.8.way_sig
+                    ])?;
+                }
             }
         }
     }
@@ -287,13 +312,61 @@ fn pair_index(stops: &[StopPt], rsv_id: i64) -> i64 {
 }
 
 /// One route's cut of a stop pair: the traveled way list (by way id, for
-/// the variant signature) plus its geometry draft.
+/// the variant signature) plus its geometry draft. The station ext_uids
+/// ride along so each cluster can hash its corridor segment id at write
+/// time.
 #[derive(Clone)]
 pub(crate) struct Cut {
     pub way_sig: String,
     pub ways: Vec<(i64, f64)>,
     pub enc: String,
     pub len: f64,
+    pub a_ext_uid: String,
+    pub b_ext_uid: String,
+}
+
+/// Absolute adjacent-length gap that separates two corridors of a station
+/// pair (noise band ≤ 96 m vs real-corridor band ≥ 148 m in the survey
+/// data; 100 m sits safely between).
+pub(crate) const CORRIDOR_GAP_ABS_M: f64 = 100.0;
+
+/// Relative adjacent-length gap share that keeps long corridors intact
+/// (e.g. 345 m jitter on a 31 km segment is 1.1%, not a split).
+pub(crate) const CORRIDOR_GAP_REL: f64 = 0.03;
+
+/// Cluster ranges over length-ascending cuts: a new cluster starts at i
+/// when the gap to the previous length exceeds
+/// `max(CORRIDOR_GAP_ABS_M, CORRIDOR_GAP_REL × shorter adjacent length)`.
+/// Ranges are half-open `(start, end)` in ascending order.
+pub(crate) fn cluster_ranges(lens: &[f64]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    for i in 1..lens.len() {
+        let gap = lens[i] - lens[i - 1];
+        let shorter = lens[i - 1].min(lens[i]);
+        if gap > CORRIDOR_GAP_ABS_M.max(CORRIDOR_GAP_REL * shorter) {
+            ranges.push((start, i));
+            start = i;
+        }
+    }
+    if start < lens.len() {
+        ranges.push((start, lens.len()));
+    }
+    ranges
+}
+
+/// Corridor key: a cluster's median length quantized down to 10 m, as a
+/// decimal string (e.g. 604.9 -> "600"). Inter-cluster gaps > 100 m keep
+/// keys from colliding; the key carries no way_sig so OSM way renames
+/// cannot drift segment identity.
+pub(crate) fn corridor_key(median_len_m: f64) -> String {
+    format!("{}", (median_len_m / 10.0).floor() as i64 * 10)
+}
+
+/// Median of ascending lengths; even sizes take the lower middle so the
+/// key never jumps up on a tie.
+pub(crate) fn lower_median(sorted: &[f64]) -> f64 {
+    sorted[(sorted.len() - 1) / 2]
 }
 
 /// Travel-order way-id signature distinguishing path variants of a pair.
@@ -318,15 +391,16 @@ pub(crate) fn representative(cuts: &[Cut]) -> (usize, usize, f64) {
             best = i;
         }
     }
-    let variants = cuts.iter().map(|c| c.way_sig.as_str()).fold(
-        Vec::new(),
-        |mut acc: Vec<String>, s| {
+    let variants = cuts
+        .iter()
+        .map(|c| c.way_sig.as_str())
+        .fold(Vec::new(), |mut acc: Vec<String>, s| {
             if !acc.iter().any(|x| x == s) {
                 acc.push(s.to_string());
             }
             acc
-        },
-    ).len();
+        })
+        .len();
     let max_len = cuts.iter().map(|c| c.len).fold(f64::MIN, f64::max);
     let min_len = cuts.iter().map(|c| c.len).fold(f64::MAX, f64::min);
     (best, variants, max_len - min_len)
@@ -432,6 +506,8 @@ mod tests {
             ways: vec![(1, len)],
             enc: String::new(),
             len,
+            a_ext_uid: "tcg:node:a".to_string(),
+            b_ext_uid: "tcg:node:b".to_string(),
         }
     }
 
@@ -465,5 +541,46 @@ mod tests {
         assert_eq!(idx, 0);
         assert_eq!(variants, 1);
         assert!((spread - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cluster_ranges_gap_over_100m_splits() {
+        // 150 m adjacent gap clears the absolute threshold
+        assert_eq!(cluster_ranges(&[100.0, 250.0]), vec![(0, 1), (1, 2)]);
+    }
+
+    #[test]
+    fn cluster_ranges_lane_noise_stays_together() {
+        // carriage/boundary spread (<= 96 m) is one corridor, even chained
+        assert_eq!(cluster_ranges(&[100.0, 190.0, 280.0]), vec![(0, 3)]);
+    }
+
+    #[test]
+    fn cluster_ranges_relative_rule_protects_long_corridors() {
+        // 31 km 中橫 case: 345 m jitter is only 1.1% of the shorter side
+        assert_eq!(cluster_ranges(&[30_000.0, 30_345.0]), vec![(0, 2)]);
+        // 3% of 5000 m = 150 m: 148 m stays, 200 m splits
+        assert_eq!(cluster_ranges(&[5_000.0, 5_148.0]), vec![(0, 2)]);
+        assert_eq!(cluster_ranges(&[5_000.0, 5_200.0]), vec![(0, 1), (1, 2)]);
+    }
+
+    #[test]
+    fn cluster_ranges_single_cut_is_one_cluster() {
+        assert_eq!(cluster_ranges(&[77.0]), vec![(0, 1)]);
+        assert_eq!(cluster_ranges(&[]), Vec::<(usize, usize)>::new());
+    }
+
+    #[test]
+    fn corridor_key_quantizes_down_to_10m() {
+        assert_eq!(corridor_key(604.9), "600");
+        assert_eq!(corridor_key(390.0), "390");
+        assert_eq!(corridor_key(600.0), "600");
+        assert_eq!(corridor_key(9.9), "0");
+    }
+
+    #[test]
+    fn lower_median_takes_lower_middle_on_even() {
+        assert_eq!(lower_median(&[100.0, 200.0, 300.0]), 200.0);
+        assert_eq!(lower_median(&[100.0, 200.0, 300.0, 400.0]), 200.0);
     }
 }

@@ -341,33 +341,37 @@ export function matchDevPanel(rows, { onOpenRoute }) {
   });
 }
 
-/// Segment-variant list panel (topbar seg variants chip): station pairs
-/// whose routes share one segment id across path variants — click a row
-/// to open the segment detail and see the majority geometry on the map.
+/// Segment-split list panel (topbar split pairs chip): station pairs whose
+/// routes ride genuinely different corridors, one segment per corridor —
+/// click a member segment to open its detail on the map.
 export function variantPanel(rows, { onOpenSegment }) {
   const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);
   const items = (rows ?? [])
     .map((p) => {
-      const vs = (p.variants ?? [])
+      const segs = (p.segments ?? [])
         .map(
-          (v) => `<div class="variant-row muted" title="${(v.routes ?? []).join(', ')}">
-            ${v.traversals}× ${v.way_sig} · ${(v.ways ?? []).map((w) => w.name || w.osm_way_id).slice(0, 3).join('→')}${(v.ways ?? []).length > 3 ? '…' : ''}
+          (s) => `<div class="variant-row variant-seg" data-segment-id="${s.segment_id}" title="${(s.routes ?? []).join(', ')}">
+            <span class="badge">${fmt(s.length_m)}</span>
+            <span>${(s.ways ?? []).map((w) => w.name || w.osm_way_id).slice(0, 3).join('→')}${(s.ways ?? []).length > 3 ? '…' : ''}</span>
+            <span class="muted">${(s.routes ?? []).join(', ')}</span>
           </div>`
         )
         .join('');
-      return `<div class="stop-row variant-pair" title="${p.from} → ${p.to} · ${p.variant_count} variants · spread ${fmt(p.length_spread_m)}">
-        <span class="stop-name">${p.from} → ${p.to}</span>
-        <span class="badge ${p.length_spread_m >= 500 ? 'bad' : 'warn'}">${fmt(p.length_spread_m)}</span>
-        ${vs}
+      return `<div class="variant-pair" title="${p.from} → ${p.to} · ${p.segments?.length ?? 0} corridors · gap ${fmt(p.length_spread_m)}">
+        <div class="stop-row">
+          <span class="stop-name">${p.from} → ${p.to}</span>
+          <span class="badge ${p.length_spread_m >= 500 ? 'bad' : 'warn'}">${fmt(p.length_spread_m)}</span>
+        </div>
+        ${segs}
       </div>`;
     })
     .join('');
   const pane = showPane('context', `
-    <p class="muted">one segment per station pair; variants are way-list differences (dual carriageways, detours) — click to open the segment</p>
+    <p class="muted">pairs split into corridor segments by length — click a segment to open it</p>
     ${items || '<p class="muted">none</p>'}
-  `, `Seg variants (${(rows ?? []).length})`);
-  pane.querySelectorAll('.variant-pair').forEach((row, i) => {
-    row.addEventListener('click', () => onOpenSegment(rows[i]));
+  `, `Split pairs (${(rows ?? []).length})`);
+  pane.querySelectorAll('.variant-seg').forEach((row) => {
+    row.addEventListener('click', () => onOpenSegment({ segment_id: row.dataset.segmentId }));
   });
 }
 

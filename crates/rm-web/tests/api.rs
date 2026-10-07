@@ -581,7 +581,10 @@ async fn stop_and_station_detail_list_incident_segments() {
     let st_id = d["station"]["station_id"].as_i64().unwrap();
     let st = get_json(&app, &format!("/api/stations/{st_id}")).await;
     assert_eq!(
-        st["segments"].as_array().expect("segments in station detail").len(),
+        st["segments"]
+            .as_array()
+            .expect("segments in station detail")
+            .len(),
         2,
         "{st}"
     );
@@ -913,8 +916,8 @@ async fn segments_limit_keeps_top_corridors() {
     assert_eq!(v["truncated"], serde_json::json!(true), "{v}");
 }
 
-/// Like `fixture_db`, with two multi-variant segments: one pair spread
-/// 250 m (over the QA threshold), one spread 100 m.
+/// Like `fixture_db`, with one pair split into two corridor segments
+/// (395 m + 604 m, same pair_key) and one unsplit pair.
 fn fixture_db_with_variants() -> (tempfile::TempDir, std::path::PathBuf) {
     let (dir, db) = fixture_db();
     let conn = rm_db::open(&db).unwrap();
@@ -948,11 +951,12 @@ fn fixture_db_with_variants() -> (tempfile::TempDir, std::path::PathBuf) {
         "INSERT INTO osm_way (osm_way_id, highway, oneway, name)
             VALUES (100, 'primary', 1, '主線'), (300, 'tertiary', 0, '側線');
          INSERT INTO seg_segment
-            (segment_id, start_station_id, end_station_id, encoded_polyline,
-             length_m, way_count, variant_count, length_spread_m)
+            (segment_id, pair_key, corridor_key, start_station_id, end_station_id,
+             encoded_polyline, length_m, way_count, variant_count, length_spread_m)
          VALUES
-            ('segx', {st_a}, {st_b}, '', 400.0, 1, 2, 250.0),
-            ('segy', {st_a}, {st_b}, '', 200.0, 1, 2, 100.0);
+            ('segx', 'pk1', '390', {st_a}, {st_b}, '', 395.0, 1, 1, 0.0),
+            ('segy', 'pk1', '600', {st_a}, {st_b}, '', 604.0, 1, 1, 0.0),
+            ('segz', 'pk2', '120', {st_a}, {st_b}, '', 118.0, 1, 1, 0.0);
          INSERT INTO seg_traversal
             (route_version_id, subroute_version_id, direction,
              from_route_stop_version_id, to_route_stop_version_id, segment_id, way_sig)
@@ -965,39 +969,48 @@ fn fixture_db_with_variants() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[tokio::test]
-async fn qa_variants_lists_spread_offenders() {
+async fn qa_variants_lists_split_pairs() {
     let (_dir, db) = fixture_db_with_variants();
     let app = router_with(AppState::new(db));
 
-    // default min_spread=200: only the wide pair
+    // default: every split pair, one entry per pair with member segments
     let v = get_json(&app, "/api/qa/variants").await;
     let pairs = v["pairs"].as_array().unwrap();
-    assert_eq!(pairs.len(), 1, "only the >200 m pair: {v}");
-    assert_eq!(pairs[0]["segment_id"], serde_json::json!("segx"));
-    assert_eq!(pairs[0]["length_spread_m"].as_f64().unwrap(), 250.0);
+    assert_eq!(pairs.len(), 1, "only the split pair, unsplit excluded: {v}");
+    assert_eq!(pairs[0]["pair_key"], serde_json::json!("pk1"));
+    assert_eq!(pairs[0]["length_spread_m"].as_f64().unwrap(), 209.0);
     assert!(
         pairs[0]["from"].is_string() && pairs[0]["to"].is_string(),
         "station names for triage: {pairs:?}"
     );
-    let variants = pairs[0]["variants"].as_array().unwrap();
-    assert_eq!(variants.len(), 2, "{pairs:?}");
-    assert_eq!(variants[0]["way_sig"], serde_json::json!("100"));
-    assert_eq!(variants[0]["ways"][0]["name"], serde_json::json!("主線"));
+    let segments = pairs[0]["segments"].as_array().unwrap();
+    assert_eq!(segments.len(), 2, "{pairs:?}");
+    // ascending length: the 395 m corridor first
+    assert_eq!(segments[0]["segment_id"], serde_json::json!("segx"));
+    assert_eq!(segments[0]["corridor_key"], serde_json::json!("390"));
+    assert_eq!(segments[0]["way_sig"], serde_json::json!("100"));
+    assert_eq!(segments[0]["ways"][0]["name"], serde_json::json!("主線"));
+    assert_eq!(segments[1]["segment_id"], serde_json::json!("segy"));
+    // segx carries BOTH variants: majority way list shown (tie -> first),
+    // routes + traversals span every variant, not just the majority
     assert!(
-        variants[0]["routes"].as_array().unwrap().len() >= 1
-            && variants[0]["traversals"].is_i64(),
-        "variant carries users: {variants:?}"
+        segments[0]["routes"].as_array().unwrap().len() == 2
+            && segments[0]["traversals"] == serde_json::json!(2),
+        "segment carries users across variants: {segments:?}"
+    );
+    assert!(
+        segments[1]["routes"].as_array().unwrap().len() == 0
+            && segments[1]["traversals"] == serde_json::json!(0),
+        "traversal-less member: {segments:?}"
     );
 
-    // stats feeds the chip
+    // stats feeds the chip with the split-pair count
     let s = get_json(&app, "/api/stats").await;
-    assert_eq!(s["variants"]["multi_variant_pairs"].as_i64().unwrap(), 2, "{s}");
-    assert_eq!(s["variants"]["over_200m"].as_i64().unwrap(), 1, "{s}");
+    assert_eq!(s["variants"]["split_pairs"].as_i64().unwrap(), 1, "{s}");
 
-    // min_spread widens the list, spread-descending
-    let v = get_json(&app, "/api/qa/variants?min_spread=50").await;
-    let pairs = v["pairs"].as_array().unwrap();
-    assert_eq!(pairs.len(), 2, "{v}");
-    assert_eq!(pairs[0]["segment_id"], serde_json::json!("segx"));
-    assert_eq!(pairs[1]["segment_id"], serde_json::json!("segy"));
+    // min_spread filters by member length gap (604 - 395 = 209)
+    let v = get_json(&app, "/api/qa/variants?min_spread=300").await;
+    assert_eq!(v["pairs"].as_array().unwrap().len(), 0, "{v}");
+    let v = get_json(&app, "/api/qa/variants?min_spread=100").await;
+    assert_eq!(v["pairs"].as_array().unwrap().len(), 1, "{v}");
 }

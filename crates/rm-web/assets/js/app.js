@@ -227,7 +227,7 @@ async function openVariants() {
   try {
     const v = await api.variants();
     variantPanel(v.pairs ?? [], {
-      onOpenSegment: (p) => selectSegment(p.segment_id),
+      onOpenSegment: (seg) => selectSegment(seg.segment_id),
     });
     location.hash = '#variants';
   } catch (e) {
@@ -368,7 +368,7 @@ async function boot() {
     setChip('chip-match', `${s.match?.directions_with_stats ?? '—'}/${s.match?.directions_total ?? '—'}`);
     setChip('chip-outliers', s.outlier_stops ?? '—');
     setChip('chip-matchdev', s.match?.directions_dev_p95_over_50m ?? '—');
-    setChip('chip-variants', s.variants?.over_200m ?? '—');
+    setChip('chip-variants', s.variants?.split_pairs ?? '—');
     if (s.batch) {
       status(`batch ${s.batch.batch_id} · captured ${s.batch.captured_at} · ${s.batch.status}`);
     }

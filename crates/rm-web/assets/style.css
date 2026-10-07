@@ -364,6 +364,31 @@ body {
   white-space: nowrap;
 }
 
+/* Corridor-split pair: header row per pair, clickable member segments. */
+.variant-pair {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.variant-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.variant-seg {
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.variant-seg:hover {
+  background: var(--bg);
+}
+
 .badge {
   font-size: 11px;
   border-radius: 4px;

@@ -25,7 +25,7 @@ fn fixture_expectations() -> Expectations {
         single_dir: Some(1),
         no_polyline: None, // depends on empty-string rows, not asserted here
         main_side_groups: Some(1),
-        shared_pair: None,  // fixture registers no segments
+        shared_pair: None, // fixture registers no segments
     }
 }
 
@@ -217,9 +217,10 @@ fn bearing_spread_warns_but_does_not_fail() {
 }
 
 #[test]
-fn segment_variant_spread_warns_and_reports() {
+fn segment_variant_split_pair_warns_and_reports() {
     let (_dir, conn, batch) = setup();
-    // one pair-only segment with two path variants 250 m apart in length
+    // one pair split into two corridor segments (same pair_key) + one
+    // unsplit pair that must not appear
     let (st_a, st_b): (i64, i64) = conn
         .query_row(
             "SELECT MIN(station_id), MAX(station_id) FROM station",
@@ -248,13 +249,17 @@ fn segment_variant_spread_warns_and_reports() {
     let (rsv_a, rsv_b, rsv_c, rsv_d) = (rsvs[0], rsvs[1], rsvs[2], rsvs[3]);
     conn.execute_batch(&format!(
         "INSERT INTO osm_way (osm_way_id, highway, oneway, name)
-            VALUES (100, 'primary', 1, '主線');
+            VALUES (100, 'primary', 1, '主線'), (300, 'tertiary', 0, '側線');
          INSERT INTO seg_segment
-            (segment_id, start_station_id, end_station_id, encoded_polyline,
-             length_m, way_count, variant_count, length_spread_m)
-         VALUES ('segx', {st_a}, {st_b}, '', 400.0, 1, 2, 250.0);
+            (segment_id, pair_key, corridor_key, start_station_id, end_station_id,
+             encoded_polyline, length_m, way_count, variant_count, length_spread_m)
+         VALUES
+            ('segx', 'pk1', '390', {st_a}, {st_b}, '', 395.0, 1, 1, 0.0),
+            ('segy', 'pk1', '600', {st_a}, {st_b}, '', 604.0, 1, 1, 0.0),
+            ('segz', 'pk2', '120', {st_a}, {st_b}, '', 118.0, 1, 1, 0.0);
          INSERT INTO seg_segment_way (segment_id, ordinal, osm_way_id, length_m)
-         VALUES ('segx', 1, 100, 400.0);
+         VALUES ('segx', 1, 100, 395.0), ('segy', 1, 100, 604.0),
+                ('segz', 1, 100, 118.0);
          INSERT INTO seg_traversal
             (route_version_id, subroute_version_id, direction,
              from_route_stop_version_id, to_route_stop_version_id, segment_id, way_sig)
@@ -267,15 +272,21 @@ fn segment_variant_spread_warns_and_reports() {
 
     let report = rm_verify::run(&conn, batch, &fixture_expectations(), qa.path()).unwrap();
 
-    assert!(report.all_pass(), "variant spread must not fail: {report:#?}");
+    assert!(
+        report.all_pass(),
+        "corridor split must not fail: {report:#?}"
+    );
     let warn = report
         .warnings
         .iter()
         .find(|w| w.id == "seg:variants")
         .expect("seg-variants warning present");
-    assert!(warn.detail.contains("1 of 1"), "{warn:?}");
+    assert!(
+        warn.detail.contains("1 pair"),
+        "one split pair flagged: {warn:?}"
+    );
     assert_eq!(
-        report.stats.get("seg_variant_pairs"),
+        report.stats.get("seg_split_pairs"),
         Some(&1.0),
         "{:?}",
         report.stats
@@ -286,16 +297,35 @@ fn segment_variant_spread_warns_and_reports() {
     )
     .unwrap();
     let pairs = v["pairs"].as_array().expect("pairs array");
-    assert_eq!(pairs.len(), 1, "{pairs:?}");
-    assert_eq!(pairs[0]["segment_id"], "segx");
-    assert_eq!(pairs[0]["length_spread_m"], 250.0);
-    let variants = pairs[0]["variants"].as_array().expect("variants array");
-    assert_eq!(variants.len(), 2, "{variants:?}");
-    assert_eq!(variants[0]["way_sig"], "100");
-    assert_eq!(variants[0]["ways"][0]["name"], "主線");
-    assert_eq!(variants[0]["traversals"], 1, "grouped per signature");
-    assert_eq!(variants[1]["way_sig"], "100|300");
-    assert_eq!(variants[1]["traversals"], 1);
+    assert_eq!(pairs.len(), 1, "unsplit pair not listed: {pairs:?}");
+    assert_eq!(pairs[0]["pair_key"], "pk1");
+    assert!(
+        pairs[0]["from"].is_string() && pairs[0]["to"].is_string(),
+        "station names for triage: {pairs:?}"
+    );
+    let segments = pairs[0]["segments"].as_array().expect("segments array");
+    assert_eq!(segments.len(), 2, "{segments:?}");
+    // ascending length: the 395 m corridor first
+    assert_eq!(segments[0]["segment_id"], "segx");
+    assert_eq!(segments[0]["corridor_key"], "390");
+    assert_eq!(segments[0]["length_m"], 395.0);
+    assert_eq!(segments[0]["way_sig"], "100");
+    assert_eq!(segments[0]["ways"][0]["name"], "主線");
+    // segx carries BOTH variants: majority way list shown (tie -> first),
+    // routes + traversals span every variant, not just the majority
+    assert_eq!(segments[0]["traversals"], 2, "all variants counted");
+    assert_eq!(
+        segments[0]["routes"].as_array().unwrap().len(),
+        2,
+        "segment carries route users: {segments:?}"
+    );
+    assert_eq!(segments[1]["segment_id"], "segy");
+    assert_eq!(segments[1]["traversals"], 0);
+    assert_eq!(
+        segments[1]["routes"].as_array().unwrap().len(),
+        0,
+        "traversal-less member: {segments:?}"
+    );
 }
 
 #[test]

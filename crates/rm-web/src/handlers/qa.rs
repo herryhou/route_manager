@@ -29,8 +29,8 @@ pub async fn outliers(
     Ok(Json(v))
 }
 
-/// `GET /api/qa/variants` — station pairs sharing one segment id across
-/// path variants, spread-desc.
+/// `GET /api/qa/variants` — station pairs split into multiple corridor
+/// segments (grouped by pair_key), member length gap desc.
 pub async fn variants(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -38,7 +38,7 @@ pub async fn variants(
     let min_spread = params
         .get("min_spread")
         .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(200.0);
+        .unwrap_or(0.0);
     let limit = params
         .get("limit")
         .and_then(|s| s.parse::<i64>().ok())
