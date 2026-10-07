@@ -21,7 +21,7 @@ struct StopPt {
     station_ext_uid: String,
 }
 
-struct Run {
+pub(crate) struct Run {
     way_id: i64,
     cum_start_m: f64,
     cum_end_m: f64,
@@ -54,23 +54,9 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
     tx.execute("DELETE FROM seg_segment", [])?;
 
     {
-        let mut ins_seg = tx.prepare(
-            "INSERT OR IGNORE INTO seg_segment
-                (segment_id, start_station_id, end_station_id,
-                 encoded_polyline, length_m, way_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )?;
-        let mut ins_way = tx.prepare(
-            "INSERT OR IGNORE INTO seg_segment_way
-                (segment_id, ordinal, osm_way_id, length_m)
-             VALUES (?1, ?2, ?3, ?4)",
-        )?;
-        let mut ins_trav = tx.prepare(
-            "INSERT OR REPLACE INTO seg_traversal
-                (route_version_id, subroute_version_id, direction,
-                 from_route_stop_version_id, to_route_stop_version_id, segment_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )?;
+        // one cut per traversal, collected first so each station pair can
+        // resolve its representative variant (majority way list) before write
+        let mut cuts: Vec<(i64, i64, i64, i64, i64, String, i64, i64, Cut)> = Vec::new();
 
         for (sv_id, rv_id, dir) in dirs {
             let stops: Vec<StopPt> = {
@@ -120,8 +106,7 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                     continue;
                 }
 
-                let way_ids: Vec<i64> = ways.iter().map(|(w, _)| *w).collect();
-                let seg = segment_id(&a.station_ext_uid, &b.station_ext_uid, &way_ids);
+                let seg = segment_id(&a.station_ext_uid, &b.station_ext_uid);
                 let ordinal = pair_index(&stops, a.rsv_id);
 
                 // geometry draft for this stop pair, if present
@@ -136,21 +121,77 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                     // no draft (e.g. NO_PATH): fall back to summed way overlap
                     .unwrap_or_else(|| (String::new(), ways.iter().map(|(_, l)| l).sum()));
 
-                ins_seg.execute(rusqlite::params![
+                let sig = way_sig(&ways.iter().map(|(w, _)| *w).collect::<Vec<_>>());
+                cuts.push((
+                    rv_id,
+                    sv_id,
+                    dir,
+                    a.rsv_id,
+                    b.rsv_id,
                     seg,
                     a.station_id,
                     b.station_id,
-                    enc,
-                    len,
-                    way_ids.len() as i64
-                ])?;
-                for (i, (w, l)) in ways.iter().enumerate() {
-                    ins_way.execute(rusqlite::params![seg, (i + 1) as i64, w, l])?;
-                }
-                ins_trav.execute(rusqlite::params![
-                    rv_id, sv_id, dir, a.rsv_id, b.rsv_id, seg
-                ])?;
+                    Cut {
+                        way_sig: sig,
+                        ways,
+                        enc,
+                        len,
+                    },
+                ));
                 summary.traversals += 1;
+            }
+        }
+
+        // group cuts by segment id (station pair), preserving collection
+        // order inside each group so ties break to the earliest route
+        let mut groups: std::collections::HashMap<String, Vec<usize>> =
+            std::collections::HashMap::new();
+        for (i, c) in cuts.iter().enumerate() {
+            groups.entry(c.5.clone()).or_default().push(i);
+        }
+
+        let mut ins_seg = tx.prepare(
+            "INSERT INTO seg_segment
+                (segment_id, start_station_id, end_station_id,
+                 encoded_polyline, length_m, way_count, variant_count, length_spread_m)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        let mut ins_way = tx.prepare(
+            "INSERT OR IGNORE INTO seg_segment_way
+                (segment_id, ordinal, osm_way_id, length_m)
+             VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        let mut ins_trav = tx.prepare(
+            "INSERT OR REPLACE INTO seg_traversal
+                (route_version_id, subroute_version_id, direction,
+                 from_route_stop_version_id, to_route_stop_version_id,
+                 segment_id, way_sig)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )?;
+
+        for (_, idxs) in &mut groups {
+            let group: Vec<Cut> = idxs.iter().map(|&i| cuts[i].8.clone()).collect();
+            let (rep, variants, spread) = representative(&group);
+            let first = &cuts[idxs[0]];
+            let rep_cut = &group[rep];
+            ins_seg.execute(rusqlite::params![
+                first.5,
+                first.6,
+                first.7,
+                rep_cut.enc,
+                rep_cut.len,
+                rep_cut.ways.len() as i64,
+                variants as i64,
+                spread
+            ])?;
+            for (i, (w, l)) in rep_cut.ways.iter().enumerate() {
+                ins_way.execute(rusqlite::params![first.5, (i + 1) as i64, w, l])?;
+            }
+            for &i in idxs.iter() {
+                let c = &cuts[i];
+                ins_trav.execute(rusqlite::params![
+                    c.0, c.1, c.2, c.3, c.4, c.5, c.8.way_sig
+                ])?;
             }
         }
     }
@@ -236,6 +277,52 @@ fn pair_index(stops: &[StopPt], rsv_id: i64) -> i64 {
         .position(|s| s.rsv_id == rsv_id)
         .map(|i| (i + 1) as i64)
         .unwrap_or(0)
+}
+
+/// One route's cut of a stop pair: the traveled way list (by way id, for
+/// the variant signature) plus its geometry draft.
+#[derive(Clone)]
+pub(crate) struct Cut {
+    pub way_sig: String,
+    pub ways: Vec<(i64, f64)>,
+    pub enc: String,
+    pub len: f64,
+}
+
+/// Travel-order way-id signature distinguishing path variants of a pair.
+pub(crate) fn way_sig(way_ids: &[i64]) -> String {
+    way_ids
+        .iter()
+        .map(|w| w.to_string())
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// Representative variant of a station pair's cuts: the most-traveled way
+/// list (ties break to the earliest processed route), with the distinct
+/// variant count and the min..max length spread across variants.
+pub(crate) fn representative(cuts: &[Cut]) -> (usize, usize, f64) {
+    let mut best = 0;
+    let mut best_n = 0;
+    for (i, c) in cuts.iter().enumerate() {
+        let n = cuts.iter().filter(|x| x.way_sig == c.way_sig).count();
+        if n > best_n {
+            best_n = n;
+            best = i;
+        }
+    }
+    let variants = cuts.iter().map(|c| c.way_sig.as_str()).fold(
+        Vec::new(),
+        |mut acc: Vec<String>, s| {
+            if !acc.iter().any(|x| x == s) {
+                acc.push(s.to_string());
+            }
+            acc
+        },
+    ).len();
+    let max_len = cuts.iter().map(|c| c.len).fold(f64::MIN, f64::max);
+    let min_len = cuts.iter().map(|c| c.len).fold(f64::MAX, f64::min);
+    (best, variants, max_len - min_len)
 }
 
 #[cfg(test)]
@@ -330,5 +417,46 @@ mod tests {
         // dropping both boundary slivers would empty the list — keep them
         let runs = [way(1, 0.0, 2.0), way(2, 2.0, 4.0)];
         assert_eq!(slice_ways(&runs, 0.0, 4.0), vec![(1, 2.0), (2, 2.0)]);
+    }
+
+    fn cut(sig: &str, len: f64) -> Cut {
+        Cut {
+            way_sig: sig.to_string(),
+            ways: vec![(1, len)],
+            enc: String::new(),
+            len,
+        }
+    }
+
+    #[test]
+    fn way_sig_joins_travel_order_ids() {
+        assert_eq!(super::way_sig(&[100, 7, 212731490]), "100|7|212731490");
+    }
+
+    #[test]
+    fn representative_picks_majority_variant() {
+        let cuts = [cut("a", 100.0), cut("a", 101.0), cut("b", 200.0)];
+        let (idx, variants, spread) = representative(&cuts);
+        assert_eq!(idx, 0, "majority way list represents the pair");
+        assert_eq!(variants, 2, "two distinct way lists");
+        assert!((spread - 100.0).abs() < 1e-9, "spread {spread}");
+    }
+
+    #[test]
+    fn representative_tie_breaks_to_earliest_route() {
+        let cuts = [cut("a", 100.0), cut("b", 200.0)];
+        let (idx, variants, spread) = representative(&cuts);
+        assert_eq!(idx, 0, "tie -> first processed route wins");
+        assert_eq!(variants, 2);
+        assert!((spread - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn representative_single_variant_zero_spread() {
+        let cuts = [cut("a", 100.0), cut("a", 100.5)];
+        let (idx, variants, spread) = representative(&cuts);
+        assert_eq!(idx, 0);
+        assert_eq!(variants, 1);
+        assert!((spread - 0.5).abs() < 1e-9);
     }
 }

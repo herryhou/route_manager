@@ -107,6 +107,132 @@ fn pipeline(conn: &mut rusqlite::Connection, batch: i64) {
     rm_osm_match::run(conn, batch).unwrap();
 }
 
+/// road 100 (straight) + way 101 (parallel dogleg, longer): two paths
+/// between the same stations so one pair yields two way-list variants
+fn insert_two_roads(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "INSERT INTO osm_way (osm_way_id, highway, oneway, name) VALUES
+            (100, 'residential', 0, '測試路'), (101, 'residential', 0, '測試側線');
+         INSERT INTO osm_node (osm_node_id, lat, lon) VALUES
+            (1, 24.1405, 120.6857), (2, 24.1408, 120.6857), (3, 24.1412, 120.6857),
+            (4, 24.1412, 120.68595), (5, 24.1408, 120.68615), (6, 24.1405, 120.68595);
+         INSERT INTO osm_way_node (osm_way_id, ordinal, osm_node_id) VALUES
+            (100, 1, 1), (100, 2, 2), (100, 3, 3),
+            (101, 1, 4), (101, 2, 5), (101, 3, 6);",
+    )
+    .unwrap();
+}
+
+fn dogleg_polyline() -> String {
+    polyline::encode(&[
+        LatLng {
+            lat: 24.1412,
+            lon: 120.68595,
+        },
+        LatLng {
+            lat: 24.1408,
+            lon: 120.68615,
+        },
+        LatLng {
+            lat: 24.1405,
+            lon: 120.68595,
+        },
+    ])
+}
+
+/// route 2 stops directly at nodes 44 -> 46 (no mid stop) on its own polyline
+fn rewrite_route2_direct(conn: &rusqlite::Connection, batch: i64, enc: &str) {
+    conn.execute(
+        "UPDATE src_route_point SET encoded = ?1 WHERE batch_id = ?2 AND xno = '2'",
+        rusqlite::params![enc, batch],
+    )
+    .unwrap();
+    let rows: [(i64, &str, f64, f64); 2] = [
+        (1, "44", 24.1409, 120.6857),
+        (2, "46", 24.1408, 120.6859),
+    ];
+    conn.execute(
+        "DELETE FROM src_stop_edge WHERE batch_id = ?1 AND xno = '2'",
+        [batch],
+    )
+    .unwrap();
+    for (order, node, lat, lon) in rows {
+        conn.execute(
+            "INSERT OR REPLACE INTO src_stop_edge
+                (batch_id, xno, direction, source_order_no, ivr_no, sid, node_id, station_name, lat, lon, lat_e6, lon_e6)
+             VALUES (?1, '2', 0, ?2, NULL, ?2, ?3, '干城站', ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                batch, order, node, lat, lon,
+                (lat * 1e6).round() as i64,
+                (lon * 1e6).round() as i64
+            ],
+        )
+        .unwrap();
+    }
+    conn.execute_batch(
+        "UPDATE route SET current_route_version_id = NULL, revision = 0 WHERE ext_uid = 'tcg:2';
+         DELETE FROM route_stop_version WHERE subroute_version_id IN
+            (SELECT subroute_version_id FROM subroute_version WHERE route_version_id =
+                (SELECT route_version_id FROM route_version WHERE route_id =
+                    (SELECT route_id FROM route WHERE ext_uid = 'tcg:2')));
+         DELETE FROM subroute_version WHERE route_version_id IN
+            (SELECT route_version_id FROM route_version WHERE route_id IN
+                (SELECT route_id FROM route WHERE ext_uid = 'tcg:2'));
+         DELETE FROM route_version WHERE route_id IN
+            (SELECT route_id FROM route WHERE ext_uid = 'tcg:2');
+         DELETE FROM stop_version WHERE stop_id IN
+            (SELECT stop_id FROM stop WHERE ext_uid LIKE 'tcg:2:%');
+         DELETE FROM stop WHERE ext_uid LIKE 'tcg:2:%';",
+    )
+    .unwrap();
+}
+
+#[test]
+fn same_pair_different_ways_share_one_segment() {
+    let (_dir, mut conn, batch) = setup();
+    insert_two_roads(&conn);
+    // route 1 rides way 100, route 2 rides the parallel dogleg way 101,
+    // both between the shared stations 44 -> 46
+    rewrite_route2_direct(&conn, batch, &dogleg_polyline());
+    conn.execute(
+        "UPDATE src_route_point SET encoded = ?1 WHERE batch_id = ?2 AND xno = '1'",
+        rusqlite::params![road_polyline(), batch],
+    )
+    .unwrap();
+    pipeline(&mut conn, batch);
+
+    let s = rm_registry::run(&conn, batch).unwrap();
+    assert_eq!(s.traversals, 2, "{s:?}");
+    assert_eq!(s.segments, 1, "one station pair -> one segment: {s:?}");
+
+    let seg: (i64, f64, i64, f64) = conn
+        .query_row(
+            "SELECT way_count, length_m, variant_count, length_spread_m
+             FROM seg_segment",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(seg.0, 1, "representative way list = route 1's way 100");
+    assert_eq!(seg.2, 2, "two path variants recorded: {seg:?}");
+    assert!(seg.3 > 5.0, "dogleg is the longer variant: {seg:?}");
+
+    // every traversal keeps its own variant signature
+    let sigs: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.way_sig FROM seg_traversal t
+                 JOIN route_version rv ON rv.route_version_id = t.route_version_id
+                 JOIN route r ON r.route_id = rv.route_id
+                 ORDER BY r.ext_uid",
+            )
+            .unwrap();
+        let it = stmt.query_map([], |r| r.get(0)).unwrap();
+        it.collect::<Result<_, _>>().unwrap()
+    };
+    assert_eq!(sigs, vec!["100".to_string(), "101".to_string()]);
+}
+
 #[test]
 fn shared_corridor_and_cut_boundaries() {
     let (_dir, mut conn, batch) = setup();

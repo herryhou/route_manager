@@ -24,6 +24,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0007_current_views",
         include_str!("../migrations/0007_current_views.sql"),
     ),
+    ("0008_pair_only", include_str!("../migrations/0008_pair_only.sql")),
 ];
 
 /// Apply pending migrations in order. Safe to call repeatedly.
@@ -74,7 +75,8 @@ mod tests {
                 "0004_osm",
                 "0005_bearing",
                 "0006_match_dev",
-                "0007_current_views"
+                "0007_current_views",
+                "0008_pair_only"
             ]
         );
     }
