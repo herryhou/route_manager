@@ -87,17 +87,71 @@ export function showPane(kind, html, title) {
 export function closePane(kind) {
   const pane = paneEl(kind);
   pane.hidden = true;
+  paneHistory[kind].back.length = 0;
+  paneHistory[kind].fwd.length = 0;
+  updatePaneNav(kind);
   if (PANE_KINDS.every((k) => paneEl(k).hidden)) {
     document.getElementById('detail').hidden = true;
   }
-  paneChangeHook?.(kind);
+  paneChangeHook?.(kind, true);
 }
 
-/// app.js hook: fires with the pane kind whenever a pane is shown or closed,
-/// so map state tied to pane content (segment highlight) can follow it.
+/// app.js hook: fires with the pane kind whenever a pane is shown or closed
+/// (closed = true only from closePane), so map state tied to pane content
+/// (segment highlight, pane-current tracking) can follow it.
 let paneChangeHook = null;
 export function setPaneChangeHook(fn) {
   paneChangeHook = fn;
+}
+
+/// Per-pane semantic history for the ←/→ header buttons: reopen closures
+/// (selectSegment(id), …) in back + forward stacks, capped. New content
+/// pushes the outgoing closure onto back and clears forward; closePane
+/// wipes the pane's stacks.
+const HIST_CAP = 50;
+const paneHistory = { context: { back: [], fwd: [] }, point: { back: [], fwd: [] } };
+
+function updatePaneNav(kind) {
+  const pane = paneEl(kind);
+  const h = paneHistory[kind];
+  pane.querySelector('.dpane-back').hidden = !h.back.length;
+  pane.querySelector('.dpane-fwd').hidden = !h.fwd.length;
+}
+
+export function pushPaneHistory(kind, reopen) {
+  const h = paneHistory[kind];
+  h.back.push(reopen);
+  if (h.back.length > HIST_CAP) h.back.shift();
+  h.fwd.length = 0;
+  updatePaneNav(kind);
+}
+
+/// Back navigation: pop the back stack, moving the current content's reopen
+/// (if any) onto forward. Returns the popped closure, or null when empty.
+export function popPaneHistory(kind, currentReopen) {
+  const h = paneHistory[kind];
+  const reopen = h.back.pop();
+  if (!reopen) return null;
+  if (currentReopen) {
+    h.fwd.push(currentReopen);
+    if (h.fwd.length > HIST_CAP) h.fwd.shift();
+  }
+  updatePaneNav(kind);
+  return reopen;
+}
+
+/// Forward navigation: mirror of popPaneHistory (current returns to back,
+/// forward kept).
+export function popPaneForward(kind, currentReopen) {
+  const h = paneHistory[kind];
+  const reopen = h.fwd.pop();
+  if (!reopen) return null;
+  if (currentReopen) {
+    h.back.push(currentReopen);
+    if (h.back.length > HIST_CAP) h.back.shift();
+  }
+  updatePaneNav(kind);
+  return reopen;
 }
 
 export function kv(pairs) {

@@ -280,7 +280,15 @@ body {
   color: var(--text);
 }
 
-.dpane-close {
+.dpane-nav {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+
+.dpane-close,
+.dpane-back,
+.dpane-fwd {
   border: none;
   background: none;
   cursor: pointer;
@@ -291,6 +299,11 @@ body {
 
 .dpane-close:hover {
   color: var(--bad);
+}
+
+.dpane-back:hover,
+.dpane-fwd:hover {
+  color: var(--accent);
 }
 
 .dpane-body {

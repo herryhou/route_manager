@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, variantPanel, segmentPanel, pathPiecePanel, setPaneChangeHook } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, variantPanel, segmentPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawSegmentHighlight, clearSegmentHighlight } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -55,6 +55,35 @@ function refreshStations(q) {
   }, 300);
 }
 
+/// Pane history (semantic back/forward): each pane's current content is
+/// { key, reopen }; different content taking the pane pushes the old one
+/// onto that pane's back stack. Back/forward pop and re-run the closure —
+/// nulling current first suppresses the push inside the re-run.
+const paneCurrent = { context: null, point: null };
+
+function paneOpen(kind, key, reopen) {
+  if (paneCurrent[kind] && paneCurrent[kind].key !== key) {
+    pushPaneHistory(kind, paneCurrent[kind].reopen);
+  }
+  paneCurrent[kind] = { key, reopen };
+}
+
+function paneBack(kind) {
+  const cur = paneCurrent[kind];
+  const reopen = popPaneHistory(kind, cur?.reopen);
+  if (!reopen) return;
+  paneCurrent[kind] = null;
+  reopen();
+}
+
+function paneForward(kind) {
+  const cur = paneCurrent[kind];
+  const reopen = popPaneForward(kind, cur?.reopen);
+  if (!reopen) return;
+  paneCurrent[kind] = null;
+  reopen();
+}
+
 async function selectRouteById(routeId, dir = 0) {
   const r = allRoutes.find((x) => x.route_id === routeId);
   if (r) selectRoute(r, dir);
@@ -76,21 +105,25 @@ async function selectRoute(r, dir = 0) {
     if (selectedRoute?.route_id !== route_id || selectedRoute.dir !== dir) return; // stale
     const onStopClick = (stop, marker) => openStopPopup(stop.stop_version_id, marker);
     // Path click: point pane + red highlight of that piece / way run, same
-    // selectSegment pattern (pane change hook clears it).
+    // selectSegment pattern (pane change hook clears it). The reopen closure
+    // replays it from the captured properties — no refetch.
     const onPathClick = (feature) => {
-      pathPiecePanel(feature.properties, { onPickSegment: selectSegment });
-      if (feature.geometry) {
-        drawSegmentHighlight(
-          feature.geometry,
-          feature.properties.osm_way_id != null ? 'selected way' : 'selected piece'
-        );
-      }
+      const p = feature.properties;
+      const show = () => {
+        pathPiecePanel(p, { onPickSegment: selectSegment });
+        if (feature.geometry) {
+          drawSegmentHighlight(feature.geometry, p.osm_way_id != null ? 'selected way' : 'selected piece');
+        }
+      };
+      paneOpen('point', `piece:${route_id}:${dir}:${p.ordinal}:${p.osm_way_id ?? 'draft'}`, show);
+      show();
     };
     lastRouteDraw = { p, s, onStopClick, onPathClick };
     drawRoute(p, s, { onStopClick, onPathClick });
     if (document.getElementById('layer-raw').checked) loadRaw(route_id, dir);
     else clearRaw();
     fitRoute(p, s);
+    paneOpen('context', `route:${route_id}:${dir}`, () => selectRouteById(route_id, dir));
     routeStopsPanel(d, dir, s, {
       onDirection: (nd) => selectRoute(r, nd),
       onStopClick: (svid) => popupStop(svid),
@@ -117,6 +150,7 @@ async function openStopPopup(stopVersionId, marker) {
   try {
     const d = await api.stopDetail(stopVersionId);
     const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
+    paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     const el = stopPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
@@ -131,6 +165,7 @@ async function openStationPopup(stationId, marker) {
   try {
     const d = await api.stationDetail(stationId);
     const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
+    paneOpen('point', `station:${stationId}`, () => selectStation(stationId));
     const el = stationPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
@@ -145,6 +180,7 @@ async function selectStation(stationId) {
   try {
     const d = await api.stationDetail(stationId);
     const st = d.station;
+    paneOpen('point', `station:${stationId}`, () => selectStation(stationId));
     clearHighlight();
     const m = L.circleMarker([st.lat, st.lon], {
       radius: 10, color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.15,
@@ -167,6 +203,7 @@ async function popupStop(stopVersionId) {
     const d = await api.stopDetail(stopVersionId);
     const s = d.stop;
     const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
+    paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     clearHighlight();
     const m = L.circleMarker([s.lat, s.lon], {
       radius: 10, color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.15,
@@ -183,6 +220,7 @@ async function popupStop(stopVersionId) {
 async function selectStop(stopVersionId) {
   try {
     const d = await api.stopDetail(stopVersionId);
+    paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     highlightGroup(d.group_members);
     stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickSegment: selectSegment, onPickStation: selectStation });
     map.panTo([d.stop.lat, d.stop.lon], {
@@ -197,6 +235,7 @@ async function selectStop(stopVersionId) {
 async function openOutliers() {
   try {
     const v = await api.outliers();
+    paneOpen('context', 'outliers', openOutliers);
     outlierPanel(v.outliers ?? [], {
       onPick: (o) => {
         flashStop(o.lat, o.lon);
@@ -214,6 +253,7 @@ async function openOutliers() {
 async function openMatchDevs() {
   try {
     const v = await api.matchDevs();
+    paneOpen('context', 'matchdev', openMatchDevs);
     matchDevPanel(v.directions ?? [], {
       onOpenRoute: (d) => selectRouteById(d.route_id, d.direction),
     });
@@ -226,6 +266,7 @@ async function openMatchDevs() {
 async function openVariants() {
   try {
     const v = await api.variants();
+    paneOpen('context', 'variants', openVariants);
     variantPanel(v.pairs ?? [], {
       onOpenSegment: (seg) => selectSegment(seg.segment_id),
     });
@@ -291,6 +332,7 @@ async function refreshSegments() {
 async function selectSegment(segmentId) {
   try {
     const d = await api.segmentDetail(segmentId);
+    paneOpen('point', `seg:${segmentId}`, () => selectSegment(segmentId));
     segmentPanel(d, {
       onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
       onPickStation: selectStation,
@@ -314,9 +356,14 @@ function parseHash() {
 }
 
 async function boot() {
-  setPaneChangeHook((kind) => {
+  setPaneChangeHook((kind, closed) => {
+    if (closed) paneCurrent[kind] = null;
     if (kind === 'point') clearSegmentHighlight();
   });
+  for (const kind of ['context', 'point']) {
+    document.querySelector(`.dpane-${kind} .dpane-back`).addEventListener('click', () => paneBack(kind));
+    document.querySelector(`.dpane-${kind} .dpane-fwd`).addEventListener('click', () => paneForward(kind));
+  }
   const search = document.getElementById('route-search');
   search.addEventListener('input', () => {
     refreshList(search.value);
