@@ -14,5 +14,5 @@ tracing-subscriber.workspace = true
 clap.workspace = true
 
 [dev-dependencies]
-rm-ingest = { path = "../rm-ingest" }
+rm-ingest = { path = "../rm-ingest", features = ["testfix"] }
 tempfile = "3"

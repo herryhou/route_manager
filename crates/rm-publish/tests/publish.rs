@@ -160,7 +160,12 @@ fn header_without_stops_fails_alone_others_publish() {
 
 #[test]
 fn cyclic_route_same_stop_twice_keeps_both_rows() {
-    let (_dir, mut conn, batch) = setup();
+    // one-shot import: stage the extra loop pole BEFORE the single identity run
+    let dir = tempfile::tempdir().unwrap();
+    rm_ingest::testfix::make_fixture(&dir.path().join("src"));
+    let mut conn = open_in_memory().unwrap();
+    let s = rm_ingest::run(&conn, &dir.path().join("src")).unwrap();
+    let batch = s.batch_id;
     // loop pole: sid 13 visited twice in route 1 dir 1
     conn.execute(
         "INSERT INTO src_stop_edge (batch_id, xno, direction, source_order_no, ivr_no, sid, node_id, station_name, lat, lon, lat_e6, lon_e6)

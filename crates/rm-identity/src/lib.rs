@@ -31,6 +31,16 @@ pub fn run(conn: &Connection, batch_id: i64) -> Result<Summary> {
         [batch_id],
         |r| r.get(0),
     )?;
+    let status: String = conn.query_row(
+        "SELECT status FROM import_batch WHERE batch_id = ?1",
+        [batch_id],
+        |r| r.get(0),
+    )?;
+    anyhow::ensure!(
+        status == "OPEN",
+        "batch {batch_id} is {status} — imports are one-shot; \
+         start a fresh DB for a new capture (docs/web-edit-mode.md)"
+    );
     let now = rm_db::now_rfc3339();
     let mut warnings: Vec<String> = Vec::new();
 
@@ -392,6 +402,8 @@ pub fn run(conn: &Connection, batch_id: i64) -> Result<Summary> {
     }
 
     tx.commit()?;
+
+    rm_db::set_batch_status(conn, batch_id, "CLOSED")?;
 
     Ok(Summary {
         batch_id,

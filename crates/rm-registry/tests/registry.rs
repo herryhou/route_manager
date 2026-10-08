@@ -12,6 +12,16 @@ fn setup() -> (tempfile::TempDir, rusqlite::Connection, i64) {
     (dir, conn, s.batch_id)
 }
 
+/// staging-only DB (batch still OPEN): for tests that craft staging before
+/// identity's one-shot run.
+fn setup_staging() -> (tempfile::TempDir, rusqlite::Connection, i64) {
+    let dir = tempfile::tempdir().unwrap();
+    rm_ingest::testfix::make_fixture(&dir.path().join("src"));
+    let conn = rm_db::open_in_memory().unwrap();
+    let s = rm_ingest::run(&conn, &dir.path().join("src")).unwrap();
+    (dir, conn, s.batch_id)
+}
+
 /// road along lon 120.6857: nodes 1 (24.1405) - 2 (24.1408) - 3 (24.1412)
 fn insert_road(conn: &rusqlite::Connection) {
     conn.execute_batch(
@@ -284,7 +294,7 @@ fn rewrite_stops_both_directions(conn: &rusqlite::Connection, batch: i64, xno: &
 
 #[test]
 fn corridor_length_gap_splits_pair_into_two_segments() {
-    let (_dir, mut conn, batch) = setup();
+    let (_dir, mut conn, batch) = setup_staging();
     insert_road_and_long_detour(&conn);
     // route 1: 2 direct traversals (both directions on way 100);
     // route 2: 2 detour traversals (both directions on way 101, ~1.2 km)
@@ -403,7 +413,7 @@ fn corridor_length_gap_splits_pair_into_two_segments() {
 
 #[test]
 fn same_pair_different_ways_share_one_segment() {
-    let (_dir, mut conn, batch) = setup();
+    let (_dir, mut conn, batch) = setup_staging();
     insert_two_roads(&conn);
     // route 1 rides way 100, route 2 rides the parallel dogleg way 101,
     // both between the shared stations 44 -> 46
@@ -449,7 +459,7 @@ fn same_pair_different_ways_share_one_segment() {
 
 #[test]
 fn shared_corridor_and_cut_boundaries() {
-    let (_dir, mut conn, batch) = setup();
+    let (_dir, mut conn, batch) = setup_staging();
     insert_road(&conn);
     rewrite_route2(&conn, batch, &road_polyline());
     pipeline(&mut conn, batch);
@@ -523,7 +533,7 @@ fn unmatchable_pairs_are_skipped_not_registered() {
 
 #[test]
 fn rerun_is_idempotent() {
-    let (_dir, mut conn, batch) = setup();
+    let (_dir, mut conn, batch) = setup_staging();
     insert_road(&conn);
     rewrite_route2(&conn, batch, &road_polyline());
     pipeline(&mut conn, batch);

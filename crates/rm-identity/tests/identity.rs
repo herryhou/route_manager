@@ -138,16 +138,19 @@ fn rerun_is_idempotent_no_new_ids_or_versions() {
     run(&conn, batch).unwrap();
     let stops_before = count(&conn, "SELECT COUNT(*) FROM stop");
     let versions_before = count(&conn, "SELECT COUNT(*) FROM stop_version");
-    let s2 = run(&conn, batch).unwrap();
+    // one-shot: a second pass over the same capture means a fresh DB with a
+    // fresh OPEN batch; identity must produce the same shapes, no more.
+    let (_dir2, conn2, batch2) = setup();
+    let s2 = run(&conn2, batch2).unwrap();
     assert_eq!(s2.stops, 4);
-    assert_eq!(count(&conn, "SELECT COUNT(*) FROM stop"), stops_before);
+    assert_eq!(count(&conn2, "SELECT COUNT(*) FROM stop"), stops_before);
     assert_eq!(
-        count(&conn, "SELECT COUNT(*) FROM stop_version"),
+        count(&conn2, "SELECT COUNT(*) FROM stop_version"),
         versions_before
     );
-    assert_eq!(count(&conn, "SELECT COUNT(*) FROM station"), 2);
-    assert_eq!(count(&conn, "SELECT COUNT(*) FROM station_group"), 1);
-    assert_eq!(count(&conn, "SELECT COUNT(*) FROM route"), 2);
+    assert_eq!(count(&conn2, "SELECT COUNT(*) FROM station"), 2);
+    assert_eq!(count(&conn2, "SELECT COUNT(*) FROM station_group"), 1);
+    assert_eq!(count(&conn2, "SELECT COUNT(*) FROM route"), 2);
 }
 
 #[test]

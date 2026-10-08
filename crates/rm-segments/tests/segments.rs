@@ -78,7 +78,12 @@ fn fixture_degenerate_paths_are_endpoint_and_no_path() {
 
 #[test]
 fn crafted_path_projects_and_cuts_from_polyline() {
-    let (_dir, mut conn, batch) = setup();
+    // one-shot import: craft route 2 staging BEFORE the single identity run
+    let dir = tempfile::tempdir().unwrap();
+    rm_ingest::testfix::make_fixture(&dir.path().join("src"));
+    let mut conn = open_in_memory().unwrap();
+    let s = rm_ingest::run(&conn, &dir.path().join("src")).unwrap();
+    let batch = s.batch_id;
     // route 2 dir 0: give it the 3-point reference path and two extra stops,
     // one exactly on p[1] (40.7,-120.95), one ~14 m from p[0]
     conn.execute(
@@ -104,23 +109,6 @@ fn crafted_path_projects_and_cuts_from_polyline() {
         )
         .unwrap();
     }
-    // wipe identity rows for route 2 so re-run mints new stops (fixture stops)
-    conn.execute_batch(
-        "UPDATE route SET current_route_version_id = NULL, revision = 0 WHERE ext_uid = 'tcg:2';
-         DELETE FROM route_stop_version WHERE subroute_version_id IN
-            (SELECT subroute_version_id FROM subroute_version WHERE route_version_id =
-                (SELECT route_version_id FROM route_version WHERE route_id =
-                    (SELECT route_id FROM route WHERE ext_uid = 'tcg:2')));
-         DELETE FROM subroute_version WHERE route_version_id IN
-            (SELECT route_version_id FROM route_version WHERE route_id =
-                (SELECT route_id FROM route WHERE ext_uid = 'tcg:2'));
-         DELETE FROM route_version WHERE route_id IN
-            (SELECT route_id FROM route WHERE ext_uid = 'tcg:2');
-         DELETE FROM stop_version WHERE stop_id IN
-            (SELECT stop_id FROM stop WHERE ext_uid LIKE 'tcg:2:%');
-         DELETE FROM stop WHERE ext_uid LIKE 'tcg:2:%';",
-    )
-    .unwrap();
     rm_identity::run(&conn, batch).unwrap();
     rm_publish::run(&mut conn, batch).unwrap();
 
