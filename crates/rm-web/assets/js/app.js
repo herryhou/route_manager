@@ -289,7 +289,8 @@ function onEditStop(act, stop) {
   } else if (act === 'move') {
     status('click the map to place the stop');
     const handler = (e) => {
-      pendingPlace = null;
+      map.off('click', handler); // self-deregister: one-shot again
+      if (pendingPlace === handler) pendingPlace = null;
       if (!editMode) return;
       const dist = Math.round(L.latLng([stop.lat, stop.lon]).distanceTo(e.latlng));
       if (!confirm(`move stop #${stop.stop_code} ${dist} m?\n(${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}) → (${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)})`)) return status('');
