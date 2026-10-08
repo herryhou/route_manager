@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, variantPanel, segmentPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, variantPanel, segmentPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawSegmentHighlight, clearSegmentHighlight } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -19,9 +19,18 @@ export function status(msg) {
   document.getElementById('status-msg').textContent = msg ?? '';
 }
 
+/// Spinner in the statusbar — on while a primary fetch runs (route/segment/
+/// station/QA panel loads), off in finally. Background layers don't touch it.
+function busy(on) {
+  document.getElementById('busy').hidden = !on;
+}
+
 function setChip(id, text) {
   const el = document.getElementById(id);
-  if (el) el.querySelector('b').textContent = text;
+  if (!el) return;
+  el.querySelector('b').textContent = text;
+  // QA chips: non-zero count reads red — issues visible at a glance.
+  if (el.classList.contains('chip-click')) el.classList.toggle('hot', parseInt(text, 10) > 0);
 }
 
 let allRoutes = [];
@@ -95,6 +104,7 @@ async function selectRoute(r, dir = 0) {
   selectedRoute = { route_id: r.route_id, dir };
   refreshList(document.getElementById('route-search').value);
   const { route_id } = selectedRoute;
+  busy(true);
   try {
     const geom = document.getElementById('route-geom').value;
     const [d, p, s] = await Promise.all([
@@ -132,6 +142,8 @@ async function selectRoute(r, dir = 0) {
     location.hash = `#route=${route_id}&dir=${dir}`;
   } catch (e) {
     status(`route load failed: ${e.message}`);
+  } finally {
+    busy(false);
   }
 }
 
@@ -177,6 +189,7 @@ async function openStationPopup(stationId, marker) {
 
 /// Search-driven station selection: pan + ring marker + popup; popup close removes it.
 async function selectStation(stationId) {
+  busy(true);
   try {
     const d = await api.stationDetail(stationId);
     const st = d.station;
@@ -194,6 +207,8 @@ async function selectStation(stationId) {
     location.hash = `#station=${stationId}`;
   } catch (e) {
     status(`station load failed: ${e.message}`);
+  } finally {
+    busy(false);
   }
 }
 
@@ -218,6 +233,7 @@ async function popupStop(stopVersionId) {
 }
 
 async function selectStop(stopVersionId) {
+  busy(true);
   try {
     const d = await api.stopDetail(stopVersionId);
     paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
@@ -229,10 +245,13 @@ async function selectStop(stopVersionId) {
     location.hash = `#stop=${stopVersionId}`;
   } catch (e) {
     status(`stop load failed: ${e.message}`);
+  } finally {
+    busy(false);
   }
 }
 
 async function openOutliers() {
+  busy(true);
   try {
     const v = await api.outliers();
     paneOpen('context', 'outliers', openOutliers);
@@ -247,10 +266,13 @@ async function openOutliers() {
     location.hash = '#outliers';
   } catch (e) {
     status(`outliers load failed: ${e.message}`);
+  } finally {
+    busy(false);
   }
 }
 
 async function openMatchDevs() {
+  busy(true);
   try {
     const v = await api.matchDevs();
     paneOpen('context', 'matchdev', openMatchDevs);
@@ -260,10 +282,13 @@ async function openMatchDevs() {
     location.hash = '#matchdev';
   } catch (e) {
     status(`path dev load failed: ${e.message}`);
+  } finally {
+    busy(false);
   }
 }
 
 async function openVariants() {
+  busy(true);
   try {
     const v = await api.variants();
     paneOpen('context', 'variants', openVariants);
@@ -273,6 +298,8 @@ async function openVariants() {
     location.hash = '#variants';
   } catch (e) {
     status(`seg variants load failed: ${e.message}`);
+  } finally {
+    busy(false);
   }
 }
 
@@ -330,6 +357,7 @@ async function refreshSegments() {
 /// Segment drill-down: point pane + red highlight polyline, kept until the
 /// point pane is closed or replaced (pane change hook clears it).
 async function selectSegment(segmentId) {
+  busy(true);
   try {
     const d = await api.segmentDetail(segmentId);
     paneOpen('point', `seg:${segmentId}`, () => selectSegment(segmentId));
@@ -341,6 +369,8 @@ async function selectSegment(segmentId) {
     location.hash = `#segment=${segmentId}`;
   } catch (e) {
     status(`segment load failed: ${e.message}`);
+  } finally {
+    busy(false);
   }
 }
 
@@ -364,6 +394,17 @@ async function boot() {
     document.querySelector(`.dpane-${kind} .dpane-back`).addEventListener('click', () => paneBack(kind));
     document.querySelector(`.dpane-${kind} .dpane-fwd`).addEventListener('click', () => paneForward(kind));
   }
+  // Esc: close popup → point pane → context pane. "/" focuses route search.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (document.querySelector('.leaflet-popup')) map.closePopup();
+      else if (!document.querySelector('.dpane-point').hidden) closePane('point');
+      else if (!document.querySelector('.dpane-context').hidden) closePane('context');
+    } else if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? '')) {
+      e.preventDefault();
+      document.getElementById('route-search').focus();
+    }
+  });
   const search = document.getElementById('route-search');
   search.addEventListener('input', () => {
     refreshList(search.value);

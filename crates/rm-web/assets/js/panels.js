@@ -4,6 +4,13 @@ import { snapColor, matchedBadge, METHOD_COLORS } from './colors.js';
 export function renderRouteList(routes, { onSelect, selectedKey }) {
   const list = document.getElementById('route-list');
   list.innerHTML = '';
+  if (!routes.length) {
+    const empty = document.createElement('div');
+    empty.className = 'list-empty';
+    empty.textContent = 'no routes match';
+    list.append(empty);
+    return;
+  }
   for (const r of routes) {
     const row = document.createElement('div');
     row.className = 'route-row' + (selectedKey === `${r.route_id}` ? ' selected' : '');
@@ -114,8 +121,9 @@ const paneHistory = { context: { back: [], fwd: [] }, point: { back: [], fwd: []
 function updatePaneNav(kind) {
   const pane = paneEl(kind);
   const h = paneHistory[kind];
-  pane.querySelector('.dpane-back').hidden = !h.back.length;
-  pane.querySelector('.dpane-fwd').hidden = !h.fwd.length;
+  // Back/forward always visible — dimmed when empty, so nav width stays stable.
+  pane.querySelector('.dpane-back').disabled = !h.back.length;
+  pane.querySelector('.dpane-fwd').disabled = !h.fwd.length;
 }
 
 export function pushPaneHistory(kind, reopen) {
@@ -265,8 +273,8 @@ export function profileSvg(stops) {
   const grid = [0, 15, 40, PROFILE_CAP_M]
     .map(
       (m) =>
-        `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(m)}" y2="${y(m)}" stroke="#e5e7eb" stroke-width="1"/>
-         <text x="${PAD.l - 4}" y="${y(m) + 3}" text-anchor="end" font-size="8" fill="#6b7280">${m}m</text>`
+        `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(m)}" y2="${y(m)}" stroke="var(--border)" stroke-width="1"/>
+         <text x="${PAD.l - 4}" y="${y(m) + 3}" text-anchor="end" font-size="8" fill="var(--muted)">${m}m</text>`
     )
     .join('');
   const dots = stops
