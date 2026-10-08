@@ -369,6 +369,15 @@ async function boot() {
     refreshList(search.value);
     refreshStations(search.value);
   });
+  // Hide/show the route-list sidebar; Leaflet must re-measure its container.
+  const sidebarToggle = document.getElementById('sidebar-toggle');
+  sidebarToggle.addEventListener('click', () => {
+    const sb = document.getElementById('sidebar');
+    sb.hidden = !sb.hidden;
+    sidebarToggle.textContent = sb.hidden ? '»' : '«';
+    sidebarToggle.title = sb.hidden ? 'show sidebar' : 'hide sidebar';
+    map.invalidateSize();
+  });
   document.getElementById('chip-outliers').addEventListener('click', openOutliers);
   document.getElementById('chip-matchdev').addEventListener('click', openMatchDevs);
   document.getElementById('chip-variants').addEventListener('click', openVariants);
