@@ -18,6 +18,30 @@ impl ApiError {
             status: Some(StatusCode::BAD_REQUEST),
         }
     }
+
+    /// 401 helper for missing credentials.
+    pub fn unauthorized(msg: &str) -> Self {
+        Self {
+            err: anyhow::anyhow!("{msg}"),
+            status: Some(StatusCode::UNAUTHORIZED),
+        }
+    }
+
+    /// 403 helper for rejected credentials.
+    pub fn forbidden(msg: &str) -> Self {
+        Self {
+            err: anyhow::anyhow!("{msg}"),
+            status: Some(StatusCode::FORBIDDEN),
+        }
+    }
+
+    /// 404 helper (method form; see also the free fn for unknown ids).
+    pub fn not_found(msg: &str) -> Self {
+        Self {
+            err: anyhow::anyhow!("{msg}"),
+            status: Some(StatusCode::NOT_FOUND),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {

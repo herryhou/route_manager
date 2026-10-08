@@ -13,9 +13,9 @@ serde_json.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 axum.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 rm-ingest = { path = "../rm-ingest", features = ["testfix"] }

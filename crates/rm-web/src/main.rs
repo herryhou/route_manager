@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::Parser;
 
-/// Read-only map explorer for the published route/stop/segment data.
+/// Map explorer for the published route/stop/segment data.
 #[derive(Parser)]
 struct Args {
     /// Path to the pipeline SQLite database
@@ -17,6 +18,29 @@ struct Args {
     /// Tile URL template override (default: OpenStreetMap raster tiles; needs internet)
     #[arg(long)]
     tiles: Option<String>,
+
+    /// Enable edit endpoints (POST /api/edit/...)
+    #[arg(long, requires = "edit_tokens")]
+    edit: bool,
+
+    /// Edit tokens as comma-separated `name:token` entries (or RM_EDIT_TOKENS env)
+    #[arg(long, env = "RM_EDIT_TOKENS")]
+    edit_tokens: Option<String>,
+}
+
+/// Parse `name:token` entries, comma-separated.
+fn parse_tokens(s: &str) -> anyhow::Result<HashMap<String, String>> {
+    let mut map = HashMap::new();
+    for entry in s.split(',') {
+        let Some((name, token)) = entry.split_once(':') else {
+            anyhow::bail!("malformed token entry {entry:?}: expected name:token");
+        };
+        if name.is_empty() || token.is_empty() {
+            anyhow::bail!("malformed token entry {entry:?}: expected name:token");
+        }
+        map.insert(name.to_string(), token.to_string());
+    }
+    Ok(map)
 }
 
 #[tokio::main]
@@ -29,5 +53,16 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let args = Args::parse();
-    rm_web::serve(args.db, args.addr, args.tiles).await
+    let edit_tokens = if args.edit {
+        let raw = args
+            .edit_tokens
+            .expect("clap enforces --edit requires --edit-tokens");
+        Some(parse_tokens(&raw)?)
+    } else {
+        if args.edit_tokens.is_some() {
+            anyhow::bail!("--edit-tokens requires --edit");
+        }
+        None
+    };
+    rm_web::serve(args.db, args.addr, args.tiles, edit_tokens).await
 }

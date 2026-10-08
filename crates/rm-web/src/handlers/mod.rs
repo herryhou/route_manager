@@ -1,6 +1,7 @@
 //! Route table.
 
 pub mod assets;
+pub mod edit;
 pub mod qa;
 pub mod routes;
 pub mod segments;
