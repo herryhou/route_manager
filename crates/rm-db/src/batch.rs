@@ -79,7 +79,7 @@ mod tests {
     fn latest_batch_empty_then_newest_regardless_of_status() {
         let conn = open_in_memory().unwrap();
         assert_eq!(latest_batch(&conn).unwrap(), None);
-        let id1 = create_batch(
+        create_batch(
             &conn,
             "/x",
             1,
