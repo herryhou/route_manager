@@ -75,7 +75,7 @@ covers every direction that has one. The one hard error is empty
 
 ```sh
 cargo run -r -p rm-osm-match   # --db (default data/taichung.db),
-                               # --batch (default: latest OPEN)
+                               # --batch (default: latest, any status)
 ```
 
 Directions match in parallel (rayon) against one shared read-only

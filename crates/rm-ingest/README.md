@@ -83,8 +83,8 @@ cargo run -r -p rm-ingest
 
 There is no `--batch` here — unlike every later stage, `rm-ingest` is the
 tool that *creates* batches, and which batch it writes is decided by the
-source dir (reuse-or-mint above). Later tools default to the latest OPEN
-batch. The binary prints one summary line (batch id plus routes,
+source dir (reuse-or-mint above). Later tools default to the latest
+batch (any status). The binary prints one summary line (batch id plus routes,
 stop_edges, route_points, providers, route_providers, main_side_links,
 joint_operations) and then any warnings. The `testfix` cargo feature
 exposes `src/testfix.rs`, a capture-fixture builder shared with other

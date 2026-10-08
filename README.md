@@ -51,7 +51,8 @@ cargo run -r -p rm-verify -- --preset taichung   # | taipei | tainan
 ```
 
 All bins accept `--db` (default `data/taichung.db`) and `--batch`
-(default: latest OPEN batch). `rm-verify` writes `qa/report.json`,
+(default: latest batch, any status; `rm-identity`: latest OPEN).
+`rm-verify` writes `qa/report.json`,
 `qa/segments.geojson`, `qa/outlier_stops.csv`, `qa/bearing_report.json`,
 `qa/match_dev_report.json`, `qa/segment_variant_report.json`, and
 `qa/grouping_report.json`.

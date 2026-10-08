@@ -78,7 +78,7 @@ coordinates, and the batch's `src_route_point`. Writes, in one transaction:
 | Flag | Default | Meaning |
 |---|---|---|
 | `--db` | `data/taichung.db` | SQLite database path |
-| `--batch` | latest OPEN batch | whose polylines to project |
+| `--batch` | latest batch (any status) | whose polylines to project |
 | `--outlier-m` | `50.0` | snap distance beyond which a stop is flagged OUTLIER |
 
 Prints one summary line: directions, projections (no_path, endpoint,

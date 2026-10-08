@@ -10,7 +10,8 @@ writes are the QA files.
 
 Verifies one batch over every layer, staging `src_*` tables through
 `seg_*`. Flags: `--db` (default `data/taichung.db`), `--batch`
-(default: latest OPEN batch; an error if none is OPEN and unset),
+(default: latest batch, any status; an error if the DB has no batches
+and unset),
 `--qa-dir` (default `qa`), `--preset` (`taichung` default; `taipei` and
 `tainan` select their own count ledgers — `Expectations::REAL` /
 `TAIPEI` / `TAINAN` in `src/lib.rs`). Writes seven files there:
