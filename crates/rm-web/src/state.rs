@@ -33,10 +33,14 @@ impl AppState {
     }
 
     /// Edit mode: POST routes mounted, writes authenticated by token → editor.
-    pub fn with_edit(db_path: PathBuf, tokens: HashMap<String, String>) -> Self {
+    pub fn with_edit(
+        db_path: PathBuf,
+        tiles: Option<String>,
+        tokens: HashMap<String, String>,
+    ) -> Self {
         Self {
             edit_tokens: Some(Arc::new(tokens)),
-            ..Self::with_tiles(db_path, None)
+            ..Self::with_tiles(db_path, tiles)
         }
     }
 

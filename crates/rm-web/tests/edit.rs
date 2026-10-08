@@ -13,7 +13,7 @@ fn edit_state(dir: &tempfile::TempDir) -> rm_web::state::AppState {
     drop(conn);
     let mut tokens = HashMap::new();
     tokens.insert("sekrit".to_string(), "herry".to_string());
-    rm_web::state::AppState::with_edit(dir.path().join("t.db"), tokens)
+    rm_web::state::AppState::with_edit(dir.path().join("t.db"), None, tokens)
 }
 
 async fn body_json(res: axum::response::Response) -> serde_json::Value {
@@ -194,4 +194,24 @@ async fn edit_routes_absent_without_edit_flag() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let v = get_json(&app, "/api/stats").await;
     assert_eq!(v["edit_enabled"], serde_json::Value::Bool(false));
+}
+
+#[tokio::test]
+async fn edit_state_keeps_tiles() {
+    let dir = tempfile::tempdir().unwrap();
+    let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
+    fixture(&conn);
+    drop(conn);
+    let mut tokens = HashMap::new();
+    tokens.insert("sekrit".to_string(), "herry".to_string());
+    let state = rm_web::state::AppState::with_edit(
+        dir.path().join("t.db"),
+        Some("https://tiles.internal/{z}/{x}/{y}.png".to_string()),
+        tokens,
+    );
+    assert_eq!(
+        state.tiles(),
+        Some("https://tiles.internal/{z}/{x}/{y}.png")
+    );
+    assert!(state.edit_enabled());
 }

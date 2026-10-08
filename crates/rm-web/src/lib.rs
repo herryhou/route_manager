@@ -24,7 +24,7 @@ pub async fn serve(
     edit_tokens: Option<HashMap<String, String>>,
 ) -> Result<()> {
     let state = match edit_tokens {
-        Some(tokens) => AppState::with_edit(db_path, tokens),
+        Some(tokens) => AppState::with_edit(db_path, tiles, tokens),
         None => AppState::with_tiles(db_path, tiles),
     };
     state.conn()?; // probe: friendly error before binding if DB missing/stale
