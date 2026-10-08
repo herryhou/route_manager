@@ -197,6 +197,40 @@ async fn edit_routes_absent_without_edit_flag() {
 }
 
 #[tokio::test]
+async fn log_and_undo_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    // edit stop 10 (name only — no stale marks needed for this test)
+    let res = rm_web::router_with(state.clone()).oneshot(
+        Request::builder().method("POST").uri("/api/edit/stop/10")
+            .header("authorization", "Bearer sekrit")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"stop_name": "New", "note": "fix"}"#)).unwrap(),
+    ).await.unwrap();
+    let v = body_json(res).await;
+    let edit_id = v["edit_id"].as_i64().unwrap();
+
+    // log lists it
+    let res = rm_web::router_with(state.clone()).oneshot(
+        Request::builder().uri("/api/edit/log?entity=stop&entity_id=1").body(Body::empty()).unwrap(),
+    ).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["rows"].as_array().unwrap().len(), 1);
+
+    // undo restores, requires token
+    let res = rm_web::router_with(state).oneshot(
+        Request::builder().method("POST").uri(format!("/api/edit/undo/{edit_id}"))
+            .header("authorization", "Bearer sekrit")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"note": "revert"}"#)).unwrap(),
+    ).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["new_stop_version_id"].as_i64().unwrap(), 10);
+}
+
+#[tokio::test]
 async fn edit_state_keeps_tiles() {
     let dir = tempfile::tempdir().unwrap();
     let conn = rm_db::open(&dir.path().join("t.db")).unwrap();

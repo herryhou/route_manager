@@ -49,7 +49,11 @@ pub fn router_with(state: AppState) -> Router {
             "/api/edit/stop/{stop_version_id}",
             axum::routing::post(handlers::edit::edit_stop),
         )
-        // Task 5 appends: log + undo routes here
+        .route("/api/edit/log", axum::routing::get(handlers::edit::log))
+        .route(
+            "/api/edit/undo/{edit_id}",
+            axum::routing::post(handlers::edit::undo),
+        )
         .with_state(state)
     } else {
         r.with_state(state)

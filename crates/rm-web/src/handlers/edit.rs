@@ -1,6 +1,6 @@
 //! Edit endpoints — mounted only when --edit passes tokens.
 
-use axum::extract::{FromRef, FromRequest, FromRequestParts, Path, Request, State};
+use axum::extract::{FromRef, FromRequest, FromRequestParts, Path, Query, Request, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::Json;
@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::error::ApiError;
-use crate::state::{run_db_write, AppState};
+use crate::state::{run_db, run_db_write, AppState};
 
 /// Bearer-token → editor name. 401 absent, 403 unknown.
 pub struct Editor(pub String);
@@ -106,5 +106,47 @@ pub async fn edit_stop(
         "edit_id": out.edit_id,
         "new_stop_version_id": out.new_version_id,
         "stale_routes": out.stale_routes,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct LogParams {
+    entity: String,
+    entity_id: i64,
+}
+
+#[derive(Deserialize)]
+pub struct UndoBody {
+    note: Option<String>,
+}
+
+/// GET /api/edit/log?entity=stop&entity_id=1 — audit trail for one entity
+/// (unauthenticated: the log is not secret; notes are for the team).
+pub async fn log(
+    Query(q): Query<LogParams>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let rows = run_db(state, move |conn| {
+        rm_db::entity_history(conn, &q.entity, q.entity_id)
+    })
+    .await?;
+    Ok(Json(json!({ "rows": rows })))
+}
+
+/// POST /api/edit/undo/{edit_id} — revert a stop edit by restoring the
+/// version that preceded it.
+pub async fn undo(
+    Path(edit_id): Path<i64>,
+    State(state): State<AppState>,
+    Editor(editor): Editor,
+    ApiJson(b): ApiJson<UndoBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let out = run_db_write(state, move |conn| {
+        rm_db::undo(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
+    })
+    .await?;
+    Ok(Json(json!({
+        "edit_id": out.edit_id,
+        "new_stop_version_id": out.new_version_id,
     })))
 }
