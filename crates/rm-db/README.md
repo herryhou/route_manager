@@ -22,7 +22,7 @@ UPDATE is reserved for pointers/revision inside a publish transaction.
 
 ## Migrations
 
-Seven SQL files under `migrations/`, embedded into the binary with
+Nine SQL files under `migrations/`, embedded into the binary with
 `include_str!` — no external migration tool, no migration command to
 forget. `migrate` creates `schema_migrations` if missing, applies each
 unrecorded file in order as one batch, and records version, name, and
@@ -40,6 +40,8 @@ deliberately never migrates.
 | `0005_bearing` | `stop_bearing`, `station_bearing` — derived data rebuilt per run, never stored inside the immutable `*_version` tables |
 | `0006_match_dev` | path→polyline deviation percentiles (`dev_p50_m`, `dev_p95_m`, `dev_max_m`) on `seg_match_stat` |
 | `0007_current_views` | the `*_current` read views (see below) |
+| `0008_pair_only` | segment identity becomes the directed station pair: `variant_count` + `length_spread_m` on `seg_segment`, `way_sig` on `seg_traversal` (per-route path variants as data) |
+| `0009_corridor_split` | one segment per corridor within a station pair: `pair_key` + `corridor_key` on `seg_segment` |
 
 Connections from `open` set `foreign_keys = ON`, WAL,
 `synchronous = NORMAL`, and a 30 s busy timeout (WAL is a no-op on

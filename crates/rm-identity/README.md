@@ -42,8 +42,13 @@ The crate distinguishes a "thing" at three zoom levels (see the
    same IDs.
 2. **First pass over stop edges** — the first occurrence of a `node_id`
    fixes station name/lat/lon; the first `(xno, dir, sid)` mints a stop.
-   If the same stop key later shows a different node, a warning
-   (`ambiguous stop ... first wins`) goes into the summary, never fails.
+   Each stop version then carries its *own* edge's name/lat/lon, not the
+   station's first-seen values — poles across a dual carriageway share a
+   station but sit metres apart, and the stop keeps its per-pole position
+   (the registry's split pass later moves mis-clustered poles onto
+   per-side stations). If the same stop key later shows a different
+   node, a warning (`ambiguous stop ... first wins`) goes into the
+   summary, never fails.
 3. **Cluster stations** (`src/grouping.rs`) — union-find: bucket by exact
    name, union pairs under 80 m haversine, transitively — a—b 28 m plus
    b—c 28 m chains into one group. Different names never group; same name

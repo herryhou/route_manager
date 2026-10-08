@@ -1,7 +1,7 @@
 # Segment corridor split — 設計 handoff
 
 日期：2026-10-07
-狀態：設計已核准，待實作
+狀態：**已實作**（commit bd1aaab）。三城結果：taichung 9954 segments / 22 split pairs、taipei 7317 / 25、tainan 5019 / 18。
 前置：docs/segment-canonical-cut.md（pair-only identity，commit 0d9e69f）
 
 ## 背景

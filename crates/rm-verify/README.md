@@ -11,7 +11,9 @@ writes are the QA files.
 Verifies one batch over every layer, staging `src_*` tables through
 `seg_*`. Flags: `--db` (default `data/taichung.db`), `--batch`
 (default: latest OPEN batch; an error if none is OPEN and unset),
-`--qa-dir` (default `qa`). Writes five files there:
+`--qa-dir` (default `qa`), `--preset` (`taichung` default; `taipei` and
+`tainan` select their own count ledgers — `Expectations::REAL` /
+`TAIPEI` / `TAINAN` in `src/lib.rs`). Writes seven files there:
 
 | File | Contents |
 |---|---|
@@ -20,6 +22,7 @@ Verifies one batch over every layer, staging `src_*` tables through
 | `outlier_stops.csv` | `path_stop_projection` rows snapped > 50 m or method `OUTLIER`, worst first |
 | `bearing_report.json` | stations over the 45° spread threshold with member bearings, plus the OSM/POLYLINE source mix |
 | `match_dev_report.json` | directions whose matched OSM path strays > 50 m (p95) from the src polyline, worst first, with matched ratio / gap repairs |
+| `segment_variant_report.json` | station pairs split into multiple corridor segments: member lengths, way lists, route users, widest gap first |
 | `grouping_report.json` | groups over the chain-drift thresholds with their member stations |
 
 ## What gets checked
@@ -79,6 +82,12 @@ Some classes are deliberately exempt:
   side streets; source polyline quality is a data issue, so it never
   fails the run. rm-web's "path dev" chip lists the same rows live for
   eyeballing ways-vs-raw on the map.
+- **Segment variants** — a station pair the registry split into multiple
+  corridor segments warns as `seg:variants` and lands in
+  `segment_variant_report.json` (`seg_split_pairs` in the stats). Splits
+  are the design working — dual carriageways are genuinely different
+  corridors — so the warning exists to keep the list reviewable, not to
+  fail the run. rm-web's "split pairs" chip mirrors it live.
 - **Chain drift** — grouping unions same-name stations at < 80 m hops,
   so a long chain can drift past any real interchange. A group over
   `GROUP_DIAMETER_WARN_M` (300 m) diameter or `GROUP_MEMBERS_WARN`
@@ -101,7 +110,9 @@ ids must not misattribute routes); bearing spread warns without
 failing; tight spread does not warn; tampered group membership fails
 the recompute check; a station without a current version fails the
 current-unique check; chain drift, sid ambiguity and untrimmed names
-warn without failing.
+warn without failing; a length-gap split yields two segments with
+bucket-quantized corridor keys, an unsplit pair lists nothing, and the
+match-dev report filters by its threshold.
 
 ## Why this stage exists
 

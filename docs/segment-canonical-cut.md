@@ -1,7 +1,7 @@
 # Segment canonical cut（跨 route 統一切點）handoff
 
 日期：2026-10-07
-狀態：設計討論中，**尚未實作**。前期工作（方案 A：snap-down + sliver + dedup）已完成，見 `segment-handoff.md`。
+狀態：**已實作**（pair-only identity，commit 0d9e69f；後續 corridor split 見 `segment-corridor-split.md`）。前期工作（方案 A：snap-down + sliver + dedup）已完成，見 `segment-handoff.md`。
 
 ## 脈絡
 

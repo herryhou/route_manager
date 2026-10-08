@@ -1,8 +1,9 @@
-# route_manger — Taichung bus pipeline
+# route_manger — Taiwan bus pipeline
 
-All-Rust pipeline turning raw Taichung ebus captures (392 routes) into one
-versioned SQLite database plus a directed OSM-aligned segment registry,
-implementing `docs/Architecture_design_spec.md` and `docs/DB_Schema_Spec.md`.
+All-Rust pipeline turning raw city ebus captures (Taichung 392, Taipei 406,
+Tainan 113 routes) into one versioned SQLite database per city plus a
+directed OSM-aligned segment registry, implementing
+`docs/Architecture_design_spec.md` and `docs/DB_Schema_Spec.md`.
 
 ## Layout
 
@@ -37,18 +38,23 @@ cargo run -r -p rm-ingest        # raw -> staging, opens batch 1
 cargo run -r -p rm-identity      # identities + V1 versions
 cargo run -r -p rm-publish       # 392 routes, atomic per route
 cargo run -r -p rm-segments      # projections + geometry drafts
-cargo run -r -p rm-osm-prepare   # PBF -> osm_* tables
+cargo run -r -p rm-osm-prepare \ # PBF -> osm_* tables
+    -- --pbf assets/taiwan-261004.osm.pbf --clip "23.89,120.41,24.53,121.42"
 cargo run -r -p rm-osm-match     # way runs + match stats
-cargo run -r -p rm-registry      # seg_segment / seg_segment_way / seg_traversal
-                                  #   + stop_bearing / station_bearing
+cargo run -r -p rm-registry      # stop_bearing / station_bearing, dual-
+                                  #   carriageway station split, then
+                                  #   seg_segment / seg_segment_way /
+                                  #   seg_traversal
 
 # 3. verify + QA exports (exits non-zero on any failed check)
-cargo run -r -p rm-verify
+cargo run -r -p rm-verify -- --preset taichung   # | taipei | tainan
 ```
 
 All bins accept `--db` (default `data/taichung.db`) and `--batch`
 (default: latest OPEN batch). `rm-verify` writes `qa/report.json`,
-`qa/segments.geojson`, `qa/outlier_stops.csv`, `qa/bearing_report.json`.
+`qa/segments.geojson`, `qa/outlier_stops.csv`, `qa/bearing_report.json`,
+`qa/match_dev_report.json`, `qa/segment_variant_report.json`, and
+`qa/grouping_report.json`.
 
 ## Bearings
 
@@ -75,9 +81,14 @@ See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
 
 - Station identity = API `node.id` (`station.ext_uid = tcg:node:{id}`);
   stop identity = `(route, direction, sid)` (`tcg:{xno}:{dir}:{sid}`).
-- Directed segments: `segment_id = blake3_128("tcg:node:{A} | tcg:node:{B} | w1|…|wn")`
-  over station ext_uids and travel-order OSM way ids; the reverse corridor
-  hashes differently (two ids per physical corridor).
+- Directed segments: identity is the directed station pair —
+  `pair_key = blake3_128("tcg:node:{A} | tcg:node:{B}")`. A pair's cuts are
+  length-clustered into corridors; each cluster is its own segment with
+  `segment_id = blake3_128(pair over A | B | corridor_key)`, where
+  `corridor_key` is the cluster's median length bucketed to 10 m. The
+  reverse corridor hashes differently (two ids per physical corridor);
+  per-route path variants (dual carriageways, detours) stay as
+  `way_sig` data on `seg_traversal`, not identity.
 - Shared-segment surface: `seg_traversal` grouped by `segment_id` with
   `COUNT(DISTINCT route_version_id) > 1`.
 

@@ -19,7 +19,7 @@ Writes, in one transaction:
 |---|---|
 | `src_route_header` | one row per route: xno, route_code, departure/destination, description, seq, is_cycled, op_type |
 | `src_route_provider` | route → provider code |
-| `src_stop_edge` | one row per station edge: direction, source_order_no, ivr_no (nullable), sid, node_id, station_name, lat/lon as doubles plus rounded ×1e6 ints |
+| `src_stop_edge` | one row per station edge: direction, source_order_no, ivr_no (nullable), sid, node_id, station_name (surrounding whitespace trimmed — grouping compares trimmed names), lat/lon as doubles plus rounded ×1e6 ints |
 | `src_route_point` | encoded polyline per direction — always two rows per route; a missing side stores `''` |
 | `src_provider` | one row per operator: code, name, telephone, op_type |
 | `src_main_side_route` | main ↔ side xno pairs, stored as-is even when dangling |
