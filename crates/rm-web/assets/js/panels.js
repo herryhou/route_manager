@@ -5,6 +5,11 @@ import { snapColor, matchedBadge, METHOD_COLORS } from './colors.js';
 let editable = false;
 export const setEditable = (b) => { editable = b; };
 
+/// Escape editor-writable text (stop_name) interpolated into HTML —
+/// attribute contexts included.
+const esc = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 export function renderRouteList(routes, { onSelect, selectedKey }) {
   const list = document.getElementById('route-list');
   list.innerHTML = '';
@@ -225,7 +230,7 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
             : '';
       return `<div class="stop-row" data-svid="${s.stop_version_id}" data-lat="${s.lat}" data-lon="${s.lon}">
         <span class="stop-seq">${s.stop_sequence}</span>
-        <span class="stop-name" title="${s.stop_name} · snap ${s.snap_dist_m?.toFixed(1) ?? '—'}m">${s.stop_name}</span>
+        <span class="stop-name" title="${esc(s.stop_name)} · snap ${s.snap_dist_m?.toFixed(1) ?? '—'}m">${esc(s.stop_name)}</span>
         ${badge}
       </div>`;
     })
@@ -285,7 +290,7 @@ export function profileSvg(stops) {
     .map(
       (s) => `<circle cx="${x(s.chainage_m)}" cy="${y(s.snap_dist_m)}" r="3"
         fill="${METHOD_COLORS[s.method] ?? '#7da7d9'}" fill-opacity="0.9">
-        <title>${s.stop_sequence}. ${s.stop_name} — snap ${s.snap_dist_m?.toFixed(1) ?? '—'}m (${s.method})</title>
+        <title>${s.stop_sequence}. ${esc(s.stop_name)} — snap ${s.snap_dist_m?.toFixed(1) ?? '—'}m (${s.method})</title>
       </circle>`
     )
     .join('');
@@ -364,9 +369,9 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
   const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);
   const items = (rows ?? [])
     .map(
-      (o) => `<div class="stop-row outlier-row" title="${o.stop_name} · ${o.method} · snap ${fmt(o.snap_dist_m)}">
+      (o) => `<div class="stop-row outlier-row" title="${esc(o.stop_name)} · ${o.method} · snap ${fmt(o.snap_dist_m)}">
         <span class="route-code">${o.route_code}</span>
-        <span class="stop-name">${o.stop_name}</span>
+        <span class="stop-name">${esc(o.stop_name)}</span>
         <span class="badge ${o.method === 'OUTLIER' ? 'bad' : 'warn'}">${fmt(o.snap_dist_m)}</span>
       </div>`
     )
@@ -504,7 +509,7 @@ export function stopPopupEl(d, { onPickRoute }) {
     <div class="pp-head">
       ${dialSvg(d.bearing?.bearing_deg, { color: 'var(--accent)' })}
       <div>
-        <div class="pp-title">${d.stop.stop_name} <span class="pp-code">#${d.stop.stop_code}</span></div>
+        <div class="pp-title">${esc(d.stop.stop_name)} <span class="pp-code">#${d.stop.stop_code}</span></div>
       </div>
     </div>
     <div class="pp-label"><h3>經過路線</h3></div>
@@ -549,9 +554,9 @@ function otherStationChips(members, selfId, onPickStation) {
 export function stationPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
   const stops = d.stops ?? [];
   const rows = stops
-    .map((s) => `<div class="stop-row" title="${s.stop_name}">
+    .map((s) => `<div class="stop-row" title="${esc(s.stop_name)}">
         <span class="stop-seq">#${s.stop_code}</span>
-        <span class="stop-name">${s.stop_name}</span>
+        <span class="stop-name">${esc(s.stop_name)}</span>
       </div>`)
     .join('');
   const others = (d.group_members ?? []).filter((m) => m.station_id !== d.station.station_id);
@@ -586,7 +591,7 @@ export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation, onEdit
     `<td class="st-pick" data-sid="${st.station_id}" title="open station detail">${st.station_name ?? st.station_id}</td>`;
   const pane = showPane('point', `
     <table class="kv">
-      <tr><td>stop</td><td>${d.stop.stop_name} (${d.stop.stop_code})
+      <tr><td>stop</td><td>${esc(d.stop.stop_name)} (${d.stop.stop_code})
         ${editable ? '<button class="mini-btn" data-act="rename" title="rename stop">✎</button>' : ''}
         ${editable ? '<button class="mini-btn" data-act="move" title="move stop position">移動位置</button>' : ''}</td></tr>
       ${d.stale && (d.stale.projections?.length || d.stale.bearings)
