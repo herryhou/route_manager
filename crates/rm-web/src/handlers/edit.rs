@@ -66,6 +66,15 @@ pub struct StopEditBody {
     note: Option<String>,
 }
 
+/// `rm_db::EditError` means the request lost a race with another editor
+/// (consumed version id, un-undoable edit) — 409, not the blanket 500.
+fn edit_conflict(err: ApiError) -> ApiError {
+    match err.downcast_ref::<rm_db::EditError>() {
+        Some(e) => ApiError::conflict(&e.to_string()),
+        None => err,
+    }
+}
+
 /// POST /api/edit/stop/{stop_version_id} — append a manual stop version.
 pub async fn edit_stop(
     Path(stop_version_id): Path<i64>,
@@ -101,7 +110,8 @@ pub async fn edit_stop(
     let out = run_db_write(state, move |conn| {
         rm_db::edit_stop(conn, stop_version_id, &edit, &editor, &note)
     })
-    .await?;
+    .await
+    .map_err(edit_conflict)?;
     Ok(Json(json!({
         "edit_id": out.edit_id,
         "new_stop_version_id": out.new_version_id,
@@ -144,7 +154,8 @@ pub async fn undo(
     let out = run_db_write(state, move |conn| {
         rm_db::undo(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
     })
-    .await?;
+    .await
+    .map_err(edit_conflict)?;
     Ok(Json(json!({
         "edit_id": out.edit_id,
         "new_stop_version_id": out.new_version_id,

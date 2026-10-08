@@ -263,6 +263,34 @@ async fn stop_detail_reports_staleness_after_position_edit() {
 }
 
 #[tokio::test]
+async fn second_edit_of_same_version_conflicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    let post = |body: &'static str| {
+        rm_web::router_with(state.clone()).oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/edit/stop/10")
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+    };
+    let res = post(r#"{"stop_name": "New"}"#).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    // resubmitting the consumed version id (e.g. a second editor working
+    // from a stale panel) is a conflict, not a server error
+    let res = post(r#"{"stop_name": "Newer"}"#).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let v = body_json(res).await;
+    assert!(
+        v["error"].as_str().unwrap().contains("not the current version"),
+        "{v}"
+    );
+}
+
+#[tokio::test]
 async fn edit_state_keeps_tiles() {
     let dir = tempfile::tempdir().unwrap();
     let conn = rm_db::open(&dir.path().join("t.db")).unwrap();

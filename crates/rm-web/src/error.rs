@@ -42,6 +42,21 @@ impl ApiError {
             status: Some(StatusCode::NOT_FOUND),
         }
     }
+
+    /// 409 helper for edit conflicts (stale version id, un-undoable edit).
+    pub fn conflict(msg: &str) -> Self {
+        Self {
+            err: anyhow::anyhow!("{msg}"),
+            status: Some(StatusCode::CONFLICT),
+        }
+    }
+
+    /// Inspect the wrapped anyhow error, so handlers can special-case domain
+    /// errors (e.g. `rm_db::EditError` → 409) that fell through the blanket
+    /// `From` map.
+    pub fn downcast_ref<E: std::error::Error + Send + Sync + 'static>(&self) -> Option<&E> {
+        self.err.downcast_ref::<E>()
+    }
 }
 
 impl IntoResponse for ApiError {

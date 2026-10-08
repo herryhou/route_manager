@@ -15,7 +15,7 @@ pub struct StopEdit {
 
 #[derive(Debug, Error)]
 pub enum EditError {
-    #[error("stop version {0} is not the current version")]
+    #[error("stop version {0} is not the current version (or does not exist)")]
     NotCurrent(i64),
     #[error("edit {0} cannot be undone (not current, or is itself an undo)")]
     NotUndoable(i64),

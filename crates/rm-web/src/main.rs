@@ -28,17 +28,20 @@ struct Args {
     edit_tokens: Option<String>,
 }
 
-/// Parse `name:token` entries, comma-separated.
+/// Parse `name:token` entries, comma-separated. Bails by entry index — the
+/// entries carry bare tokens, so they are never echoed.
 fn parse_tokens(s: &str) -> anyhow::Result<HashMap<String, String>> {
     let mut map = HashMap::new();
-    for entry in s.split(',') {
+    for (i, entry) in s.split(',').enumerate() {
         let Some((name, token)) = entry.split_once(':') else {
-            anyhow::bail!("malformed token entry {entry:?}: expected name:token");
+            anyhow::bail!("token entry {}: expected name:token", i + 1);
         };
         if name.is_empty() || token.is_empty() {
-            anyhow::bail!("malformed token entry {entry:?}: expected name:token");
+            anyhow::bail!("token entry {}: expected non-empty name:token", i + 1);
         }
-        map.insert(name.to_string(), token.to_string());
+        if map.insert(name.to_string(), token.to_string()).is_some() {
+            anyhow::bail!("token entry {}: duplicate name {name:?}", i + 1);
+        }
     }
     Ok(map)
 }
