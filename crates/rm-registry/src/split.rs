@@ -305,7 +305,9 @@ mod tests {
     #[test]
     fn few_or_identical_headings_stay_one() {
         assert_eq!(clusters(&[m(1, 10.0)]), vec![vec![1]]);
-        assert_eq!(clusters(&[]), vec![vec![]]);
+        // inner turbofish: serde_json::Value's PartialEq<i64> impl (linked via
+        // rm-db) otherwise leaves this empty literal's element type ambiguous
+        assert_eq!(clusters(&[]), vec![Vec::<i64>::new()]);
         assert_eq!(
             clusters(&[m(1, 10.0), m(2, 10.0), m(3, 10.1)]),
             vec![vec![1, 2, 3]]
