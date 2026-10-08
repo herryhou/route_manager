@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, variantPanel, segmentPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, variantPanel, segmentPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawSegmentHighlight, clearSegmentHighlight } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -37,6 +37,7 @@ let allRoutes = [];
 let selectedKey = null;
 let selectedRoute = null; // { route_id, dir }
 let lastRouteDraw = null; // { p, s, onStopClick } — for bearing-toggle redraw
+let editMode = false;
 
 function refreshList(q) {
   renderRouteList(filterRoutes(allRoutes, q), { selectedKey, onSelect: (r) => selectRoute(r) });
@@ -166,7 +167,7 @@ async function openStopPopup(stopVersionId, marker) {
     const el = stopPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
-    stopPanel(d, { onPickRoute, onPickSegment: selectSegment, onPickStation: selectStation });
+    stopPanel(d, { onPickRoute, onPickSegment: selectSegment, onPickStation: selectStation, onEditStop });
   } catch (e) {
     status(`stop load failed: ${e.message}`);
   }
@@ -226,7 +227,7 @@ async function popupStop(stopVersionId) {
     m.bindPopup(stopPopupEl(d, { onPickRoute }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([s.lat, s.lon], { animate: true });
-    stopPanel(d, { onPickRoute, onPickSegment: selectSegment, onPickStation: selectStation });
+    stopPanel(d, { onPickRoute, onPickSegment: selectSegment, onPickStation: selectStation, onEditStop });
   } catch (e) {
     status(`stop load failed: ${e.message}`);
   }
@@ -238,7 +239,7 @@ async function selectStop(stopVersionId) {
     const d = await api.stopDetail(stopVersionId);
     paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     highlightGroup(d.group_members);
-    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickSegment: selectSegment, onPickStation: selectStation });
+    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickSegment: selectSegment, onPickStation: selectStation, onEditStop });
     map.panTo([d.stop.lat, d.stop.lon], {
       animate: true,
     });
@@ -247,6 +248,52 @@ async function selectStop(stopVersionId) {
     status(`stop load failed: ${e.message}`);
   } finally {
     busy(false);
+  }
+}
+
+async function enableEditMode() {
+  if (!sessionStorage.getItem('rm-edit-token')) {
+    const tok = prompt('edit token:');
+    if (!tok) return;
+    sessionStorage.setItem('rm-edit-token', tok);
+  }
+  editMode = true;
+  setEditable(true);
+  document.getElementById('edit-toggle').classList.add('on');
+  status('edit mode on');
+}
+
+function disableEditMode() {
+  editMode = false;
+  setEditable(false);
+  document.getElementById('edit-toggle').classList.remove('on');
+  status('');
+}
+
+/// stop-panel edit actions: rename now, move = one-shot place mode.
+function onEditStop(act, stop) {
+  if (!editMode) return;
+  if (act === 'rename') {
+    const name = prompt(`rename stop #${stop.stop_code}:`, stop.stop_name);
+    if (!name || name === stop.stop_name) return;
+    const note = prompt('note (required):', '') ?? '';
+    if (!note) return;
+    api.editStop(stop.stop_version_id, { stop_name: name, note })
+      .then((r) => { status('renamed'); return selectStop(r.new_stop_version_id); })
+      .catch((e) => status(`rename failed: ${e.message}`));
+  } else if (act === 'move') {
+    status('click the map to place the stop');
+    const handler = (e) => {
+      map.off('click', handler);
+      const dist = Math.round(L.latLng([stop.lat, stop.lon]).distanceTo(e.latlng));
+      if (!confirm(`move stop #${stop.stop_code} ${dist} m?\n(${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}) → (${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)})`)) return status('');
+      const note = prompt('note (required):', '') ?? '';
+      if (!note) return status('');
+      api.editStop(stop.stop_version_id, { lat: e.latlng.lat, lon: e.latlng.lng, note })
+        .then((r) => { status(`moved ${dist} m`); return selectStop(r.new_stop_version_id); })
+        .catch((err) => status(`move failed: ${err.message}`));
+    };
+    map.on('click', handler);
   }
 }
 
@@ -466,6 +513,11 @@ async function boot() {
     setChip('chip-outliers', s.outlier_stops ?? '—');
     setChip('chip-matchdev', s.match?.directions_dev_p95_over_50m ?? '—');
     setChip('chip-variants', s.variants?.split_pairs ?? '—');
+    if (s.edit_enabled) {
+      const btn = document.getElementById('edit-toggle');
+      btn.hidden = false;
+      btn.addEventListener('click', () => (editMode ? disableEditMode() : enableEditMode()));
+    }
     if (s.batch) {
       status(`batch ${s.batch.batch_id} · captured ${s.batch.captured_at} · ${s.batch.status}`);
     }

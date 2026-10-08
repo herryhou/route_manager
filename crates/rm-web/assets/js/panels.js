@@ -1,6 +1,10 @@
 // Sidebar + detail panel rendering.
 import { snapColor, matchedBadge, METHOD_COLORS } from './colors.js';
 
+/// Edit mode (phase 1): stop panels gain rename/move buttons when on.
+let editable = false;
+export const setEditable = (b) => { editable = b; };
+
 export function renderRouteList(routes, { onSelect, selectedKey }) {
   const list = document.getElementById('route-list');
   list.innerHTML = '';
@@ -557,6 +561,7 @@ export function stationPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
     ['spread', d.bearing ? `${Math.round(d.bearing.max_spread_deg)}°` : '—'],
     ['members', d.bearing?.member_count ?? stops.length],
     ['group', d.group ? d.group.station_group_name : '—'],
+    ...(d.stale?.bearings ? [['stale', '<span class="pp-hot">⚠ bearings stale</span>']] : []),
   ])}
     <h3>其它 Stations (${others.length})</h3>
     <div class="other-station-chips"></div>
@@ -576,12 +581,17 @@ export function stationPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
 }
 
 /// Stop drill-down panel: stop → station → group + incident segments + serving routes.
-export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
+export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation, onEditStop }) {
   const stCell = (st) =>
     `<td class="st-pick" data-sid="${st.station_id}" title="open station detail">${st.station_name ?? st.station_id}</td>`;
   const pane = showPane('point', `
     <table class="kv">
-      <tr><td>stop</td><td>${d.stop.stop_name} (${d.stop.stop_code})</td></tr>
+      <tr><td>stop</td><td>${d.stop.stop_name} (${d.stop.stop_code})
+        ${editable ? '<button class="mini-btn" data-act="rename" title="rename stop">✎</button>' : ''}
+        ${editable ? '<button class="mini-btn" data-act="move" title="move stop position">移動位置</button>' : ''}</td></tr>
+      ${d.stale && (d.stale.projections?.length || d.stale.bearings)
+        ? `<tr><td>stale</td><td><span class="pp-hot">⚠ ${d.stale.projections?.length ?? 0} route projections · bearings ${d.stale.bearings ? 'stale' : 'ok'}</span></td></tr>`
+        : ''}
       <tr><td>bearing</td><td>${d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'}</td></tr>
       <tr><td>station</td>${stCell(d.station)}</tr>
     <tr><td>station bearing</td><td>${d.station_bearing
@@ -602,6 +612,10 @@ export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
   pane.querySelectorAll('.st-pick').forEach((el) =>
     el.addEventListener('click', () => onPickStation(Number(el.dataset.sid)))
   );
+  if (editable && onEditStop) {
+    pane.querySelectorAll('.mini-btn').forEach((el) =>
+      el.addEventListener('click', () => onEditStop(el.dataset.act, d.stop)));
+  }
   pane.querySelector('.segment-rows').append(segmentRows(d.segments, { onPick: onPickSegment }));
   pane.querySelector('.group-chips').append(
     otherStationChips(d.group_members, d.station.station_id, onPickStation)

@@ -30,3 +30,24 @@ export const stationsSearch = (q) => fetchJson(`/api/stations?q=${encodeURICompo
 export const outliers = (minSnap = 50) => fetchJson(`/api/qa/outliers?min_snap=${minSnap}`);
 export const matchDevs = (minDev = 50) => fetchJson(`/api/qa/matchdev?min_dev=${minDev}`);
 export const variants = (minSpread = 0) => fetchJson(`/api/qa/variants?min_spread=${minSpread}`);
+
+// --- edit mode (phase 1) ---
+export const editToken = () => sessionStorage.getItem('rm-edit-token') ?? '';
+
+async function editFetch(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${editToken()}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let msg = '';
+    try { msg = (await res.json()).error ?? ''; } catch { /* not json */ }
+    throw new Error(`HTTP ${res.status}: ${msg || res.statusText}`);
+  }
+  return res.json();
+}
+
+export const editStop = (svi, body) => editFetch(`/api/edit/stop/${svi}`, body);
+export const undoEdit = (id, note) => editFetch(`/api/edit/undo/${id}`, { note });
+export const editLog = (entity, id) => fetchJson(`/api/edit/log?entity=${entity}&entity_id=${id}`);
