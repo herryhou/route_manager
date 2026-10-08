@@ -13,7 +13,7 @@ mod batch;
 mod migrate;
 
 pub use allocator::mint;
-pub use batch::{create_batch, latest_open_batch, set_batch_status};
+pub use batch::{create_batch, latest_batch, latest_open_batch, set_batch_status};
 pub use migrate::migrate;
 
 /// RFC3339 UTC timestamp for created_at/valid_from columns.

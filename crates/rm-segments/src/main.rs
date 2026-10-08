@@ -8,7 +8,7 @@ struct Args {
     /// SQLite DB path
     #[arg(long, default_value = "data/taichung.db")]
     db: PathBuf,
-    /// Batch whose polylines to use (default: latest OPEN)
+    /// Batch whose polylines to use (default: latest)
     #[arg(long)]
     batch: Option<i64>,
     /// Snap distance beyond which a stop is flagged OUTLIER (metres)
@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
     let conn = rm_db::open(&args.db)?;
     let batch = match args.batch {
         Some(b) => b,
-        None => rm_db::latest_open_batch(&conn)?.expect("no OPEN batch; run rm-ingest first"),
+        None => rm_db::latest_batch(&conn)?.expect("no import batch; run rm-ingest first"),
     };
     let s = rm_segments::run(&conn, batch, args.outlier_m)?;
     println!(

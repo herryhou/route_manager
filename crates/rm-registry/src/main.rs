@@ -7,7 +7,7 @@ struct Args {
     #[arg(long, default_value = "data/taichung.db")]
     db: String,
 
-    /// Import batch to process (default: latest OPEN batch)
+    /// Import batch to process (default: latest batch)
     #[arg(long)]
     batch: Option<i64>,
 }
@@ -24,8 +24,8 @@ fn main() -> anyhow::Result<()> {
     let conn = rm_db::open(std::path::Path::new(&args.db))?;
     let batch = match args.batch {
         Some(b) => b,
-        None => rm_db::latest_open_batch(&conn)?
-            .ok_or_else(|| anyhow::anyhow!("no OPEN batch; pass --batch"))?,
+        None => rm_db::latest_batch(&conn)?
+            .ok_or_else(|| anyhow::anyhow!("no import batch; pass --batch"))?,
     };
     let b = rm_registry::bearing::run(&conn, batch)?;
     println!(

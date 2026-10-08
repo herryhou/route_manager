@@ -9,7 +9,7 @@ struct Args {
     #[arg(long, default_value = "data/taichung.db")]
     db: String,
 
-    /// Import batch to verify (default: latest OPEN batch)
+    /// Import batch to verify (default: latest batch)
     #[arg(long)]
     batch: Option<i64>,
 
@@ -34,8 +34,8 @@ fn main() -> anyhow::Result<()> {
     let conn = rm_db::open(std::path::Path::new(&args.db))?;
     let batch = match args.batch {
         Some(b) => b,
-        None => rm_db::latest_open_batch(&conn)?
-            .ok_or_else(|| anyhow::anyhow!("no OPEN batch; pass --batch"))?,
+        None => rm_db::latest_batch(&conn)?
+            .ok_or_else(|| anyhow::anyhow!("no import batch; pass --batch"))?,
     };
     let expect = match args.preset.as_str() {
         "taichung" => rm_verify::Expectations::REAL,

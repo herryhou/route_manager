@@ -8,7 +8,7 @@ struct Args {
     /// SQLite DB path
     #[arg(long, default_value = "data/taichung.db")]
     db: PathBuf,
-    /// Batch to publish (default: latest OPEN)
+    /// Batch to publish (default: latest)
     #[arg(long)]
     batch: Option<i64>,
 }
@@ -21,7 +21,7 @@ fn main() -> anyhow::Result<()> {
     let mut conn = rm_db::open(&args.db)?;
     let batch = match args.batch {
         Some(b) => b,
-        None => rm_db::latest_open_batch(&conn)?.expect("no OPEN batch; run rm-ingest first"),
+        None => rm_db::latest_batch(&conn)?.expect("no import batch; run rm-ingest first"),
     };
     let s = rm_publish::run(&mut conn, batch)?;
     println!(
