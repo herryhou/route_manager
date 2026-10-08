@@ -95,7 +95,9 @@ mod tests {
             "2026-10-02T00:00:00Z",
         )
         .unwrap();
-        set_batch_status(&conn, id1, "CLOSED").unwrap();
+        // closing the NEWEST batch is what discriminates: an OPEN-only
+        // filter would return None here, the any-status default returns id2
+        set_batch_status(&conn, id2, "CLOSED").unwrap();
         assert_eq!(latest_batch(&conn).unwrap(), Some(id2));
     }
 }
