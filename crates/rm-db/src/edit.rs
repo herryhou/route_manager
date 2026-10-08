@@ -124,33 +124,7 @@ pub fn edit_stop(
 
     let mut stale_routes = Vec::new();
     if edit.lat.is_some() || edit.lon.is_some() {
-        {
-            let mut stmt = tx.prepare(
-                "SELECT DISTINCT rv.route_id
-                 FROM route_stop_version rsv
-                 JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
-                 JOIN route_version rv ON rv.route_version_id = sv.route_version_id
-                 WHERE rsv.stop_version_id = ?1",
-            )?;
-            let rows = stmt.query_map([new_id], |r| r.get::<_, i64>(0))?;
-            for rid in rows {
-                stale_routes.push(rid?);
-            }
-        }
-        for rid in &stale_routes {
-            tx.execute(
-                "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
-                 VALUES ('path_stop_projection', ?1, ?2, ?3)",
-                params![rid.to_string(), edit_id, now],
-            )?;
-        }
-        for tbl in ["stop_bearing", "station_bearing"] {
-            tx.execute(
-                "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
-                 VALUES (?1, '*', ?2, ?3)",
-                params![tbl, edit_id, now],
-            )?;
-        }
+        stale_routes = mark_position_stale(&tx, new_id, edit_id, &now)?;
     }
     tx.commit()?;
     Ok(EditOutcome {
@@ -160,21 +134,63 @@ pub fn edit_stop(
     })
 }
 
+/// Mark the derived data that depends on a stop's position stale: one
+/// `path_stop_projection` row per route serving `stop_version_id` (whose
+/// `route_stop_version` rows must already point at it) plus the whole
+/// `stop_bearing`/`station_bearing` tables. Idempotent via INSERT OR IGNORE
+/// on the `(table_name, key)` primary key.
+fn mark_position_stale(
+    tx: &Connection,
+    stop_version_id: i64,
+    edit_id: i64,
+    now: &str,
+) -> Result<Vec<i64>> {
+    let mut stale_routes = Vec::new();
+    {
+        let mut stmt = tx.prepare(
+            "SELECT DISTINCT rv.route_id
+             FROM route_stop_version rsv
+             JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
+             JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+             WHERE rsv.stop_version_id = ?1",
+        )?;
+        let rows = stmt.query_map([stop_version_id], |r| r.get::<_, i64>(0))?;
+        for rid in rows {
+            stale_routes.push(rid?);
+        }
+    }
+    for rid in &stale_routes {
+        tx.execute(
+            "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+             VALUES ('path_stop_projection', ?1, ?2, ?3)",
+            params![rid.to_string(), edit_id, now],
+        )?;
+    }
+    for tbl in ["stop_bearing", "station_bearing"] {
+        tx.execute(
+            "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+             VALUES (?1, '*', ?2, ?3)",
+            params![tbl, edit_id, now],
+        )?;
+    }
+    Ok(stale_routes)
+}
+
 pub fn undo(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result<EditOutcome> {
     let tx = conn.unchecked_transaction()?;
-    let row: (String, i64, String, Option<i64>, Option<i64>) = match tx
-        .query_row(
-            "SELECT entity, entity_id, action, version_before, version_after
-             FROM edit_log WHERE edit_id = ?1",
-            [edit_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-        )
-        .optional()?
-    {
-        Some(v) => v,
-        None => return Err(EditError::NotUndoable(edit_id).into()),
+    let row: (String, i64, String, Option<i64>, Option<i64>, String) = match tx.query_row(
+        "SELECT entity, entity_id, action, version_before, version_after, changes
+         FROM edit_log WHERE edit_id = ?1",
+        [edit_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(EditError::NotUndoable(edit_id).into())
+        }
+        Err(e) => return Err(e.into()),
     };
-    let (entity, stable_id, action, version_before, version_after) = row;
+    let (entity, stable_id, action, version_before, version_after, changes) = row;
     if entity != "stop" || action == "undo" {
         return Err(EditError::NotUndoable(edit_id).into());
     }
@@ -196,6 +212,11 @@ pub fn undo(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result
     if valid_to.is_some() {
         return Err(EditError::NotUndoable(edit_id).into());
     }
+    // a position change was undone: the derived data recomputed at the
+    // edited position is stale again (spec §Staleness — any position change)
+    let changes_json: serde_json::Value = serde_json::from_str(&changes)?;
+    let position_changed = changes_json.get("latitude").is_some()
+        || changes_json.get("longitude").is_some();
 
     let now = crate::now_rfc3339();
     tx.execute(
@@ -228,11 +249,17 @@ pub fn undo(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result
         ],
     )?;
     let undo_edit_id = tx.last_insert_rowid();
+
+    let mut stale_routes = Vec::new();
+    if position_changed {
+        // route_stop_version already points at `before` (repointed above)
+        stale_routes = mark_position_stale(&tx, before, undo_edit_id, &now)?;
+    }
     tx.commit()?;
     Ok(EditOutcome {
         edit_id: undo_edit_id,
         new_version_id: before,
-        stale_routes: Vec::new(),
+        stale_routes,
     })
 }
 
@@ -391,6 +418,35 @@ mod tests {
         let c = edit_stop(&conn, b.new_version_id, &StopEdit { stop_name: Some("C".into()), ..Default::default() }, "h", "n").unwrap();
         let u = undo(&conn, c.edit_id, "h", "n").unwrap();
         assert!(undo(&conn, u.edit_id, "h", "n").is_err());
+    }
+
+    #[test]
+    fn undo_of_position_edit_remarks_stale() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let out = edit_stop(&conn, old, &StopEdit { lat: Some(24.001), lon: None, stop_name: None }, "herry", "move").unwrap();
+        // simulate a refresh having consumed the edit's marks: undo must
+        // re-mark the derived data for the restored position
+        conn.execute("DELETE FROM stale_mark", []).unwrap();
+        let u = undo(&conn, out.edit_id, "herry", "revert").unwrap();
+        // route 1 (serving the repointed version) + both bearing tables
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 3);
+        let causes: Vec<i64> = conn.prepare("SELECT DISTINCT cause_edit_id FROM stale_mark").unwrap()
+            .query_map([], |r| r.get(0)).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(causes, vec![u.edit_id], "marks must come from the undo itself");
+        assert_eq!(u.stale_routes, vec![1]);
+    }
+
+    #[test]
+    fn undo_of_name_only_edit_writes_no_stale_marks() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let out = edit_stop(&conn, old, &StopEdit { stop_name: Some("N".into()), ..Default::default() }, "herry", "rename").unwrap();
+        let u = undo(&conn, out.edit_id, "herry", "revert").unwrap();
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        assert!(u.stale_routes.is_empty());
     }
 
     #[test]
