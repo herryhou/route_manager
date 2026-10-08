@@ -123,6 +123,9 @@ pub fn edit_stop(
     let edit_id = tx.last_insert_rowid();
 
     let mut stale_routes = Vec::new();
+    // stop_bearing rows are deleted unconditionally above → always marked;
+    // position-dependent data only when the position moved
+    mark_bearings_stale(&tx, edit_id, &now)?;
     if edit.lat.is_some() || edit.lon.is_some() {
         stale_routes = mark_position_stale(&tx, new_id, edit_id, &now)?;
     }
@@ -134,10 +137,23 @@ pub fn edit_stop(
     })
 }
 
+/// The edited/restored version's `stop_bearing` rows were deleted (every
+/// edit_stop/undo does), so the whole table's derived data is stale until
+/// the bearing refresh re-runs. Idempotent via INSERT OR IGNORE.
+fn mark_bearings_stale(tx: &Connection, edit_id: i64, now: &str) -> Result<()> {
+    tx.execute(
+        "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+         VALUES ('stop_bearing', '*', ?1, ?2)",
+        params![edit_id, now],
+    )?;
+    Ok(())
+}
+
 /// Mark the derived data that depends on a stop's position stale: one
 /// `path_stop_projection` row per route serving `stop_version_id` (whose
 /// `route_stop_version` rows must already point at it) plus the whole
-/// `stop_bearing`/`station_bearing` tables. Idempotent via INSERT OR IGNORE
+/// `station_bearing` table (`stop_bearing` is marked unconditionally —
+/// see `mark_bearings_stale`). Idempotent via INSERT OR IGNORE
 /// on the `(table_name, key)` primary key.
 fn mark_position_stale(
     tx: &Connection,
@@ -166,13 +182,11 @@ fn mark_position_stale(
             params![rid.to_string(), edit_id, now],
         )?;
     }
-    for tbl in ["stop_bearing", "station_bearing"] {
-        tx.execute(
-            "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
-             VALUES (?1, '*', ?2, ?3)",
-            params![tbl, edit_id, now],
-        )?;
-    }
+    tx.execute(
+        "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+         VALUES ('station_bearing', '*', ?1, ?2)",
+        params![edit_id, now],
+    )?;
     Ok(stale_routes)
 }
 
@@ -251,6 +265,9 @@ pub fn undo(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result
     let undo_edit_id = tx.last_insert_rowid();
 
     let mut stale_routes = Vec::new();
+    // the undo deleted the restored-from edit's bearing rows → always mark;
+    // position-dependent data only when the undone edit moved the stop
+    mark_bearings_stale(&tx, undo_edit_id, &now)?;
     if position_changed {
         // route_stop_version already points at `before` (repointed above)
         stale_routes = mark_position_stale(&tx, before, undo_edit_id, &now)?;
@@ -353,12 +370,15 @@ mod tests {
     }
 
     #[test]
-    fn name_only_edit_writes_no_stale_marks() {
+    fn name_only_edit_marks_only_bearings() {
         let conn = open_in_memory().unwrap();
         let old = fixture(&conn);
         let out = edit_stop(&conn, old, &StopEdit { lat: None, lon: None, stop_name: Some("N2".into()) }, "herry", "rename").unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
-        assert_eq!(n, 0);
+        // the rename deleted the stop's bearing rows → only that mark; no
+        // route projections or station bearing
+        let (tbl, key): (String, String) = conn.query_row(
+            "SELECT table_name, key FROM stale_mark", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((tbl.as_str(), key.as_str()), ("stop_bearing", "*"));
         assert!(out.stale_routes.is_empty());
     }
 
@@ -439,13 +459,17 @@ mod tests {
     }
 
     #[test]
-    fn undo_of_name_only_edit_writes_no_stale_marks() {
+    fn undo_of_name_only_edit_marks_only_bearings() {
         let conn = open_in_memory().unwrap();
         let old = fixture(&conn);
         let out = edit_stop(&conn, old, &StopEdit { stop_name: Some("N".into()), ..Default::default() }, "herry", "rename").unwrap();
+        // simulate a refresh having consumed the edit's mark: the undo
+        // deletes stop_bearing rows too, so it must re-mark them itself
+        conn.execute("DELETE FROM stale_mark", []).unwrap();
         let u = undo(&conn, out.edit_id, "herry", "revert").unwrap();
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
-        assert_eq!(n, 0);
+        let (tbl, key): (String, String) = conn.query_row(
+            "SELECT table_name, key FROM stale_mark", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((tbl.as_str(), key.as_str()), ("stop_bearing", "*"));
         assert!(u.stale_routes.is_empty());
     }
 
