@@ -38,6 +38,7 @@ let selectedKey = null;
 let selectedRoute = null; // { route_id, dir }
 let lastRouteDraw = null; // { p, s, onStopClick } — for bearing-toggle redraw
 let editMode = false;
+let pendingPlace = null; // armed move-place map handler — replaced/cancelled, never stacked
 
 function refreshList(q) {
   renderRouteList(filterRoutes(allRoutes, q), { selectedKey, onSelect: (r) => selectRoute(r) });
@@ -265,6 +266,10 @@ async function enableEditMode() {
 
 function disableEditMode() {
   editMode = false;
+  if (pendingPlace) {
+    map.off('click', pendingPlace);
+    pendingPlace = null;
+  }
   setEditable(false);
   document.getElementById('edit-toggle').classList.remove('on');
   status('');
@@ -284,7 +289,8 @@ function onEditStop(act, stop) {
   } else if (act === 'move') {
     status('click the map to place the stop');
     const handler = (e) => {
-      map.off('click', handler);
+      pendingPlace = null;
+      if (!editMode) return;
       const dist = Math.round(L.latLng([stop.lat, stop.lon]).distanceTo(e.latlng));
       if (!confirm(`move stop #${stop.stop_code} ${dist} m?\n(${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}) → (${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)})`)) return status('');
       const note = prompt('note (required):', '') ?? '';
@@ -293,6 +299,8 @@ function onEditStop(act, stop) {
         .then((r) => { status(`moved ${dist} m`); return selectStop(r.new_stop_version_id); })
         .catch((err) => status(`move failed: ${err.message}`));
     };
+    if (pendingPlace) map.off('click', pendingPlace);
+    pendingPlace = handler;
     map.on('click', handler);
   }
 }
