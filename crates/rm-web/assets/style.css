@@ -57,8 +57,21 @@ body {
   color: var(--text);
 }
 
+/* Plain count chips (routes/stops/…) are passive info, not controls —
+   drop the pill so only the clickable QA chips read as interactive. */
+.chip:not(.chip-click) {
+  background: transparent;
+  border-color: transparent;
+  padding-inline: 2px;
+}
+
 .chip-click {
   cursor: pointer;
+}
+
+.chip-click:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 #main {
