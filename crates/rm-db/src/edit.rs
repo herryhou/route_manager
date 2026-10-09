@@ -364,6 +364,60 @@ pub fn load_station_snapshot(
     }))
 }
 
+/// Current row of one stop (pole) — current-row discipline
+/// (`valid_to IS NULL`). `None` when the version is closed or missing.
+#[derive(Debug)]
+pub struct StopSnapshot {
+    pub stop_id: i64,
+    pub station_id: i64,
+    pub stop_version_id: i64,
+    pub stop_code: String,
+    pub stop_name: String,
+    pub direction: i64,
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+pub fn load_stop_snapshot(
+    conn: &Connection,
+    stop_version_id: i64,
+) -> Result<Option<StopSnapshot>> {
+    let res = conn.query_row(
+        "SELECT stop_id, station_id, stop_version_id, stop_code, stop_name,
+                direction, latitude, longitude
+         FROM stop_version WHERE stop_version_id = ?1 AND valid_to IS NULL",
+        [stop_version_id],
+        |r| {
+            Ok(StopSnapshot {
+                stop_id: r.get(0)?,
+                station_id: r.get(1)?,
+                stop_version_id: r.get(2)?,
+                stop_code: r.get(3)?,
+                stop_name: r.get(4)?,
+                direction: r.get(5)?,
+                latitude: r.get(6)?,
+                longitude: r.get(7)?,
+            })
+        },
+    );
+    match res {
+        Ok(s) => Ok(Some(s)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Does `station_id` have a current `station_version`? (Regroup target check.)
+pub fn station_is_current(conn: &Connection, station_id: i64) -> Result<bool> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM station_version
+         WHERE station_id = ?1 AND valid_to IS NULL",
+        [station_id],
+        |r| r.get(0),
+    )?;
+    Ok(n > 0)
+}
+
 /// Read-side DTO for the logged station rename (consumed by
 /// rm-edit::plan_rename_undo). edit_log is append-only, so a plan parsed
 /// from this row is immutable; apply re-validates currency in its tx.
@@ -904,6 +958,37 @@ mod tests {
         conn.execute("UPDATE station_version SET valid_to = '2026-01-02T00:00:00Z' WHERE station_version_id = 1", []).unwrap();
         assert!(load_station_snapshot(&conn, 1).unwrap().is_none());
         assert!(load_station_snapshot(&conn, 999).unwrap().is_none());
+    }
+
+    #[test]
+    fn load_stop_snapshot_returns_current_row() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let s = load_stop_snapshot(&conn, old).unwrap().expect("current");
+        assert_eq!(
+            (s.stop_id, s.station_id, s.stop_version_id),
+            (1, 1, old)
+        );
+        assert_eq!(s.stop_name, "Old");
+        assert_eq!((s.latitude, s.longitude), (24.0, 120.0));
+    }
+
+    #[test]
+    fn load_stop_snapshot_none_for_non_current_or_missing() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        edit_stop(&conn, old, &StopEdit { stop_name: Some("N".into()), ..Default::default() }, "h", "n").unwrap();
+        // old is now closed; the minted version is current
+        assert!(load_stop_snapshot(&conn, old).unwrap().is_none());
+        assert!(load_stop_snapshot(&conn, 999).unwrap().is_none());
+    }
+
+    #[test]
+    fn station_is_current_checks_valid_to() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        assert!(station_is_current(&conn, 1).unwrap());
+        assert!(!station_is_current(&conn, 42).unwrap());
     }
 
     #[test]
