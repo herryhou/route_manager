@@ -1,6 +1,9 @@
 //! Scenario 1: station rename — domain model and pure planning policy.
 
+use anyhow::Result;
+use rm_db::{apply_station_rename, load_station_snapshot, PoleOp, StationRenameOp};
 use rm_db::StationSnapshot;
+use rusqlite::Connection;
 
 /// How aggressively poles follow a station rename. A parameter, not a
 /// policy: all three are legitimate user choices.
@@ -97,6 +100,66 @@ pub fn plan_station_rename(
         new_name: cmd.new_name,
         level: cmd.level,
         poles,
+    })
+}
+
+#[derive(Debug)]
+pub struct RenameOutcome {
+    pub edit_id: i64,
+    pub new_station_version_id: i64,
+    pub poles: Vec<PoleRenamed>,
+}
+
+#[derive(Debug)]
+pub struct PoleRenamed {
+    pub stop_id: i64,
+    pub old_svi: i64,
+    pub new_svi: i64,
+}
+
+/// Application service: load → plan (pure) → apply (one tx). Zero SQL here.
+pub fn rename_station(
+    conn: &Connection,
+    cmd: StationRename,
+    editor: &str,
+    note: &str,
+) -> Result<RenameOutcome> {
+    let snapshot = load_station_snapshot(conn, cmd.station_version_id)?
+        .ok_or(EditError::StationNotCurrent(cmd.station_version_id))?;
+    let plan = plan_station_rename(&snapshot, cmd)?;
+    let op = StationRenameOp {
+        station_id: plan.station_id,
+        old_station_version_id: plan.station_version_id,
+        old_station_name: plan.old_name.clone(),
+        new_station_name: plan.new_name.clone(),
+        level: plan.level.as_str().to_string(),
+        poles: plan
+            .poles
+            .iter()
+            .map(|p| PoleOp {
+                stop_id: p.stop_id,
+                old_stop_version_id: p.old_stop_version_id,
+                new_stop_name: p.new_stop_name.clone(),
+            })
+            .collect(),
+    };
+    let applied = apply_station_rename(conn, &op, editor, note).map_err(|e| {
+        // rm-db re-validates inside its tx; surface its typed stale-version
+        // error as this crate's public EditError
+        match e.downcast_ref::<rm_db::EditError>() {
+            Some(rm_db::EditError::StationNotCurrent(id)) => EditError::StationNotCurrent(*id).into(),
+            Some(rm_db::EditError::NotCurrent(id)) => EditError::StationNotCurrent(*id).into(),
+            _ => e,
+        }
+    })?;
+    Ok(RenameOutcome {
+        edit_id: applied.edit_id,
+        new_station_version_id: applied.new_station_version_id,
+        poles: applied
+            .poles
+            .into_iter()
+            .map(|p| PoleRenamed { stop_id: p.stop_id, old_svi: p.old_svi, new_svi: p.new_svi })
+            .collect(),
     })
 }
 
