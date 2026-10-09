@@ -364,6 +364,49 @@ pub fn load_station_snapshot(
     }))
 }
 
+/// Read-side DTO for the logged station rename (consumed by
+/// rm-edit::plan_rename_undo). edit_log is append-only, so a plan parsed
+/// from this row is immutable; apply re-validates currency in its tx.
+#[derive(Debug)]
+pub struct StationRenameEdit {
+    pub edit_id: i64,
+    pub station_id: i64,
+    pub action: String,
+    pub old_station_version_id: Option<i64>, // edit_log.version_before
+    pub new_station_version_id: Option<i64>, // edit_log.version_after
+    pub changes: serde_json::Value,
+}
+
+/// Load one edit_log row (any entity — the plan's kind guard is the
+/// discriminator) with `changes` parsed as JSON. `None` when `edit_id`
+/// does not exist.
+pub fn load_station_rename_edit(
+    conn: &Connection,
+    edit_id: i64,
+) -> Result<Option<StationRenameEdit>> {
+    let row: (i64, String, Option<i64>, Option<i64>, String) = match conn
+        .query_row(
+            "SELECT entity_id, action, version_before, version_after, changes
+             FROM edit_log WHERE edit_id = ?1",
+            [edit_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()?
+    {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+    let (station_id, action, vb, va, changes) = row;
+    Ok(Some(StationRenameEdit {
+        edit_id,
+        station_id,
+        action,
+        old_station_version_id: vb,
+        new_station_version_id: va,
+        changes: serde_json::from_str(&changes)?,
+    }))
+}
+
 /// Write-side op for the station rename (rm-edit maps a StationRenamePlan
 /// into this; rm-db knows nothing about the domain types).
 #[derive(Debug)]
@@ -743,6 +786,27 @@ mod tests {
         conn.execute("UPDATE station_version SET valid_to = '2026-01-02T00:00:00Z' WHERE station_version_id = 1", []).unwrap();
         assert!(load_station_snapshot(&conn, 1).unwrap().is_none());
         assert!(load_station_snapshot(&conn, 999).unwrap().is_none());
+    }
+
+    #[test]
+    fn load_station_rename_edit_returns_parsed_row() {
+        let conn = open_in_memory().unwrap();
+        rename_fixture(&conn);
+        let out = apply_station_rename(&conn, &all_poles_op(), "herry", "n").unwrap();
+        let e = load_station_rename_edit(&conn, out.edit_id).unwrap().expect("row exists");
+        assert_eq!(e.edit_id, out.edit_id);
+        assert_eq!(e.station_id, 1);
+        assert_eq!(e.action, "update");
+        assert_eq!(e.old_station_version_id, Some(20));
+        assert_eq!(e.new_station_version_id, Some(out.new_station_version_id));
+        assert_eq!(e.changes["kind"], "station_rename");
+        assert_eq!(e.changes["stops"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn load_station_rename_edit_none_for_missing_id() {
+        let conn = open_in_memory().unwrap();
+        assert!(load_station_rename_edit(&conn, 999).unwrap().is_none());
     }
 
     /// Station-rename fixture: station 'S' (sv 20) + poles sv 10 'S' (with

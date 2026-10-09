@@ -19,6 +19,7 @@ pub use edit::{
     edit_stop, entity_history, undo, EditError, EditLogRow, EditOutcome, StopEdit,
     StationSnapshot, PoleSnapshot, load_station_snapshot,
     StationRenameOp, PoleOp, StationRenameApplied, PoleApplied, apply_station_rename,
+    StationRenameEdit, load_station_rename_edit,
 };
 pub use migrate::migrate;
 
