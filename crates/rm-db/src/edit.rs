@@ -1291,9 +1291,9 @@ mod tests {
     fn undo_rolls_back_earlier_pole_inversions_when_later_pole_stale() {
         let conn = open_in_memory().unwrap();
         let applied = seed_renamed(&conn);
-        // stale pole listed LAST: pole 1 inverts fully inside the tx before
-        // pole 2's staleness aborts it — the rollback of that inversion is
-        // the property under test
+        // stale pole listed LAST: all pole guards run before any UPDATE, so
+        // pole 2's staleness refuses the tx before pole 1 is touched —
+        // pole 1's untouched state is the property under test
         edit_stop(&conn, applied.poles[1].new_svi,
             &StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
         let err = apply_station_rename_undo(&conn, &undo_op(&applied), "herry", "revert").unwrap_err();
