@@ -18,6 +18,7 @@ pub use batch::{create_batch, latest_batch, latest_open_batch, set_batch_status}
 pub use edit::{
     edit_stop, entity_history, undo, EditError, EditLogRow, EditOutcome, StopEdit,
     StopEditOp, apply_stop_edit, StopRegroupOp, apply_stop_regroup,
+    StopEditRow, load_stop_edit, StopEditUndoOp, apply_stop_undo,
     StationSnapshot, PoleSnapshot, load_station_snapshot, StopSnapshot, load_stop_snapshot,
     station_is_current,
     StationRenameOp, PoleOp, StationRenameApplied, PoleApplied, apply_station_rename,

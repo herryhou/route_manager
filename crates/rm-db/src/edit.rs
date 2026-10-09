@@ -421,6 +421,130 @@ pub fn apply_stop_regroup(
     })
 }
 
+#[derive(Debug)]
+pub struct StopEditUndoOp {
+    pub edit_id: i64,
+    pub stop_id: i64,
+    pub old_svi: i64, // edit_log.version_before — the predecessor to reopen
+    pub cur_svi: i64, // edit_log.version_after — must still be current
+}
+
+/// Whole-tx stop-edit undo: reopen the predecessor, close the minted row,
+/// repoint rsv back, MINT NOTHING. Bearing handling derives from the
+/// undone edit's recorded `changes`: a position edit deleted the
+/// predecessor's bearing (and a refresh may have recomputed one at the
+/// churned svi — deleted here); otherwise the carried row moves back with
+/// its `computed_at`. Stale marks re-derive from the same fields.
+/// All guards run before any write; every version UPDATE checks
+/// rows-affected == 1.
+pub fn apply_stop_undo(
+    conn: &Connection,
+    op: &StopEditUndoOp,
+    editor: &str,
+    note: &str,
+) -> Result<EditOutcome> {
+    let tx = conn.unchecked_transaction()?;
+    // guards BEFORE any write
+    let cur: (Option<String>, String) = match tx.query_row(
+        "SELECT valid_to, source FROM stop_version WHERE stop_version_id = ?1",
+        [op.cur_svi],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(EditError::NotUndoable(op.edit_id).into())
+        }
+        Err(e) => return Err(e.into()),
+    };
+    if cur.0.is_some() || cur.1 != "manual" {
+        return Err(EditError::NotUndoable(op.edit_id).into());
+    }
+    let n: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM stop_version WHERE stop_version_id = ?1",
+        [op.old_svi],
+        |r| r.get(0),
+    )?;
+    if n == 0 {
+        return Err(EditError::NotUndoable(op.edit_id).into());
+    }
+    let changes: String = match tx.query_row(
+        "SELECT changes FROM edit_log WHERE edit_id = ?1", [op.edit_id], |r| r.get(0),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(EditError::NotUndoable(op.edit_id).into())
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let cj: serde_json::Value = serde_json::from_str(&changes)?;
+    let position_changed =
+        cj.get("latitude").is_some() || cj.get("longitude").is_some();
+    let regrouped = cj.get("station_id").is_some();
+
+    let now = crate::now_rfc3339();
+    let n = tx.execute(
+        "UPDATE stop_version SET valid_to = ?1
+         WHERE stop_version_id = ?2 AND valid_to IS NULL",
+        params![now, op.cur_svi],
+    )?;
+    if n != 1 {
+        return Err(EditError::NotUndoable(op.edit_id).into());
+    }
+    let n = tx.execute(
+        "UPDATE stop_version SET valid_to = NULL WHERE stop_version_id = ?1",
+        [op.old_svi],
+    )?;
+    if n != 1 {
+        return Err(EditError::NotUndoable(op.edit_id).into());
+    }
+    tx.execute(
+        "UPDATE route_stop_version SET stop_version_id = ?1 WHERE stop_version_id = ?2",
+        params![op.old_svi, op.cur_svi],
+    )?;
+
+    if !position_changed {
+        carry_bearing(&tx, op.cur_svi, op.old_svi)?;
+    }
+    tx.execute(
+        "DELETE FROM stop_bearing WHERE stop_version_id = ?1",
+        [op.cur_svi],
+    )?;
+
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, undo_of, version_before, version_after)
+         VALUES (?1, ?2, 'stop', ?3, 'undo', '{}', ?4, ?5, ?6, ?7)",
+        params![
+            now,
+            editor,
+            op.stop_id,
+            if note.is_empty() { None } else { Some(note) },
+            op.edit_id,
+            op.cur_svi,
+            op.old_svi
+        ],
+    )?;
+    let undo_edit_id = tx.last_insert_rowid();
+
+    let mut stale_routes = Vec::new();
+    if position_changed {
+        mark_bearings_stale(&tx, undo_edit_id, &now)?;
+        // rsv already points at `old_svi` (repointed above)
+        stale_routes = mark_position_stale(&tx, op.old_svi, undo_edit_id, &now)?;
+    } else if regrouped {
+        tx.execute(
+            "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+             VALUES ('station_bearing', '*', ?1, ?2)",
+            params![undo_edit_id, now],
+        )?;
+    }
+    tx.commit()?;
+    Ok(EditOutcome {
+        edit_id: undo_edit_id,
+        new_version_id: op.old_svi,
+        stale_routes,
+    })
+}
+
 pub fn undo(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result<EditOutcome> {
     let tx = conn.unchecked_transaction()?;
     let row: (String, i64, String, Option<i64>, Option<i64>, String) = match tx.query_row(
@@ -686,6 +810,43 @@ pub fn load_station_rename_edit(
         action,
         old_station_version_id: vb,
         new_station_version_id: va,
+        changes: serde_json::from_str(&changes)?,
+    }))
+}
+
+/// One edit_log row for the stop-undo plan (ANY entity — the plan's
+/// entity guard is the discriminator). `changes` parsed as JSON;
+/// `None` when the id does not exist.
+#[derive(Debug)]
+pub struct StopEditRow {
+    pub edit_id: i64,
+    pub entity: String,
+    pub stop_id: i64, // edit_log.entity_id (stable)
+    pub action: String,
+    pub old_stop_version_id: Option<i64>, // version_before
+    pub new_stop_version_id: Option<i64>, // version_after
+    pub changes: serde_json::Value,
+}
+
+pub fn load_stop_edit(conn: &Connection, edit_id: i64) -> Result<Option<StopEditRow>> {
+    let row: (i64, String, i64, String, Option<i64>, Option<i64>, String) = match conn.query_row(
+        "SELECT edit_id, entity, entity_id, action, version_before, version_after, changes
+         FROM edit_log WHERE edit_id = ?1",
+        [edit_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let (edit_id, entity, stop_id, action, vb, va, changes) = row;
+    Ok(Some(StopEditRow {
+        edit_id,
+        entity,
+        stop_id,
+        action,
+        old_stop_version_id: vb,
+        new_stop_version_id: va,
         changes: serde_json::from_str(&changes)?,
     }))
 }
@@ -1782,5 +1943,145 @@ mod tests {
         let err = apply_stop_regroup(&conn, &regroup_op(old, 2), "h", "n").unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");
         let _ = out;
+    }
+
+    fn stop_edit_undo_op(edit_id: i64, stop_id: i64, old: i64, cur: i64) -> StopEditUndoOp {
+        StopEditUndoOp { edit_id, stop_id, old_svi: old, cur_svi: cur }
+    }
+
+    #[test]
+    fn load_stop_edit_returns_parsed_row_any_entity() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let out = apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: old, stop_name: Some("N".into()), ..Default::default()
+        }, "h", "n").unwrap();
+        let e = load_stop_edit(&conn, out.edit_id).unwrap().expect("row");
+        assert_eq!((e.entity.as_str(), e.stop_id, e.action.as_str()), ("stop", 1, "update"));
+        assert_eq!((e.old_stop_version_id, e.new_stop_version_id), (Some(old), Some(out.new_version_id)));
+        assert!(load_stop_edit(&conn, 999).unwrap().is_none());
+    }
+
+    #[test]
+    fn apply_stop_undo_restores_predecessor_mints_nothing() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn); // fixture has no bearing row — seed one
+        conn.execute(
+            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+             VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')", []).unwrap();
+        let out = apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: old, stop_name: Some("N".into()), ..Default::default()
+        }, "h", "n").unwrap();
+        let u = apply_stop_undo(&conn, &stop_edit_undo_op(out.edit_id, 1, old, out.new_version_id), "h", "rev").unwrap();
+        assert_eq!(u.new_version_id, old);
+        // predecessor reopened, minted row closed, count unchanged (no mint)
+        let (to, name): (Option<String>, String) = conn.query_row(
+            "SELECT valid_to, stop_name FROM stop_version WHERE stop_version_id = ?1",
+            [old], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((to.is_none(), name.as_str()), (true, "Old"));
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_version WHERE stop_id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2, "undo mints nothing");
+        // rsv repointed back
+        let sv: i64 = conn.query_row(
+            "SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1",
+            [], |r| r.get(0)).unwrap();
+        assert_eq!(sv, old);
+        // name-only undo: bearing carried back, ZERO marks
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = ?1", [old], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        // undo edit_log row: action='undo', changes='{}', versions swapped
+        let (act, changes, ub, ua): (String, String, Option<i64>, Option<i64>) = conn.query_row(
+            "SELECT action, changes, version_before, version_after FROM edit_log WHERE edit_id = ?1",
+            [u.edit_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap();
+        assert_eq!((act.as_str(), changes.as_str()), ("undo", "{}"));
+        assert_eq!((ub, ua), (Some(out.new_version_id), Some(old)));
+    }
+
+    #[test]
+    fn apply_stop_undo_after_move_remarks_and_leaves_no_bearing() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let out = apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: old, lat: Some(24.001), ..Default::default()
+        }, "h", "move").unwrap();
+        // simulate a refresh having consumed the marks AND recomputed a
+        // bearing at the churned svi
+        conn.execute("DELETE FROM stale_mark", []).unwrap();
+        conn.execute(
+            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+             VALUES (?1, 9.0, 'OSM', '2026-01-03T00:00:00Z')", [out.new_version_id]).unwrap();
+
+        let u = apply_stop_undo(&conn, &stop_edit_undo_op(out.edit_id, 1, old, out.new_version_id), "h", "rev").unwrap();
+        // refreshed row at the closed version deleted; predecessor has none
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_bearing", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        // marks re-derived from changes fields: stop_bearing + projection(route 1) + station_bearing
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 3);
+        let causes: Vec<i64> = conn.prepare("SELECT DISTINCT cause_edit_id FROM stale_mark").unwrap()
+            .query_map([], |r| r.get(0)).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(causes, vec![u.edit_id], "marks come from the undo itself");
+        assert_eq!(u.stale_routes, vec![1]);
+    }
+
+    #[test]
+    fn apply_stop_undo_after_regroup_marks_station_only() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn); // fixture has no bearing row — seed one
+        conn.execute(
+            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+             VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')", []).unwrap();
+        second_station(&conn);
+        let out = apply_stop_regroup(&conn, &regroup_op(old, 2), "h", "n").unwrap();
+        conn.execute("DELETE FROM stale_mark", []).unwrap();
+        let u = apply_stop_undo(&conn, &stop_edit_undo_op(out.edit_id, 1, old, out.new_version_id), "h", "rev").unwrap();
+        // station membership restored
+        let st: i64 = conn.query_row(
+            "SELECT station_id FROM stop_version WHERE stop_version_id = ?1", [old], |r| r.get(0)).unwrap();
+        assert_eq!(st, 1);
+        // bearing carried back
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = ?1", [old], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+        // station_bearing ONLY
+        let rows: Vec<(String, String)> = conn.prepare("SELECT table_name, key FROM stale_mark").unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+            .collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(rows, vec![("station_bearing".into(), "*".into())]);
+        assert!(u.stale_routes.is_empty());
+    }
+
+    #[test]
+    fn apply_stop_undo_guards_fail_zero_partial() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let a = apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: old, stop_name: Some("A".into()), ..Default::default()
+        }, "h", "n").unwrap();
+        // undoing an unknown edit id
+        let err = apply_stop_undo(&conn, &stop_edit_undo_op(999, 1, old, a.new_version_id), "h", "n").unwrap_err();
+        assert!(err.to_string().contains("cannot be undone"), "{err}");
+        // stale cur_svi: edit again, then try to undo `a`
+        let b = apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: a.new_version_id, stop_name: Some("B".into()), ..Default::default()
+        }, "h", "n").unwrap();
+        let err = apply_stop_undo(&conn, &stop_edit_undo_op(a.edit_id, 1, old, a.new_version_id), "h", "n").unwrap_err();
+        assert!(err.to_string().contains("cannot be undone"), "{err}");
+        // bogus old_svi: rows-affected guard
+        let err = apply_stop_undo(&conn, &stop_edit_undo_op(b.edit_id, 1, 999, b.new_version_id), "h", "n").unwrap_err();
+        assert!(err.to_string().contains("cannot be undone"), "{err}");
+        // zero partial state: no undo rows, versions as after edit b
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM edit_log WHERE action = 'undo'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        let cur: i64 = conn.query_row(
+            "SELECT stop_version_id FROM stop_version WHERE stop_id = 1 AND valid_to IS NULL",
+            [], |r| r.get(0)).unwrap();
+        assert_eq!(cur, b.new_version_id);
     }
 }
