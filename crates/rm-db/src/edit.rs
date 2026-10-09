@@ -304,6 +304,64 @@ pub fn entity_history(conn: &Connection, entity: &str, entity_id: i64) -> Result
     Ok(out)
 }
 
+/// Read-side snapshot for the station-rename use case (rm-edit::rename_station):
+/// the current station version plus its poles' current stop versions.
+#[derive(Debug)]
+pub struct StationSnapshot {
+    pub station_id: i64,
+    pub station_version_id: i64,
+    pub station_name: String,
+    pub poles: Vec<PoleSnapshot>,
+}
+
+#[derive(Debug)]
+pub struct PoleSnapshot {
+    pub stop_id: i64,
+    pub stop_version_id: i64,
+    pub stop_name: String,
+}
+
+/// Load the current `station_version` (matched by id AND `valid_to IS NULL`)
+/// with its current poles. `None` when `station_version_id` is not current.
+pub fn load_station_snapshot(
+    conn: &Connection,
+    station_version_id: i64,
+) -> Result<Option<StationSnapshot>> {
+    let row: (i64, String) = match conn
+        .query_row(
+            "SELECT station_id, station_name FROM station_version
+             WHERE station_version_id = ?1 AND valid_to IS NULL",
+            [station_version_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+    {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+    let (station_id, station_name) = row;
+    let mut stmt = conn.prepare(
+        "SELECT stop_id, stop_version_id, stop_name FROM stop_version
+         WHERE station_id = ?1 AND valid_to IS NULL
+         ORDER BY stop_version_id",
+    )?;
+    let poles = stmt
+        .query_map([station_id], |r| {
+            Ok(PoleSnapshot {
+                stop_id: r.get(0)?,
+                stop_version_id: r.get(1)?,
+                stop_name: r.get(2)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(StationSnapshot {
+        station_id,
+        station_version_id,
+        station_name,
+        poles,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,5 +542,27 @@ mod tests {
         assert_eq!(rows[0].action, "undo");
         assert_eq!(rows[1].action, "update");
         assert_eq!(rows[0].undo_of, Some(a.edit_id));
+    }
+
+    #[test]
+    fn load_station_snapshot_returns_station_and_current_poles() {
+        let conn = open_in_memory().unwrap();
+        let _ = fixture(&conn);
+        let snap = load_station_snapshot(&conn, 1).unwrap().expect("current station version");
+        assert_eq!(snap.station_id, 1);
+        assert_eq!(snap.station_version_id, 1);
+        assert_eq!(snap.station_name, "S");
+        assert_eq!(snap.poles.len(), 1);
+        assert_eq!((snap.poles[0].stop_id, snap.poles[0].stop_version_id, snap.poles[0].stop_name.as_str()), (1, 10, "Old"));
+    }
+
+    #[test]
+    fn load_station_snapshot_none_for_stale_or_missing_version() {
+        let conn = open_in_memory().unwrap();
+        let _ = fixture(&conn);
+        // close the station version → no longer current
+        conn.execute("UPDATE station_version SET valid_to = '2026-01-02T00:00:00Z' WHERE station_version_id = 1", []).unwrap();
+        assert!(load_station_snapshot(&conn, 1).unwrap().is_none());
+        assert!(load_station_snapshot(&conn, 999).unwrap().is_none());
     }
 }
