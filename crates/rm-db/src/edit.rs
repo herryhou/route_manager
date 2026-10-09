@@ -192,6 +192,134 @@ fn mark_position_stale(
     Ok(stale_routes)
 }
 
+/// Move a `stop_bearing` row from one version key to another, keeping the
+/// value and `computed_at` (bearing = f(position); edits that don't move
+/// the position don't invalidate it). No-op when `from_svi` has no row.
+fn carry_bearing(tx: &Connection, from_svi: i64, to_svi: i64) -> Result<()> {
+    tx.execute(
+        "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+         SELECT ?1, bearing_deg, source, computed_at FROM stop_bearing
+         WHERE stop_version_id = ?2",
+        params![to_svi, from_svi],
+    )?;
+    tx.execute(
+        "DELETE FROM stop_bearing WHERE stop_version_id = ?1",
+        [from_svi],
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+pub struct StopEditOp {
+    pub stop_id: i64,
+    pub stop_version_id: i64, // must be the current version
+    pub stop_name: Option<String>,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+}
+
+/// Whole-tx stop edit (move and/or rename). Position present ⇒ the pole's
+/// `stop_bearing` row is DELETED (value = f(position) — invalid now) and
+/// the derived data is marked stale. Name-only ⇒ the bearing row is
+/// carried over and NOTHING goes stale. One edit_log row,
+/// `changes = {field: {old, new}}`.
+pub fn apply_stop_edit(
+    conn: &Connection,
+    op: &StopEditOp,
+    editor: &str,
+    note: &str,
+) -> Result<EditOutcome> {
+    let tx = conn.unchecked_transaction()?;
+    // re-validate inside the tx: the version must still be current
+    let old: (i64, String, String, i64, f64, f64) = match tx.query_row(
+        "SELECT station_id, stop_code, stop_name, direction, latitude, longitude
+         FROM stop_version WHERE stop_version_id = ?1 AND valid_to IS NULL",
+        [op.stop_version_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(EditError::NotCurrent(op.stop_version_id).into())
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let (station_id, stop_code, old_name, direction, old_lat, old_lon) = old;
+    let now = crate::now_rfc3339();
+    let new_id = crate::mint(&tx, "stop_version")?;
+    tx.execute(
+        "UPDATE stop_version SET valid_to = ?1 WHERE stop_version_id = ?2",
+        params![now, op.stop_version_id],
+    )?;
+    tx.execute(
+        "INSERT INTO stop_version
+            (stop_version_id, stop_id, station_id, stop_code, stop_name, direction,
+             latitude, longitude, valid_from, created_at, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, 'manual')",
+        params![
+            new_id,
+            op.stop_id,
+            station_id,
+            stop_code,
+            op.stop_name.clone().unwrap_or(old_name.clone()),
+            direction,
+            op.lat.unwrap_or(old_lat),
+            op.lon.unwrap_or(old_lon),
+            now
+        ],
+    )?;
+    tx.execute(
+        "UPDATE route_stop_version SET stop_version_id = ?1 WHERE stop_version_id = ?2",
+        params![new_id, op.stop_version_id],
+    )?;
+
+    let moves = op.lat.is_some() || op.lon.is_some();
+    if moves {
+        tx.execute(
+            "DELETE FROM stop_bearing WHERE stop_version_id = ?1",
+            [op.stop_version_id],
+        )?;
+    } else {
+        carry_bearing(&tx, op.stop_version_id, new_id)?;
+    }
+
+    let mut changes = serde_json::Map::new();
+    if let Some(v) = &op.stop_name {
+        changes.insert("stop_name".into(), json!({"old": old_name, "new": v}));
+    }
+    if let Some(v) = op.lat {
+        changes.insert("latitude".into(), json!({"old": old_lat, "new": v}));
+    }
+    if let Some(v) = op.lon {
+        changes.insert("longitude".into(), json!({"old": old_lon, "new": v}));
+    }
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, version_before, version_after)
+         VALUES (?1, ?2, 'stop', ?3, 'update', ?4, ?5, ?6, ?7)",
+        params![
+            now,
+            editor,
+            op.stop_id,
+            serde_json::Value::Object(changes).to_string(),
+            if note.is_empty() { None } else { Some(note) },
+            op.stop_version_id,
+            new_id
+        ],
+    )?;
+    let edit_id = tx.last_insert_rowid();
+
+    let mut stale_routes = Vec::new();
+    if moves {
+        mark_bearings_stale(&tx, edit_id, &now)?;
+        stale_routes = mark_position_stale(&tx, new_id, edit_id, &now)?;
+    }
+    tx.commit()?;
+    Ok(EditOutcome {
+        edit_id,
+        new_version_id: new_id,
+        stale_routes,
+    })
+}
+
 pub fn undo(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result<EditOutcome> {
     let tx = conn.unchecked_transaction()?;
     let row: (String, i64, String, Option<i64>, Option<i64>, String) = match tx.query_row(
@@ -1397,5 +1525,88 @@ mod tests {
         let sv: i64 = conn.query_row(
             "SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1", [], |r| r.get(0)).unwrap();
         assert_eq!(sv, applied.poles[0].new_svi, "rsv still on the minted svi");
+    }
+
+    #[test]
+    fn apply_stop_edit_moves_position_deletes_bearing_marks_three() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let op = StopEditOp {
+            stop_id: 1,
+            stop_version_id: old,
+            lat: Some(24.001),
+            lon: None,
+            stop_name: None,
+        };
+        let out = apply_stop_edit(&conn, &op, "herry", "move").unwrap();
+        assert!(out.new_version_id > old);
+        // old closed, new current + manual, position applied
+        let (to, lat, src): (Option<String>, f64, String) = conn.query_row(
+            "SELECT valid_to, latitude, source FROM stop_version WHERE stop_version_id = ?1",
+            [out.new_version_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((to.is_some(), lat, src.as_str()), (false, 24.001, "manual"));
+        // rsv repointed
+        let sv: i64 = conn.query_row(
+            "SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1",
+            [], |r| r.get(0)).unwrap();
+        assert_eq!(sv, out.new_version_id);
+        // bearing deleted at the old svi
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = ?1", [old], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        // marks: stop_bearing + projection(route 1) + station_bearing
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(out.stale_routes, vec![1]);
+        // edit_log: {field:{old,new}} shape
+        let (ent, act, changes): (String, String, String) = conn.query_row(
+            "SELECT entity, action, changes FROM edit_log WHERE edit_id = ?1",
+            [out.edit_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((ent.as_str(), act.as_str()), ("stop", "update"));
+        let c: serde_json::Value = serde_json::from_str(&changes).unwrap();
+        assert_eq!(c["latitude"]["new"], 24.001);
+        assert!(c["stop_name"].is_null());
+    }
+
+    #[test]
+    fn apply_stop_edit_name_only_carries_bearing_zero_marks() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn); // fixture has no bearing row — seed one
+        conn.execute(
+            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+             VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')", []).unwrap();
+        let op = StopEditOp {
+            stop_id: 1,
+            stop_version_id: old,
+            stop_name: Some("New".into()),
+            ..Default::default()
+        };
+        let out = apply_stop_edit(&conn, &op, "herry", "rename").unwrap();
+        // bearing row MOVED to the new svi, identical values + computed_at
+        let (deg, computed): (f64, String) = conn.query_row(
+            "SELECT bearing_deg, computed_at FROM stop_bearing WHERE stop_version_id = ?1",
+            [out.new_version_id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((deg, computed.as_str()), (123.5, "2026-01-02T00:00:00Z"));
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = ?1", [old], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        // zero stale marks — a rename invalidates no derived data
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        assert!(out.stale_routes.is_empty());
+    }
+
+    #[test]
+    fn apply_stop_edit_refuses_stale_version_zero_partial() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let first = StopEditOp { stop_id: 1, stop_version_id: old, stop_name: Some("A".into()), ..Default::default() };
+        apply_stop_edit(&conn, &first, "h", "n").unwrap();
+        let err = apply_stop_edit(&conn, &first, "h", "n").unwrap_err();
+        assert!(err.to_string().contains("not the current version"), "{err}");
+        // zero partial: exactly one minted version exists
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_version WHERE stop_id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2);
     }
 }
