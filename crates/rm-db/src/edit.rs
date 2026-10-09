@@ -246,10 +246,15 @@ pub fn apply_stop_edit(
     let (station_id, stop_code, old_name, direction, old_lat, old_lon) = old;
     let now = crate::now_rfc3339();
     let new_id = crate::mint(&tx, "stop_version")?;
-    tx.execute(
+    let closed = tx.execute(
         "UPDATE stop_version SET valid_to = ?1 WHERE stop_version_id = ?2",
         params![now, op.stop_version_id],
     )?;
+    if closed != 1 {
+        // the SELECT guard above saw this row current; a 0-row close means it
+        // vanished mid-tx — refuse before any further write (tx aborts)
+        return Err(EditError::NotCurrent(op.stop_version_id).into());
+    }
     tx.execute(
         "INSERT INTO stop_version
             (stop_version_id, stop_id, station_id, stop_code, stop_name, direction,
