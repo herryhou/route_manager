@@ -56,6 +56,8 @@ pub enum EditError {
     EmptyNewName,
     #[error("new station name equals the current name")]
     NoOpRename,
+    #[error("edit {0} cannot be undone (not current, or is itself an undo)")]
+    NotUndoable(i64),
 }
 
 /// Pure planning policy: pick which poles follow the rename. No I/O.
