@@ -2,7 +2,12 @@
 //! changes JSON. The op's rows are historical facts from an append-only
 //! log; rm-db re-validates currency inside its apply tx.
 
-use rm_db::StationRenameEdit;
+use anyhow::Result;
+use rm_db::{
+    apply_station_rename_undo, load_station_rename_edit, PoleUndoOp, StationRenameEdit,
+    StationRenameUndoOp,
+};
+use rusqlite::Connection;
 
 use crate::EditError;
 
@@ -57,6 +62,51 @@ pub fn plan_rename_undo(edit: &StationRenameEdit) -> Result<RenameUndoOp, EditEr
         old_station_version_id: old_st,
         new_station_version_id: new_st,
         poles,
+    })
+}
+
+#[derive(Debug)]
+pub struct UndoOutcome {
+    pub edit_id: i64, // the undo's own edit_log row
+    pub restored_station_version_id: i64,
+}
+
+/// Application service: load the logged rename → plan (pure) → apply the
+/// inverse in one tx. Zero SQL here.
+pub fn undo_station_rename(
+    conn: &Connection,
+    edit_id: i64,
+    editor: &str,
+    note: &str,
+) -> Result<UndoOutcome> {
+    let edit = load_station_rename_edit(conn, edit_id)?
+        .ok_or(EditError::NotUndoable(edit_id))?;
+    let plan = plan_rename_undo(&edit)?;
+    let op = StationRenameUndoOp {
+        edit_id: plan.edit_id,
+        station_id: plan.station_id,
+        old_station_version_id: plan.old_station_version_id,
+        new_station_version_id: plan.new_station_version_id,
+        poles: plan
+            .poles
+            .iter()
+            .map(|p| PoleUndoOp { stop_id: p.stop_id, old_svi: p.old_svi, new_svi: p.new_svi })
+            .collect(),
+    };
+    let undone = apply_station_rename_undo(conn, &op, editor, note).map_err(|e| {
+        // rm-db re-validates inside its tx; surface its typed errors as
+        // this crate's public EditError (same mapping as rename_station)
+        match e.downcast_ref::<rm_db::EditError>() {
+            Some(rm_db::EditError::StationNotCurrent(id)) => {
+                EditError::StationNotCurrent(*id).into()
+            }
+            Some(rm_db::EditError::NotUndoable(id)) => EditError::NotUndoable(*id).into(),
+            _ => e,
+        }
+    })?;
+    Ok(UndoOutcome {
+        edit_id: undone.edit_id,
+        restored_station_version_id: undone.restored_station_version_id,
     })
 }
 
