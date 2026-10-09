@@ -111,18 +111,22 @@ current versions. No locks held; apply re-validates inside its tx.
   `station_name = new_name`, `source = 'manual'`
 - per `PoleChange`: close old `stop_version`, mint new with
   `stop_name = new_stop_name`, `source = 'manual'`, repoint
-  `route_stop_version.stop_version_id` old → new, delete the pole's
-  `stop_bearing` rows
+  `route_stop_version.stop_version_id` old → new, **carry the pole's
+  `stop_bearing` row over**: `INSERT INTO stop_bearing SELECT <new_svi>,
+  bearing_deg, source, computed_at FROM stop_bearing WHERE stop_version_id =
+  <old_svi>` (skip when no row exists — bearing not computed yet). Bearing
+  value = f(position, path geometry); a rename changes neither, so the value
+  stays valid — only the version key moves. Keep the original `computed_at`.
 - re-validate the old station version is still current inside the tx
   (guard against concurrent edits). On failure rm-db returns its own
   `rm_db::edit::EditError::StationNotCurrent(i64)` (new variant next to the
   existing `NotCurrent`/`NotUndoable`); `rm-edit` maps it 1:1 to
   `rm_edit::EditError::StationNotCurrent` — rm-edit owns the public error
   type callers see, rm-db stays SQL-side with its own internal enum
-- stale marks (idempotent `INSERT OR IGNORE`):
-  - `('station_bearing', '*')` — always (station identity changed)
-  - `('stop_bearing', '*')` — only when ≥1 pole churned (rows were deleted)
-  - **no** `path_stop_projection` marks — no lat/lon changes anywhere
+- **zero stale marks**: no `stop_bearing` mark (rows carried, not deleted —
+  see above), no `station_bearing` mark (keyed by `station_id`, name not an
+  input to the circular mean), no `path_stop_projection` marks (no lat/lon
+  changes). A rename invalidates no derived data.
 - one `edit_log` row:
   - `entity = 'station'`, `entity_id = station_id`, `action = 'update'`
   - `version_before/after` = old/new `station_version_id`
@@ -143,7 +147,14 @@ current versions. No locks held; apply re-validates inside its tx.
 ## What stays put
 
 - `edit_stop` / `undo` / `entity_history` remain in `rm-db`, unchanged.
-  Their migration into `rm-edit` is a later scenario, not this one.
+  Their migration into `rm-edit` is a later scenario, not this one. Known
+  inconsistency carried until then: `edit_stop`'s name-only path still
+  deletes `stop_bearing` rows + marks `('stop_bearing','*')` — over-
+  conservative by this spec's reasoning (bearing value survives a rename);
+  the later migration scenario switches it to carry-over too.
+- Scenario-3 undo of a rename must mirror the carry-over: copy `stop_bearing`
+  rows new_svi → old_svi from the `stops` array in the edit_log `changes`
+  JSON. The shape recorded here already carries everything undo needs.
 - `rm-web` gets no new endpoint and no UI change.
 - No repository trait, no domain events, no aggregates — plan/apply with a
   pure policy function is the whole pattern here.
@@ -155,10 +166,11 @@ current versions. No locks held; apply re-validates inside its tx.
   rejection, no-op rejection, StationNotCurrent mapping from `None` snapshot.
 - `rm-db` tests (in-memory DB, existing fixture style): apply semantics —
   version append + source, FK repoint, `route_stop_version` integrity,
-  stale-mark set per level (StationOnly → station_bearing only;
-  MatchingPoles/AllPoles → + stop_bearing), edit_log row shape including
-  `stops` array, concurrent-edit guard (stale station_version_id refused,
-  no partial state).
+  **zero stale marks after any rename level**, bearing carry-over
+  (churned pole's `stop_bearing` row lands on the new svi with identical
+  values + `computed_at`; pole without a bearing row stays without one),
+  edit_log row shape including `stops` array, concurrent-edit guard (stale
+  station_version_id refused, no partial state).
 - Workspace `cargo test` green.
 
 ## Out of scope
