@@ -993,6 +993,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rm-edit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rm-db",
+ "rusqlite",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "rm-identity"
 version = "0.1.0"
 dependencies = [

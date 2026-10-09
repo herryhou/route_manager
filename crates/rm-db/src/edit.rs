@@ -17,6 +17,8 @@ pub struct StopEdit {
 pub enum EditError {
     #[error("stop version {0} is not the current version (or does not exist)")]
     NotCurrent(i64),
+    #[error("station version {0} is not the current version (or does not exist)")]
+    StationNotCurrent(i64),
     #[error("edit {0} cannot be undone (not current, or is itself an undo)")]
     NotUndoable(i64),
 }
@@ -304,6 +306,241 @@ pub fn entity_history(conn: &Connection, entity: &str, entity_id: i64) -> Result
     Ok(out)
 }
 
+/// Read-side snapshot for the station-rename use case (rm-edit::rename_station):
+/// the current station version plus its poles' current stop versions.
+#[derive(Debug)]
+pub struct StationSnapshot {
+    pub station_id: i64,
+    pub station_version_id: i64,
+    pub station_name: String,
+    pub poles: Vec<PoleSnapshot>,
+}
+
+#[derive(Debug)]
+pub struct PoleSnapshot {
+    pub stop_id: i64,
+    pub stop_version_id: i64,
+    pub stop_name: String,
+}
+
+/// Load the current `station_version` (matched by id AND `valid_to IS NULL`)
+/// with its current poles. `None` when `station_version_id` is not current.
+pub fn load_station_snapshot(
+    conn: &Connection,
+    station_version_id: i64,
+) -> Result<Option<StationSnapshot>> {
+    let row: (i64, String) = match conn
+        .query_row(
+            "SELECT station_id, station_name FROM station_version
+             WHERE station_version_id = ?1 AND valid_to IS NULL",
+            [station_version_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+    {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+    let (station_id, station_name) = row;
+    let mut stmt = conn.prepare(
+        "SELECT stop_id, stop_version_id, stop_name FROM stop_version
+         WHERE station_id = ?1 AND valid_to IS NULL
+         ORDER BY stop_version_id",
+    )?;
+    let poles = stmt
+        .query_map([station_id], |r| {
+            Ok(PoleSnapshot {
+                stop_id: r.get(0)?,
+                stop_version_id: r.get(1)?,
+                stop_name: r.get(2)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(StationSnapshot {
+        station_id,
+        station_version_id,
+        station_name,
+        poles,
+    }))
+}
+
+/// Write-side op for the station rename (rm-edit maps a StationRenamePlan
+/// into this; rm-db knows nothing about the domain types).
+#[derive(Debug)]
+pub struct StationRenameOp {
+    pub station_id: i64,
+    pub old_station_version_id: i64,
+    pub old_station_name: String, // for the edit_log changes JSON only
+    pub new_station_name: String,
+    pub level: String, // RenameLevel::as_str
+    pub poles: Vec<PoleOp>,
+}
+
+#[derive(Debug)]
+pub struct PoleOp {
+    pub stop_id: i64,
+    pub old_stop_version_id: i64,
+    pub new_stop_name: String,
+}
+
+#[derive(Debug)]
+pub struct StationRenameApplied {
+    pub edit_id: i64,
+    pub new_station_version_id: i64,
+    pub poles: Vec<PoleApplied>,
+}
+
+#[derive(Debug)]
+pub struct PoleApplied {
+    pub stop_id: i64,
+    pub old_svi: i64,
+    pub new_svi: i64,
+}
+
+/// Apply a station rename in ONE transaction: version-append the station,
+/// churn the listed poles, repoint route_stop_version, carry stop_bearing
+/// rows to the new pole versions (bearing value = f(position, path
+/// geometry) — a rename changes neither, so nothing goes stale). One
+/// edit_log row shaped for scenario-3 multi-row undo.
+pub fn apply_station_rename(
+    conn: &Connection,
+    op: &StationRenameOp,
+    editor: &str,
+    note: &str,
+) -> Result<StationRenameApplied> {
+    let tx = conn.unchecked_transaction()?;
+    let now = crate::now_rfc3339();
+
+    // re-validate inside the tx: the old station version must still be current
+    let (station_group_id, lat, lon): (i64, f64, f64) = match tx.query_row(
+        "SELECT station_group_id, latitude, longitude FROM station_version
+         WHERE station_version_id = ?1 AND valid_to IS NULL",
+        [op.old_station_version_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(EditError::StationNotCurrent(op.old_station_version_id).into())
+        }
+        Err(e) => return Err(e.into()),
+    };
+    tx.execute(
+        "UPDATE station_version SET valid_to = ?1 WHERE station_version_id = ?2",
+        params![now, op.old_station_version_id],
+    )?;
+    let new_station_version_id = crate::mint(&tx, "station_version")?;
+    tx.execute(
+        "INSERT INTO station_version
+            (station_version_id, station_id, station_group_id, station_name,
+             latitude, longitude, valid_from, created_at, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 'manual')",
+        params![
+            new_station_version_id,
+            op.station_id,
+            station_group_id,
+            op.new_station_name,
+            lat,
+            lon,
+            now
+        ],
+    )?;
+
+    let mut poles_applied = Vec::new();
+    for pole in &op.poles {
+        // pole must still be current; abort the whole tx otherwise
+        let (stop_station_id, stop_code, direction, slat, slon): (i64, String, i64, f64, f64) =
+            match tx.query_row(
+                "SELECT station_id, stop_code, direction, latitude, longitude
+                 FROM stop_version WHERE stop_version_id = ?1 AND valid_to IS NULL",
+                [pole.old_stop_version_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            ) {
+                Ok(v) => v,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    return Err(EditError::NotCurrent(pole.old_stop_version_id).into())
+                }
+                Err(e) => return Err(e.into()),
+            };
+        tx.execute(
+            "UPDATE stop_version SET valid_to = ?1 WHERE stop_version_id = ?2",
+            params![now, pole.old_stop_version_id],
+        )?;
+        let new_svi = crate::mint(&tx, "stop_version")?;
+        tx.execute(
+            "INSERT INTO stop_version
+                (stop_version_id, stop_id, station_id, stop_code, stop_name, direction,
+                 latitude, longitude, valid_from, created_at, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, 'manual')",
+            params![
+                new_svi,
+                pole.stop_id,
+                stop_station_id,
+                stop_code,
+                pole.new_stop_name,
+                direction,
+                slat,
+                slon,
+                now
+            ],
+        )?;
+        tx.execute(
+            "UPDATE route_stop_version SET stop_version_id = ?1 WHERE stop_version_id = ?2",
+            params![new_svi, pole.old_stop_version_id],
+        )?;
+        // carry the bearing row to the new version (none → no-op): the row
+        // MOVES — old svi's copy is deleted, so no stale-marking is needed
+        tx.execute(
+            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+             SELECT ?1, bearing_deg, source, computed_at FROM stop_bearing
+             WHERE stop_version_id = ?2",
+            params![new_svi, pole.old_stop_version_id],
+        )?;
+        tx.execute(
+            "DELETE FROM stop_bearing WHERE stop_version_id = ?1",
+            params![pole.old_stop_version_id],
+        )?;
+        poles_applied.push(PoleApplied {
+            stop_id: pole.stop_id,
+            old_svi: pole.old_stop_version_id,
+            new_svi,
+        });
+    }
+
+    let stops_json: Vec<serde_json::Value> = poles_applied
+        .iter()
+        .map(|p| json!({"stop_id": p.stop_id, "old_svi": p.old_svi, "new_svi": p.new_svi}))
+        .collect();
+    let changes = json!({
+        "kind": "station_rename",
+        "level": op.level,
+        "old_name": op.old_station_name,
+        "new_name": op.new_station_name,
+        "stops": stops_json,
+    })
+    .to_string();
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, version_before, version_after)
+         VALUES (?1, ?2, 'station', ?3, 'update', ?4, ?5, ?6, ?7)",
+        params![
+            now,
+            editor,
+            op.station_id,
+            changes,
+            if note.is_empty() { None } else { Some(note) },
+            op.old_station_version_id,
+            new_station_version_id
+        ],
+    )?;
+    let edit_id = tx.last_insert_rowid();
+
+    tx.commit()?;
+    Ok(StationRenameApplied {
+        edit_id,
+        new_station_version_id,
+        poles: poles_applied,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,5 +721,232 @@ mod tests {
         assert_eq!(rows[0].action, "undo");
         assert_eq!(rows[1].action, "update");
         assert_eq!(rows[0].undo_of, Some(a.edit_id));
+    }
+
+    #[test]
+    fn load_station_snapshot_returns_station_and_current_poles() {
+        let conn = open_in_memory().unwrap();
+        let _ = fixture(&conn);
+        let snap = load_station_snapshot(&conn, 1).unwrap().expect("current station version");
+        assert_eq!(snap.station_id, 1);
+        assert_eq!(snap.station_version_id, 1);
+        assert_eq!(snap.station_name, "S");
+        assert_eq!(snap.poles.len(), 1);
+        assert_eq!((snap.poles[0].stop_id, snap.poles[0].stop_version_id, snap.poles[0].stop_name.as_str()), (1, 10, "Old"));
+    }
+
+    #[test]
+    fn load_station_snapshot_none_for_stale_or_missing_version() {
+        let conn = open_in_memory().unwrap();
+        let _ = fixture(&conn);
+        // close the station version → no longer current
+        conn.execute("UPDATE station_version SET valid_to = '2026-01-02T00:00:00Z' WHERE station_version_id = 1", []).unwrap();
+        assert!(load_station_snapshot(&conn, 1).unwrap().is_none());
+        assert!(load_station_snapshot(&conn, 999).unwrap().is_none());
+    }
+
+    /// Station-rename fixture: station 'S' (sv 20) + poles sv 10 'S' (with
+    /// bearing) and sv 11 'S 往' (no bearing), rsv pointing at sv 10.
+    fn rename_fixture(conn: &Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO station_group (station_group_id, created_at) VALUES (1, '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO station_group_version (station_group_version_id, station_group_id, station_group_name, source, valid_from, created_at)
+             VALUES (1, 1, 'g', 'capture', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO station (station_id, ext_uid, created_at) VALUES (1, 'tcg:node:1', '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO station_version (station_version_id, station_id, station_group_id, station_name, latitude, longitude, valid_from, created_at)
+             VALUES (20, 1, 1, 'S', 24.0, 120.0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')", []).unwrap();
+        for (svi, sid, name) in [(10, 1, "S"), (11, 2, "S 往")] {
+            conn.execute(
+                "INSERT INTO stop (stop_id, ext_uid, created_at) VALUES (?1, 'tcg:stop:' || ?1, '2026-01-01T00:00:00Z')", [sid]).unwrap();
+            conn.execute(
+                "INSERT INTO stop_version (stop_version_id, stop_id, station_id, stop_code, stop_name, direction, latitude, longitude, valid_from, created_at)
+                 VALUES (?1, ?2, 1, '001', ?3, 0, 24.0, 120.0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                params![svi, sid, name]).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO route (route_id, route_code, ext_uid, created_at, updated_at)
+             VALUES (1, '1', 'tcg:1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO route_version (route_version_id, route_id, version_no, valid_from, status, created_at)
+             VALUES (1, 1, 1, '2026-01-01T00:00:00Z', 'PUBLISHED', '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO subroute (subroute_id, route_id, subroute_code, created_at)
+             VALUES (1, 1, '1-0', '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO subroute_version (subroute_version_id, route_version_id, subroute_id, subroute_name, created_at)
+             VALUES (1, 1, 1, '1', '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO route_stop_version (route_stop_version_id, subroute_version_id, stop_version_id, direction, stop_sequence, created_at)
+             VALUES (1, 1, 10, 0, 1, '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+             VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')", []).unwrap();
+        conn.execute("INSERT INTO id_sequence (table_name, next_value) VALUES ('station_version', 21)", []).unwrap();
+        conn.execute("INSERT INTO id_sequence (table_name, next_value) VALUES ('stop_version', 12)", []).unwrap();
+        20
+    }
+
+    fn all_poles_op() -> StationRenameOp {
+        StationRenameOp {
+            station_id: 1,
+            old_station_version_id: 20,
+            old_station_name: "S".into(),
+            new_station_name: "台北車站".into(),
+            level: "AllPoles".into(),
+            poles: vec![
+                PoleOp { stop_id: 1, old_stop_version_id: 10, new_stop_name: "台北車站".into() },
+                PoleOp { stop_id: 2, old_stop_version_id: 11, new_stop_name: "台北車站".into() },
+            ],
+        }
+    }
+
+    #[test]
+    fn apply_renames_station_and_all_poles_one_tx() {
+        let conn = open_in_memory().unwrap();
+        let old = rename_fixture(&conn);
+        let out = apply_station_rename(&conn, &all_poles_op(), "herry", "fix").unwrap();
+        // station version appended: old closed, new current + manual + new name
+        let (to, _): (Option<String>, Option<String>) = conn.query_row(
+            "SELECT valid_to, source FROM station_version WHERE station_version_id = ?1", [old], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert!(to.is_some());
+        let (name, src): (String, String) = conn.query_row(
+            "SELECT station_name, source FROM station_version WHERE station_version_id = ?1",
+            [out.new_station_version_id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((name.as_str(), src.as_str()), ("台北車站", "manual"));
+        // both poles churned to the new name, source manual
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_version WHERE stop_name = '台北車站' AND source = 'manual' AND valid_to IS NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2);
+        // rsv repointed from sv 10 to the churned pole
+        let sv: i64 = conn.query_row(
+            "SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(sv, out.poles[0].new_svi);
+        assert_eq!(out.poles.len(), 2);
+    }
+
+    #[test]
+    fn apply_leaves_zero_stale_marks() {
+        let conn = open_in_memory().unwrap();
+        let old = rename_fixture(&conn);
+        apply_station_rename(&conn, &all_poles_op(), "herry", "fix").unwrap();
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0, "rename invalidates no derived data");
+        // station_bearing untouched by design; none seeded — still none
+        let _ = old;
+    }
+
+    #[test]
+    fn apply_carries_bearing_rows_only_where_present() {
+        let conn = open_in_memory().unwrap();
+        rename_fixture(&conn);
+        let out = apply_station_rename(&conn, &all_poles_op(), "herry", "fix").unwrap();
+        // pole 1 (had bearing 123.5 @ computed_at): row now on new svi, same values
+        let (deg, src, at): (f64, String, String) = conn.query_row(
+            "SELECT bearing_deg, source, computed_at FROM stop_bearing WHERE stop_version_id = ?1",
+            [out.poles[0].new_svi], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((deg, src.as_str(), at.as_str()), (123.5, "OSM", "2026-01-02T00:00:00Z"));
+        // old svi row gone (PK moved), pole 2 still has none
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stop_bearing", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn apply_records_edit_log_row_shaped_for_undo() {
+        let conn = open_in_memory().unwrap();
+        let old = rename_fixture(&conn);
+        let out = apply_station_rename(&conn, &all_poles_op(), "herry", "note!").unwrap();
+        let (entity, eid, action, changes, note, vb, va): (String, i64, String, String, Option<String>, Option<i64>, Option<i64>) = conn.query_row(
+            "SELECT entity, entity_id, action, changes, note, version_before, version_after FROM edit_log WHERE edit_id = ?1",
+            [out.edit_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))).unwrap();
+        assert_eq!((entity.as_str(), eid, action.as_str()), ("station", 1, "update"));
+        assert_eq!(note.as_deref(), Some("note!"));
+        assert_eq!((vb, va), (Some(old), Some(out.new_station_version_id)));
+        // CJK round-trip + undo-ready shape
+        let c: serde_json::Value = serde_json::from_str(&changes).unwrap();
+        assert_eq!(c["kind"], "station_rename");
+        assert_eq!(c["level"], "AllPoles");
+        assert_eq!(c["old_name"], "S");
+        assert_eq!(c["new_name"], "台北車站");
+        assert_eq!(c["stops"].as_array().unwrap().len(), 2);
+        assert_eq!(c["stops"][0]["stop_id"], 1);
+        assert_eq!(c["stops"][0]["old_svi"], 10);
+        assert_eq!(c["stops"][0]["new_svi"], out.poles[0].new_svi);
+    }
+
+    #[test]
+    fn apply_rejects_stale_station_version() {
+        let conn = open_in_memory().unwrap();
+        let old = rename_fixture(&conn);
+        apply_station_rename(&conn, &all_poles_op(), "herry", "first").unwrap();
+        // double-submit of the same station version id
+        let err = apply_station_rename(&conn, &all_poles_op(), "herry", "second").unwrap_err();
+        assert!(err.to_string().contains("not the current version"), "{err}");
+        // no partial state from the refused attempt: still exactly one manual
+        // station version, one edit_log row, one bearing row
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM station_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stop_bearing", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+        let _ = old;
+    }
+
+    #[test]
+    fn apply_aborts_when_pole_not_current() {
+        let conn = open_in_memory().unwrap();
+        rename_fixture(&conn);
+        // churn pole 10 behind the plan's back (name-only edit_stop)
+        edit_stop(&conn, 10, &StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+        let err = apply_station_rename(&conn, &all_poles_op(), "herry", "stale pole").unwrap_err();
+        assert!(err.to_string().contains("not the current version"), "{err}");
+        // whole tx rolled back (the edit_stop's own manual stop_version and
+        // stop_bearing mark stay — they are not this tx's): no manual
+        // station version, no station edit_log row
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM station_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log WHERE entity = 'station'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn apply_rolls_back_earlier_poles_when_later_pole_stale() {
+        let conn = open_in_memory().unwrap();
+        rename_fixture(&conn);
+        // stale pole listed LAST: pole 10 churns fully inside the tx before
+        // pole 11's staleness aborts it — the rollback of that churn is the
+        // property under test (no partial station/pole mix). all_poles_op
+        // lists [10, 11]; churn 11 behind the plan's back so it's stale.
+        edit_stop(&conn, 11, &StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+        let err = apply_station_rename(&conn, &all_poles_op(), "herry", "stale last").unwrap_err();
+        assert!(err.to_string().contains("not the current version"), "{err}");
+        // pole 10's churn rolled back: original row current again, name 'S'
+        let (to, name): (Option<String>, String) = conn.query_row(
+            "SELECT valid_to, stop_name FROM stop_version WHERE stop_version_id = 10", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert!(to.is_none(), "pole 10 unclosed by rollback");
+        assert_eq!(name, "S");
+        // its bearing row came back to svi 10 (exactly one row, on svi 10)
+        let (n, on10): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), SUM(CASE WHEN stop_version_id = 10 THEN 1 ELSE 0 END) FROM stop_bearing", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((n, on10), (1, 1));
+        // rsv still points at svi 10
+        let sv: i64 = conn.query_row(
+            "SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(sv, 10);
+        // no trace of this tx: no manual station version, no station edit_log,
+        // and the only manual stop_version is edit_stop's churn of pole 11
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM station_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log WHERE entity = 'station'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "only edit_stop's churn of pole 11");
     }
 }
