@@ -71,14 +71,9 @@ async fn stats_reports_fixture_counts() {
         2,
         "fixture has 2 routes"
     );
-    for key in ["stops", "stations", "groups", "segments", "traversals"] {
+    for key in ["stops", "stations", "groups"] {
         assert!(counts[key].is_i64(), "counts.{key} missing: {v}");
     }
-    assert_eq!(
-        counts["segments"].as_i64().unwrap(),
-        0,
-        "no registry stage run"
-    );
     let m = &v["match"];
     assert_eq!(m["directions_with_stats"].as_i64().unwrap(), 0);
     assert!(m["directions_total"].as_i64().unwrap() >= 2);
@@ -173,10 +168,6 @@ async fn route_path_stops_and_drilldown() {
         assert!((23.0..25.0).contains(&lat), "lat second, got {cs:?}");
         assert!(f["properties"]["length_m"].is_f64());
         assert!(f["properties"]["geometry_method"].is_string());
-        assert!(
-            f["properties"]["segment_id"].is_null(),
-            "no registry run → no traversal segment: {f}"
-        );
     }
 
     // stops: ordered, with projection QA fields
@@ -204,11 +195,6 @@ async fn route_path_stops_and_drilldown() {
     assert!(
         !d["routes_by_stop"].as_array().unwrap().is_empty(),
         "route 1 serves this stop"
-    );
-    assert_eq!(
-        d["segments"],
-        serde_json::json!([]),
-        "no registry run → no incident segments"
     );
 
     // station detail
@@ -377,9 +363,9 @@ async fn unknown_api_path_is_404_json() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
-/// Full fixture chain through rm-registry: road along lon 120.6857, both
-/// routes ride it, registry mints 3 canonical segments (44→46, 44→50, 50→46).
-fn fixture_db_with_segments() -> (tempfile::TempDir, std::path::PathBuf) {
+/// Full fixture chain through matcher + segments: road along lon 120.6857,
+/// both routes ride it, matcher records the way runs for the direction paths.
+fn fixture_db_matched() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     rm_ingest::testfix::make_fixture(&dir.path().join("src"));
     let db = dir.path().join("fixture.db");
@@ -460,182 +446,12 @@ fn fixture_db_with_segments() -> (tempfile::TempDir, std::path::PathBuf) {
     rm_publish::run(&mut conn, s.batch_id).unwrap();
     rm_segments::run(&conn, s.batch_id, 50.0).unwrap();
     rm_osm_match::run(&conn, s.batch_id).unwrap();
-    rm_registry::run(&conn, s.batch_id).unwrap();
     rm_registry::bearing::run(&conn, s.batch_id).unwrap();
     (dir, db)
 }
-
-#[tokio::test]
-async fn segments_bbox_and_detail() {
-    let (_dir, db) = fixture_db_with_segments();
-    let app = router_with(AppState::new(db));
-
-    // bbox around the road (lon 120.6857, lat 24.1405..24.1412)
-    let v = get_json(&app, "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420").await;
-    assert_eq!(v["type"], serde_json::json!("FeatureCollection"), "{v}");
-    let feats = v["features"].as_array().unwrap();
-    assert_eq!(feats.len(), 3, "3 canonical segments: {v}");
-    for f in feats {
-        assert_eq!(f["geometry"]["type"], serde_json::json!("LineString"));
-        let cs = f["geometry"]["coordinates"].as_array().unwrap();
-        assert!(cs.len() >= 2, "{f}");
-        assert!(
-            (120.68..120.69).contains(&cs[0][0].as_f64().unwrap()),
-            "lon first: {cs:?}"
-        );
-        assert!(f["properties"]["segment_id"].is_string());
-        assert!(f["properties"]["route_count"].as_i64().unwrap() >= 1);
-        assert!(f["properties"]["length_m"].as_f64().unwrap() > 0.0);
-    }
-
-    // disjunct bbox → empty
-    let v = get_json(&app, "/api/segments?bbox=121.0,24.0,121.1,24.1").await;
-    assert_eq!(v["features"].as_array().unwrap().len(), 0, "{v}");
-
-    // min_routes=2 → none (each segment carries exactly one route in fixture)
-    let v = get_json(
-        &app,
-        "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420&min_routes=2",
-    )
-    .await;
-    assert_eq!(v["features"].as_array().unwrap().len(), 0, "{v}");
-
-    // detail: ways composition + traversing routes
-    let v = get_json(&app, "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420").await;
-    let seg_id = v["features"][0]["properties"]["segment_id"]
-        .as_str()
-        .unwrap();
-    let d = get_json(&app, &format!("/api/segments/{seg_id}")).await;
-    assert_eq!(d["segment_id"], serde_json::json!(seg_id));
-    let cs = d["geometry"]["coordinates"].as_array().expect("geometry");
-    assert_eq!(d["geometry"]["type"], serde_json::json!("LineString"));
-    assert!(cs.len() >= 2, "highlight polyline needs ≥2 vertices: {d}");
-    let ways = d["ways"].as_array().unwrap();
-    assert!(!ways.is_empty(), "{d}");
-    assert_eq!(ways[0]["osm_way_id"].as_i64().unwrap(), 100);
-    assert_eq!(ways[0]["name"], serde_json::json!("測試路"));
-    let routes = d["routes"].as_array().unwrap();
-    assert_eq!(routes.len(), 1, "one route per fixture segment: {d}");
-    let codes: Vec<&str> = routes
-        .iter()
-        .map(|r| r["route_code"].as_str().unwrap())
-        .collect();
-    assert!(codes.contains(&"1") || codes.contains(&"2"), "{codes:?}");
-
-    // unknown segment id → 404
-    let res = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/segments/nonexistent")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
-
-/// Stop/station detail carries the registry segments incident to the stop's
-/// station: node 44 is the start endpoint of exactly the 44→46 and 44→50 segments.
-#[tokio::test]
-async fn stop_and_station_detail_list_incident_segments() {
-    let (_dir, db) = fixture_db_with_segments();
-    let app = router_with(AppState::new(db));
-
-    let v = get_json(&app, "/api/routes").await;
-    let r2 = v["routes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|r| r["route_code"] == serde_json::json!("2"))
-        .unwrap();
-    let id2 = r2["route_id"].as_i64().unwrap();
-
-    let s = get_json(&app, &format!("/api/routes/{id2}/directions/0/stops")).await;
-    let stops = s["stops"].as_array().unwrap();
-    assert_eq!(stops.len(), 3, "route 2 rides the road with 3 stops: {s}");
-
-    let sv_id = stops[0]["stop_version_id"].as_i64().unwrap(); // node 44
-    let d = get_json(&app, &format!("/api/stops/{sv_id}")).await;
-    let segs = d["segments"].as_array().expect("segments in stop detail");
-    assert_eq!(segs.len(), 2, "node 44 ends exactly 2 of 3 segments: {d}");
-    for seg in segs {
-        assert!(seg["segment_id"].is_string(), "{seg}");
-        assert!(seg["length_m"].as_f64().unwrap() > 0.0, "{seg}");
-        assert!(seg["way_count"].as_i64().is_some(), "{seg}");
-        assert!(seg["other_station_id"].is_i64(), "{seg}");
-        assert!(
-            seg["other_station_name"]
-                .as_str()
-                .is_some_and(|n| !n.is_empty()),
-            "{seg}"
-        );
-        assert_eq!(
-            seg["is_start"],
-            serde_json::json!(true),
-            "44 is the start of both its segments: {seg}"
-        );
-    }
-
-    // station detail mirrors the incident list for its own station
-    let st_id = d["station"]["station_id"].as_i64().unwrap();
-    let st = get_json(&app, &format!("/api/stations/{st_id}")).await;
-    assert_eq!(
-        st["segments"]
-            .as_array()
-            .expect("segments in station detail")
-            .len(),
-        2,
-        "{st}"
-    );
-
-    // every listed segment_id resolves through the segment detail endpoint
-    for seg in segs {
-        let sid = seg["segment_id"].as_str().unwrap();
-        let sd = get_json(&app, &format!("/api/segments/{sid}")).await;
-        assert_eq!(sd["segment_id"], serde_json::json!(sid));
-    }
-}
-
-/// Path pieces carry the seg_traversal segment for their stop pair, so the
-/// piece panel can drill into the canonical corridor.
-#[tokio::test]
-async fn route_path_pieces_link_traversal_segments() {
-    let (_dir, db) = fixture_db_with_segments();
-    let app = router_with(AppState::new(db));
-
-    let v = get_json(&app, "/api/routes").await;
-    let id2 = v["routes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|r| r["route_code"] == serde_json::json!("2"))
-        .unwrap()["route_id"]
-        .as_i64()
-        .unwrap();
-
-    let p = get_json(&app, &format!("/api/routes/{id2}/directions/0/path")).await;
-    let feats = p["features"].as_array().expect("route 2 path pieces");
-    let mut linked = 0;
-    for f in feats {
-        let sid = f["properties"]["segment_id"].as_str();
-        if let Some(sid) = sid {
-            linked += 1;
-            let d = get_json(&app, &format!("/api/segments/{sid}")).await;
-            assert_eq!(d["segment_id"], serde_json::json!(sid), "{f}");
-            assert_eq!(
-                d["geometry"]["type"],
-                serde_json::json!("LineString"),
-                "linked segment has highlight geometry: {d}"
-            );
-        }
-    }
-    assert!(linked > 0, "registry fixture links ≥1 piece: {p}");
-}
-
 #[tokio::test]
 async fn route_ways_overlay_trims_to_entry_exit() {
-    let (_dir, db) = fixture_db_with_segments();
+    let (_dir, db) = fixture_db_matched();
     let app = router_with(AppState::new(db));
 
     let v = get_json(&app, "/api/routes").await;
@@ -681,7 +497,7 @@ async fn route_ways_overlay_trims_to_entry_exit() {
 
 #[tokio::test]
 async fn raw_staging_compare() {
-    let (_dir, db) = fixture_db_with_segments();
+    let (_dir, db) = fixture_db_matched();
     let app = router_with(AppState::new(db));
 
     let v = get_json(&app, "/api/routes").await;
@@ -790,7 +606,7 @@ async fn stops_viewport_and_search() {
 
 #[tokio::test]
 async fn bearings_exposed_across_endpoints() {
-    let (_dir, db) = fixture_db_with_segments();
+    let (_dir, db) = fixture_db_matched();
     let app = router_with(AppState::new(db));
 
     // viewport stops: bearing + source
@@ -860,7 +676,7 @@ async fn bearings_exposed_across_endpoints() {
 
 #[tokio::test]
 async fn raw_endpoint_survives_missing_staging_row() {
-    let (_dir, db) = fixture_db_with_segments();
+    let (_dir, db) = fixture_db_matched();
     // second-import shape: published route, but no src_route_point row in the
     // latest batch for this direction
     let conn = rm_db::open(&db).unwrap();
@@ -880,137 +696,3 @@ async fn raw_endpoint_survives_missing_staging_row() {
     );
 }
 
-#[tokio::test]
-async fn segments_limit_keeps_top_corridors() {
-    let (_dir, db) = fixture_db_with_segments();
-    let conn = rm_db::open(&db).unwrap();
-    // make the LAST-inserted segment (route 2's, so it trails route 1's in
-    // scan order) carry two routes: point route 1's traversal at it
-    conn.execute_batch(
-        "UPDATE seg_traversal SET segment_id =
-            (SELECT segment_id FROM seg_segment ORDER BY rowid DESC LIMIT 1)
-         WHERE subroute_version_id IN (
-            SELECT ssv.subroute_version_id FROM subroute_version ssv
-            JOIN route_version rv ON rv.route_version_id = ssv.route_version_id
-            JOIN route r ON r.route_id = rv.route_id
-            WHERE r.route_code = '1');",
-    )
-    .unwrap();
-    drop(conn);
-
-    let app = router_with(AppState::new(db));
-    // 3 candidates, limit 1: the shared corridor (route_count 2, scanned
-    // last) must win over the first-scanned single-route segments
-    let v = get_json(
-        &app,
-        "/api/segments?bbox=120.6850,24.1400,120.6870,24.1420&limit=1",
-    )
-    .await;
-    let feats = v["features"].as_array().unwrap();
-    assert_eq!(feats.len(), 1, "{v}");
-    assert_eq!(
-        feats[0]["properties"]["route_count"].as_i64().unwrap(),
-        2,
-        "top corridor kept under limit: {v}"
-    );
-    assert_eq!(v["truncated"], serde_json::json!(true), "{v}");
-}
-
-/// Like `fixture_db`, with one pair split into two corridor segments
-/// (395 m + 604 m, same pair_key) and one unsplit pair.
-fn fixture_db_with_variants() -> (tempfile::TempDir, std::path::PathBuf) {
-    let (dir, db) = fixture_db();
-    let conn = rm_db::open(&db).unwrap();
-    let (st_a, st_b): (i64, i64) = conn
-        .query_row(
-            "SELECT MIN(station_id), MAX(station_id) FROM station",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
-    let (rv, sv): (i64, i64) = conn
-        .query_row(
-            "SELECT rv.route_version_id, sv.subroute_version_id
-             FROM route_version rv
-             JOIN subroute_version sv ON sv.route_version_id = rv.route_version_id LIMIT 1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
-    let mut rsvs: Vec<i64> = conn
-        .prepare("SELECT route_stop_version_id FROM route_stop_version ORDER BY 1")
-        .unwrap()
-        .query_map([], |r| r.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    rsvs.truncate(4);
-    assert_eq!(rsvs.len(), 4, "fixture needs two stop pairs: {rsvs:?}");
-    let (rsvs0, rsvs1, rsvs2, rsvs3) = (rsvs[0], rsvs[1], rsvs[2], rsvs[3]);
-    conn.execute_batch(&format!(
-        "INSERT INTO osm_way (osm_way_id, highway, oneway, name)
-            VALUES (100, 'primary', 1, '主線'), (300, 'tertiary', 0, '側線');
-         INSERT INTO seg_segment
-            (segment_id, pair_key, corridor_key, start_station_id, end_station_id,
-             encoded_polyline, length_m, way_count, variant_count, length_spread_m)
-         VALUES
-            ('segx', 'pk1', '390', {st_a}, {st_b}, '', 395.0, 1, 1, 0.0),
-            ('segy', 'pk1', '600', {st_a}, {st_b}, '', 604.0, 1, 1, 0.0),
-            ('segz', 'pk2', '120', {st_a}, {st_b}, '', 118.0, 1, 1, 0.0);
-         INSERT INTO seg_traversal
-            (route_version_id, subroute_version_id, direction,
-             from_route_stop_version_id, to_route_stop_version_id, segment_id, way_sig)
-         VALUES
-            ({rv}, {sv}, 0, {rsvs0}, {rsvs1}, 'segx', '100'),
-            ({rv}, {sv}, 0, {rsvs2}, {rsvs3}, 'segx', '100|300');",
-    ))
-    .unwrap();
-    (dir, db)
-}
-
-#[tokio::test]
-async fn qa_variants_lists_split_pairs() {
-    let (_dir, db) = fixture_db_with_variants();
-    let app = router_with(AppState::new(db));
-
-    // default: every split pair, one entry per pair with member segments
-    let v = get_json(&app, "/api/qa/variants").await;
-    let pairs = v["pairs"].as_array().unwrap();
-    assert_eq!(pairs.len(), 1, "only the split pair, unsplit excluded: {v}");
-    assert_eq!(pairs[0]["pair_key"], serde_json::json!("pk1"));
-    assert_eq!(pairs[0]["length_spread_m"].as_f64().unwrap(), 209.0);
-    assert!(
-        pairs[0]["from"].is_string() && pairs[0]["to"].is_string(),
-        "station names for triage: {pairs:?}"
-    );
-    let segments = pairs[0]["segments"].as_array().unwrap();
-    assert_eq!(segments.len(), 2, "{pairs:?}");
-    // ascending length: the 395 m corridor first
-    assert_eq!(segments[0]["segment_id"], serde_json::json!("segx"));
-    assert_eq!(segments[0]["corridor_key"], serde_json::json!("390"));
-    assert_eq!(segments[0]["way_sig"], serde_json::json!("100"));
-    assert_eq!(segments[0]["ways"][0]["name"], serde_json::json!("主線"));
-    assert_eq!(segments[1]["segment_id"], serde_json::json!("segy"));
-    // segx carries BOTH variants: majority way list shown (tie -> first),
-    // routes + traversals span every variant, not just the majority
-    assert!(
-        segments[0]["routes"].as_array().unwrap().len() == 2
-            && segments[0]["traversals"] == serde_json::json!(2),
-        "segment carries users across variants: {segments:?}"
-    );
-    assert!(
-        segments[1]["routes"].as_array().unwrap().len() == 0
-            && segments[1]["traversals"] == serde_json::json!(0),
-        "traversal-less member: {segments:?}"
-    );
-
-    // stats feeds the chip with the split-pair count
-    let s = get_json(&app, "/api/stats").await;
-    assert_eq!(s["variants"]["split_pairs"].as_i64().unwrap(), 1, "{s}");
-
-    // min_spread filters by member length gap (604 - 395 = 209)
-    let v = get_json(&app, "/api/qa/variants?min_spread=300").await;
-    assert_eq!(v["pairs"].as_array().unwrap().len(), 0, "{v}");
-    let v = get_json(&app, "/api/qa/variants?min_spread=100").await;
-    assert_eq!(v["pairs"].as_array().unwrap().len(), 1, "{v}");
-}

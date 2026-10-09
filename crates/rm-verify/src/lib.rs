@@ -19,9 +19,6 @@ pub struct Expectations {
     pub single_dir: Option<i64>,
     pub no_polyline: Option<i64>,
     pub main_side_groups: Option<i64>,
-    /// Sanity pair for the shared-segment check (two route ext_uids that must
-    /// share at least one segment). None skips the check.
-    pub shared_pair: Option<(&'static str, &'static str)>,
 }
 
 impl Expectations {
@@ -41,7 +38,6 @@ impl Expectations {
         single_dir: Some(23),
         no_polyline: Some(17),
         main_side_groups: Some(99),
-        shared_pair: Some(("tcg:1", "tcg:9221")),
     };
 
     /// Verified targets from the 2026-10-05 Tainan capture (小黃巴士 excluded).
@@ -59,7 +55,6 @@ impl Expectations {
         single_dir: Some(5),
         no_polyline: Some(1),
         main_side_groups: Some(0),
-        shared_pair: Some(("tcg:2101", "tcg:2102")), // 101/102 share 28 segments
     };
 
     /// Verified targets from the 2026-10-06 Taipei capture (ebus.gov.taipei
@@ -79,7 +74,6 @@ impl Expectations {
         single_dir: Some(11),
         no_polyline: Some(11),
         main_side_groups: Some(0),
-        shared_pair: Some(("tcg:0100064500", "tcg:0100064510")), // 64/64區 share 109 segments
     };
 }
 
@@ -404,73 +398,6 @@ pub fn run(
             OR COUNT(DISTINCT stop_sequence) != COUNT(*))",
     )?);
 
-    // ---- segment layer ----
-    let traversals = n(conn, "SELECT COUNT(*) FROM seg_traversal", &[])?;
-    let segments = n(conn, "SELECT COUNT(*) FROM seg_segment", &[])?;
-    counts.insert("traversals".into(), traversals);
-    counts.insert("segments".into(), segments);
-    let shared = n(
-        conn,
-        "SELECT COUNT(*) FROM (SELECT segment_id FROM seg_traversal
-         GROUP BY segment_id HAVING COUNT(DISTINCT route_version_id) > 1)",
-        &[],
-    )?;
-    counts.insert("shared_segments".into(), shared);
-    if traversals == 0 {
-        checks.push(check(
-            "seg:sanity",
-            "segment registry consistency",
-            true,
-            "no segments registered (matcher/registry not run)".to_string(),
-        ));
-        checks.push(check(
-            "seg:shared-pair",
-            "routes tcg:1 & tcg:9221 share >= 1 segment",
-            true,
-            "no segments registered".to_string(),
-        ));
-    } else {
-        let bad_seg = n(
-            conn,
-            "SELECT COUNT(*) FROM seg_segment
-             WHERE way_count < 1 OR length_m <= 0",
-            &[],
-        )?;
-        checks.push(check(
-            "seg:sanity",
-            "segments have ways and positive length",
-            bad_seg == 0,
-            format!("{bad_seg} bad seg_segment rows"),
-        ));
-        match exp.shared_pair {
-            Some((uid_a, uid_b)) => {
-                let pair = n(
-                    conn,
-                    "SELECT COUNT(*) FROM seg_traversal t1
-                     JOIN seg_traversal t2 ON t2.segment_id = t1.segment_id
-                     JOIN route_version rv1 ON rv1.route_version_id = t1.route_version_id
-                     JOIN route r1 ON r1.route_id = rv1.route_id
-                     JOIN route_version rv2 ON rv2.route_version_id = t2.route_version_id
-                     JOIN route r2 ON r2.route_id = rv2.route_id
-                     WHERE r1.ext_uid = ?1 AND r2.ext_uid = ?2",
-                    &[&uid_a, &uid_b],
-                )?;
-                checks.push(check(
-                    "seg:shared-pair",
-                    &format!("routes {uid_a} & {uid_b} share >= 1 segment"),
-                    pair >= 1,
-                    format!("{pair} shared segment_ids"),
-                ));
-            }
-            None => checks.push(check(
-                "seg:shared-pair",
-                "shared-segment sanity pair",
-                true,
-                "no shared-pair configured".to_string(),
-            )),
-        }
-    }
-
     // ---- matcher stats (informational) ----
     {
         let stat_rows = n(conn, "SELECT COUNT(*) FROM seg_match_stat", &[])?;
@@ -576,10 +503,10 @@ pub fn run(
         }
     }
 
-    // ---- station-pair path variants (warn-only) ----
+    // ---- station-pair length corridors (warn-only) ----
     {
-        let (warn, variant_stats) = segment_variant_warnings(conn)?;
-        stats.extend(variant_stats);
+        let (warn, spread_stats) = pair_spread_warnings(conn)?;
+        stats.extend(spread_stats);
         if let Some(warn) = warn {
             warnings.push(warn);
         }
@@ -596,11 +523,10 @@ pub fn run(
     // ---- QA exports ----
     std::fs::create_dir_all(qa_dir)?;
     write_report_json(qa_dir, &report)?;
-    write_segments_geojson(conn, qa_dir)?;
     write_outlier_csv(conn, qa_dir)?;
     write_bearing_report(conn, qa_dir)?;
     write_match_dev_report(conn, qa_dir)?;
-    write_segment_variant_report(conn, qa_dir)?;
+    write_pair_spread_report(conn, qa_dir)?;
     write_grouping_report(conn, qa_dir)?;
 
     Ok(report)
@@ -650,167 +576,195 @@ fn match_dev_warnings(conn: &Connection) -> anyhow::Result<(Option<Check>, BTree
     Ok((warn, stats))
 }
 
-/// Station pairs whose pair_key maps to more than one segment (corridor
-/// splits within one pair). Never fails the run — see
-/// segment_variant_report.json for the split list.
-fn segment_variant_warnings(
+/// Corridor-split thresholds carried over from the removed segment registry
+/// (docs/segment-corridor-split.md): drafts between one station pair form
+/// separate corridors when adjacent sorted lengths differ by more than
+/// max(100 m, 3% of the shorter side).
+pub const PAIR_SPREAD_GAP_ABS_M: f64 = 100.0;
+pub const PAIR_SPREAD_GAP_REL: f64 = 0.03;
+
+/// Station pairs whose geometry-draft pieces cluster into more than one
+/// length corridor (true path alternatives). Never fails the run — see
+/// pair_spread_report.json for the list.
+fn pair_spread_warnings(
     conn: &Connection,
 ) -> anyhow::Result<(Option<Check>, BTreeMap<String, f64>)> {
-    let split = n(
-        conn,
-        "SELECT COUNT(*) FROM (SELECT pair_key FROM seg_segment
-         WHERE pair_key != '' GROUP BY pair_key HAVING COUNT(*) > 1)",
-        &[],
-    )?;
-    let stats = BTreeMap::from([("seg_split_pairs".into(), split as f64)]);
-    let warn = if split > 0 {
+    let spreads = pair_spread_clusters(conn)?;
+    let stats = BTreeMap::from([("pair_spread_pairs".into(), spreads.len() as f64)]);
+    let warn = if spreads.is_empty() {
+        None
+    } else {
         Some(check(
-            "seg:variants",
-            "one segment per corridor within a station pair",
+            "pair:spread",
+            "one length corridor per station pair",
             true,
             format!(
-                "{split} pairs split into multiple corridor segments (see segment_variant_report.json)"
+                "{} pairs split into multiple length corridors (see pair_spread_report.json)",
+                spreads.len()
             ),
         ))
-    } else {
-        None
     };
     Ok((warn, stats))
 }
 
-/// Split-pair detail for QA: each pair's member corridor segments (length,
-/// way list, route users, traversals), widest member length gap first.
-fn write_segment_variant_report(conn: &Connection, qa_dir: &Path) -> anyhow::Result<()> {
-    use serde_json::json;
-    let mut pairs = Vec::new();
-    {
-        let mut stmt = conn.prepare(
-            "SELECT sg.pair_key, sa.station_name, sb.station_name,
-                    MAX(sg.length_m) - MIN(sg.length_m)
-             FROM seg_segment sg
-             JOIN station_version sa
-               ON sa.station_id = sg.start_station_id AND sa.valid_to IS NULL
-             JOIN station_version sb
-               ON sb.station_id = sg.end_station_id AND sb.valid_to IS NULL
-             WHERE sg.pair_key != ''
-             GROUP BY sg.pair_key HAVING COUNT(*) > 1
-             ORDER BY 4 DESC, sg.pair_key",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?;
-        for row in rows {
-            let (pair, from, to) = row?;
-            let mut segments: Vec<serde_json::Value> = {
-                let mut s = conn.prepare(
-                    "SELECT segment_id, corridor_key, length_m FROM seg_segment
-                     WHERE pair_key = ?1 ORDER BY length_m",
-                )?;
-                let it = s.query_map([&pair], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, f64>(2)?,
-                    ))
-                })?;
-                it.collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .map(|(id, ck, len)| {
-                        json!({"segment_id": id, "corridor_key": ck, "length_m": len})
-                    })
-                    .collect()
-            };
-            for seg in &mut segments {
-                let seg_id = seg["segment_id"].as_str().unwrap_or_default().to_string();
-                // majority way list across this segment's traversals, plus
-                // its route users (per traversal, so both directions list)
-                let mut by_sig: std::collections::BTreeMap<String, Vec<String>> =
-                    std::collections::BTreeMap::new();
-                {
-                    let mut t = conn.prepare(
-                        "SELECT t.way_sig, r.route_code FROM seg_traversal t
-                         JOIN route_version rv ON rv.route_version_id = t.route_version_id
-                         JOIN route r ON r.route_id = rv.route_id
-                         WHERE t.segment_id = ?1",
-                    )?;
-                    let it = t.query_map([&seg_id], |r| {
-                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                    })?;
-                    for row in it {
-                        let (sig, code) = row?;
-                        by_sig.entry(sig).or_default().push(code);
-                    }
-                }
-                // majority way list represents the segment (ties -> first);
-                // routes + traversals span EVERY variant of the segment
-                let mut by_sig: Vec<(String, Vec<String>)> = by_sig.into_iter().collect();
-                by_sig.sort_by_key(|(sig, rs)| (std::cmp::Reverse(rs.len()), sig.clone()));
-                let majority_sig = by_sig
-                    .first()
-                    .map(|(sig, _)| sig.clone())
-                    .unwrap_or_default();
-                let routes: Vec<String> = by_sig
-                    .iter()
-                    .flat_map(|(_, rs)| rs.iter().cloned())
-                    .collect();
-                let traversals = routes.len();
-                let way_ids: Vec<i64> = majority_sig
-                    .split('|')
-                    .filter_map(|w| w.parse().ok())
-                    .collect();
-                let mut names: std::collections::HashMap<i64, String> =
-                    std::collections::HashMap::new();
-                if !way_ids.is_empty() {
-                    let ids = way_ids
-                        .iter()
-                        .map(|w| w.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    let mut w = conn.prepare(&format!(
-                        "SELECT osm_way_id, name FROM osm_way WHERE osm_way_id IN ({ids})"
-                    ))?;
-                    let it =
-                        w.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
-                    for row in it {
-                        let (id, name) = row?;
-                        names.insert(id, name);
-                    }
-                }
-                let ways: Vec<serde_json::Value> = majority_sig
-                    .split('|')
-                    .filter_map(|w| w.parse::<i64>().ok())
-                    .map(|id| {
-                        json!({
-                            "osm_way_id": id,
-                            "name": names.get(&id).cloned().unwrap_or_default(),
-                        })
-                    })
-                    .collect();
-                *seg = json!({
-                    "segment_id": seg_id,
-                    "corridor_key": seg["corridor_key"].clone(),
-                    "length_m": seg["length_m"].clone(),
-                    "way_sig": majority_sig,
-                    "ways": ways,
-                    "traversals": traversals,
-                    "routes": routes,
+struct SpreadCluster {
+    len_min: f64,
+    len_max: f64,
+    pieces: usize,
+    routes: Vec<String>,
+}
+
+struct PairSpread {
+    from_station: i64,
+    to_station: i64,
+    /// Widest adjacent length gap inside the pair (the split evidence).
+    gap_m: f64,
+    clusters: Vec<SpreadCluster>,
+}
+
+/// Walk the ordered (station pair, length, route) rows, cutting a new cluster
+/// wherever adjacent lengths separate beyond the corridor thresholds.
+fn pair_spread_clusters(conn: &Connection) -> anyhow::Result<Vec<PairSpread>> {
+    struct Cur {
+        from: i64,
+        to: i64,
+        lens: Vec<f64>,
+        routes: Vec<String>,
+    }
+    fn finish(cur: Cur) -> PairSpread {
+        let mut clusters: Vec<SpreadCluster> = Vec::new();
+        let mut start = 0;
+        for i in 1..=cur.lens.len() {
+            let boundary = i == cur.lens.len()
+                || (cur.lens[i] - cur.lens[i - 1])
+                    > PAIR_SPREAD_GAP_ABS_M.max(PAIR_SPREAD_GAP_REL * cur.lens[i - 1]);
+            if boundary {
+                let lens = &cur.lens[start..i];
+                clusters.push(SpreadCluster {
+                    len_min: lens[0],
+                    len_max: lens[lens.len() - 1],
+                    pieces: lens.len(),
+                    routes: cur.routes[start..i].to_vec(),
                 });
+                start = i;
             }
-            pairs.push(json!({
-                "pair_key": pair,
-                "from": from,
-                "to": to,
-                "segments": segments,
-            }));
+        }
+        let gap_m = cur
+            .lens
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .fold(0.0_f64, f64::max);
+        PairSpread {
+            from_station: cur.from,
+            to_station: cur.to,
+            gap_m,
+            clusters,
         }
     }
+
+    let mut stmt = conn.prepare(
+        "SELECT svf.station_id, svt.station_id, gd.length_m, r.route_code
+         FROM seg_geometry_draft gd
+         JOIN route_stop_version rf ON rf.route_stop_version_id = gd.from_route_stop_version_id
+         JOIN stop_version svf ON svf.stop_version_id = rf.stop_version_id
+         JOIN route_stop_version rt ON rt.route_stop_version_id = gd.to_route_stop_version_id
+         JOIN stop_version svt ON svt.stop_version_id = rt.stop_version_id
+         JOIN subroute_version sv ON sv.subroute_version_id = gd.subroute_version_id
+         JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         JOIN route r ON r.route_id = rv.route_id
+         ORDER BY svf.station_id, svt.station_id, gd.length_m",
+    )?;
+    let it = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, f64>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    })?;
+
+    let mut pairs: Vec<PairSpread> = Vec::new();
+    let mut cur: Option<Cur> = None;
+    for row in it {
+        let (from, to, len, code) = row?;
+        match &mut cur {
+            Some(c) if c.from == from && c.to == to => {
+                c.lens.push(len);
+                c.routes.push(code);
+            }
+            _ => {
+                if let Some(c) = cur.take() {
+                    let p = finish(c);
+                    if p.clusters.len() > 1 {
+                        pairs.push(p);
+                    }
+                }
+                cur = Some(Cur {
+                    from,
+                    to,
+                    lens: vec![len],
+                    routes: vec![code],
+                });
+            }
+        }
+    }
+    if let Some(c) = cur {
+        let p = finish(c);
+        if p.clusters.len() > 1 {
+            pairs.push(p);
+        }
+    }
+    Ok(pairs)
+}
+
+/// Split-pair detail for QA: each pair's length corridors (length range,
+/// piece count, route users), widest gap first.
+fn write_pair_spread_report(conn: &Connection, qa_dir: &Path) -> anyhow::Result<()> {
+    use serde_json::json;
+    let mut spreads = pair_spread_clusters(conn)?;
+    spreads.sort_by(|a, b| b.gap_m.partial_cmp(&a.gap_m).unwrap());
+
+    let mut names: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+    let mut ids: Vec<i64> = spreads
+        .iter()
+        .flat_map(|p| [p.from_station, p.to_station])
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if !ids.is_empty() {
+        let list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT station_id, station_name FROM station_version
+             WHERE valid_to IS NULL AND station_id IN ({list})"
+        ))?;
+        let it = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        for row in it {
+            let (id, name) = row?;
+            names.insert(id, name);
+        }
+    }
+
+    let pairs: Vec<_> = spreads
+        .iter()
+        .map(|p| {
+            json!({
+                "from_station_id": p.from_station,
+                "to_station_id": p.to_station,
+                "from": names.get(&p.from_station).cloned().unwrap_or_default(),
+                "to": names.get(&p.to_station).cloned().unwrap_or_default(),
+                "gap_m": p.gap_m,
+                "clusters": p.clusters.iter().map(|c| json!({
+                    "length_min_m": c.len_min,
+                    "length_max_m": c.len_max,
+                    "pieces": c.pieces,
+                    "routes": c.routes,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
     let report = json!({ "pairs": pairs });
     std::fs::write(
-        qa_dir.join("segment_variant_report.json"),
+        qa_dir.join("pair_spread_report.json"),
         serde_json::to_vec_pretty(&report)?,
     )?;
     Ok(())
@@ -1286,53 +1240,6 @@ fn write_report_json(qa_dir: &Path, report: &Report) -> anyhow::Result<()> {
     std::fs::write(
         qa_dir.join("report.json"),
         serde_json::to_string_pretty(report)?,
-    )?;
-    Ok(())
-}
-
-fn write_segments_geojson(conn: &Connection, qa_dir: &Path) -> anyhow::Result<()> {
-    use serde_json::json;
-    let mut features = Vec::new();
-    {
-        let mut stmt = conn.prepare(
-            "SELECT sg.segment_id, sg.encoded_polyline, sg.length_m, sg.way_count,
-                    (SELECT COUNT(DISTINCT t.route_version_id) FROM seg_traversal t
-                     WHERE t.segment_id = sg.segment_id)
-             FROM seg_segment sg",
-        )?;
-        let it = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, f64>(2)?,
-                r.get::<_, i64>(3)?,
-                r.get::<_, i64>(4)?,
-            ))
-        })?;
-        for row in it {
-            let (id, enc, len, ways, routes) = row?;
-            let coords: Vec<Vec<f64>> = rm_core::polyline::decode(&enc)
-                .map(|pts| pts.into_iter().map(|p| vec![p.lon, p.lat]).collect())
-                .unwrap_or_default();
-            if coords.len() < 2 {
-                continue; // no usable geometry
-            }
-            features.push(json!({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": coords},
-                "properties": {
-                    "segment_id": id,
-                    "length_m": len,
-                    "way_count": ways,
-                    "routes": routes,
-                }
-            }));
-        }
-    }
-    let fc = json!({"type": "FeatureCollection", "features": features});
-    std::fs::write(
-        qa_dir.join("segments.geojson"),
-        serde_json::to_string_pretty(&fc)?,
     )?;
     Ok(())
 }

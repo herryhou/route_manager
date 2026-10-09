@@ -33,6 +33,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/0009_corridor_split.sql"),
     ),
     ("0010_edit", include_str!("../migrations/0010_edit.sql")),
+    (
+        "0011_drop_segment",
+        include_str!("../migrations/0011_drop_segment.sql"),
+    ),
 ];
 
 /// Apply pending migrations in order. Safe to call repeatedly.
@@ -88,7 +92,8 @@ mod tests {
                 "0007_current_views",
                 "0008_pair_only",
                 "0009_corridor_split",
-                "0010_edit"
+                "0010_edit",
+                "0011_drop_segment"
             ]
         );
     }

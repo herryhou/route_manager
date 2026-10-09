@@ -20,16 +20,12 @@ export const routeWays = (id, dir) => fetchJson(`/api/routes/${id}/directions/${
 export const routeRaw = (id, dir) => fetchJson(`/api/routes/${id}/directions/${dir}/raw`);
 export const stopDetail = (id) => fetchJson(`/api/stops/${id}`);
 export const stationDetail = (id) => fetchJson(`/api/stations/${id}`);
-export const segmentsBbox = (bbox, minRoutes = 0, geom = 'provider') =>
-  fetchJson(`/api/segments?bbox=${bbox}&min_routes=${minRoutes}&geom=${geom}`);
-export const segmentDetail = (id) => fetchJson(`/api/segments/${id}`);
 export const stopsBbox = (bbox, kind) =>
   fetchJson(`/api/stops?bbox=${bbox}&kind=${kind}`);
 export const stopsSearch = (q) => fetchJson(`/api/stops?q=${encodeURIComponent(q)}`);
 export const stationsSearch = (q) => fetchJson(`/api/stations?q=${encodeURIComponent(q)}`);
 export const outliers = (minSnap = 50) => fetchJson(`/api/qa/outliers?min_snap=${minSnap}`);
 export const matchDevs = (minDev = 50) => fetchJson(`/api/qa/matchdev?min_dev=${minDev}`);
-export const variants = (minSpread = 0) => fetchJson(`/api/qa/variants?min_spread=${minSpread}`);
 
 // --- edit mode (phase 1) ---
 export const editToken = () => sessionStorage.getItem('rm-edit-token') ?? '';

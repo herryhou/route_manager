@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 
 /// Row shape of the scalar-count query in `stats`.
-type CountsRow = (i64, i64, i64, i64, i64, i64, i64, i64);
+type CountsRow = (i64, i64, i64, i64, i64, i64);
 
 /// Row shape of the seg_match_stat aggregate in `stats`.
 type MatchAgg = (
@@ -22,30 +22,25 @@ type MatchAgg = (
 
 /// Overview: counts, match summary, outlier count, latest batch.
 pub fn stats(conn: &Connection) -> Result<Value> {
-    let (routes, stops, stations, groups, segments, traversals, osm_ways, drafts) = conn
-        .query_row(
-            "SELECT (SELECT COUNT(*) FROM route),
-                    (SELECT COUNT(*) FROM stop_version WHERE valid_to IS NULL),
-                    (SELECT COUNT(*) FROM station_version WHERE valid_to IS NULL),
-                    (SELECT COUNT(*) FROM station_group_version WHERE valid_to IS NULL),
-                    (SELECT COUNT(*) FROM seg_segment),
-                    (SELECT COUNT(*) FROM seg_traversal),
-                    (SELECT COUNT(*) FROM osm_way),
-                    (SELECT COUNT(*) FROM seg_geometry_draft)",
-            [],
-            |r| -> rusqlite::Result<CountsRow> {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                    r.get(6)?,
-                    r.get(7)?,
-                ))
-            },
-        )?;
+    let (routes, stops, stations, groups, osm_ways, drafts) = conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM route),
+                (SELECT COUNT(*) FROM stop_version WHERE valid_to IS NULL),
+                (SELECT COUNT(*) FROM station_version WHERE valid_to IS NULL),
+                (SELECT COUNT(*) FROM station_group_version WHERE valid_to IS NULL),
+                (SELECT COUNT(*) FROM osm_way),
+                (SELECT COUNT(*) FROM seg_geometry_draft)",
+        [],
+        |r| -> rusqlite::Result<CountsRow> {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        },
+    )?;
 
     let directions_total: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT subroute_version_id || '#' || direction)
@@ -92,13 +87,6 @@ pub fn stats(conn: &Connection) -> Result<Value> {
         |r| r.get(0),
     )?;
 
-    let split_pairs: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM (SELECT pair_key FROM seg_segment WHERE pair_key != ''
-         GROUP BY pair_key HAVING COUNT(*) > 1)",
-        [],
-        |r| r.get(0),
-    )?;
-
     let batch = match conn.query_row(
         "SELECT batch_id, captured_at, valid_from, status
          FROM import_batch ORDER BY batch_id DESC LIMIT 1",
@@ -118,8 +106,6 @@ pub fn stats(conn: &Connection) -> Result<Value> {
             "stops": stops,
             "stations": stations,
             "groups": groups,
-            "segments": segments,
-            "traversals": traversals,
             "osm_ways": osm_ways,
             "geometry_drafts": drafts,
         },
@@ -136,147 +122,10 @@ pub fn stats(conn: &Connection) -> Result<Value> {
             "directions_dev_p95_over_50m": dev_over_50.unwrap_or(0),
         },
         "outlier_stops": outlier_stops,
-        "variants": {
-            "split_pairs": split_pairs,
-        },
         "batch": batch.map(|(id, captured, valid, status)| json!({
             "batch_id": id, "captured_at": captured, "valid_from": valid, "status": status,
         })),
     }))
-}
-
-/// `GET /api/qa/variants?min_spread=&limit=` — station pairs whose pair_key
-/// maps to more than one segment (corridor splits), member length gap
-/// descending. Mirrors the rm-verify segment_variant_report.json pairs.
-pub fn variants(conn: &Connection, min_spread: f64, limit: i64) -> Result<Value> {
-    let mut stmt = conn.prepare(
-        "SELECT sg.pair_key, sa.station_name, sb.station_name,
-                MAX(sg.length_m) - MIN(sg.length_m) AS spread
-         FROM seg_segment sg
-         JOIN station_version sa
-           ON sa.station_id = sg.start_station_id AND sa.valid_to IS NULL
-         JOIN station_version sb
-           ON sb.station_id = sg.end_station_id AND sb.valid_to IS NULL
-         WHERE sg.pair_key != ''
-         GROUP BY sg.pair_key
-         HAVING COUNT(*) > 1 AND spread > ?1
-         ORDER BY spread DESC, sg.pair_key
-         LIMIT ?2",
-    )?;
-    let it = stmt.query_map(rusqlite::params![min_spread, limit], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, f64>(3)?,
-        ))
-    })?;
-    let mut pairs = Vec::new();
-    for row in it {
-        let (pair, from, to, spread) = row?;
-        let mut segments: Vec<Value> = {
-            let mut s = conn.prepare(
-                "SELECT segment_id, corridor_key, length_m FROM seg_segment
-                 WHERE pair_key = ?1 ORDER BY length_m",
-            )?;
-            let rows = s.query_map([&pair], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, f64>(2)?,
-                ))
-            })?;
-            rows.collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .map(|(id, ck, len)| json!({"segment_id": id, "corridor_key": ck, "length_m": len}))
-                .collect()
-        };
-        for seg in &mut segments {
-            let seg_id = seg["segment_id"].as_str().unwrap_or_default().to_string();
-            // majority way list across this segment's traversals, plus its
-            // route users (per traversal, so both directions list)
-            let mut by_sig: std::collections::BTreeMap<String, Vec<String>> =
-                std::collections::BTreeMap::new();
-            {
-                let mut t = conn.prepare(
-                    "SELECT t.way_sig, r.route_code FROM seg_traversal t
-                     JOIN route_version rv ON rv.route_version_id = t.route_version_id
-                     JOIN route r ON r.route_id = rv.route_id
-                     WHERE t.segment_id = ?1",
-                )?;
-                let rows = t.query_map([&seg_id], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })?;
-                for row in rows {
-                    let (sig, code) = row?;
-                    by_sig.entry(sig).or_default().push(code);
-                }
-            }
-            // majority way list represents the segment (ties -> first);
-            // routes + traversals span EVERY variant of the segment
-            let mut by_sig: Vec<(String, Vec<String>)> = by_sig.into_iter().collect();
-            by_sig.sort_by_key(|(sig, rs)| (std::cmp::Reverse(rs.len()), sig.clone()));
-            let majority_sig = by_sig
-                .first()
-                .map(|(sig, _)| sig.clone())
-                .unwrap_or_default();
-            let routes: Vec<String> = by_sig
-                .iter()
-                .flat_map(|(_, rs)| rs.iter().cloned())
-                .collect();
-            let traversals = routes.len();
-            let way_ids: Vec<i64> = majority_sig
-                .split('|')
-                .filter_map(|w| w.parse().ok())
-                .collect();
-            let mut names: std::collections::HashMap<i64, String> =
-                std::collections::HashMap::new();
-            if !way_ids.is_empty() {
-                let ids = way_ids
-                    .iter()
-                    .map(|w| w.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let mut w = conn.prepare(&format!(
-                    "SELECT osm_way_id, name FROM osm_way WHERE osm_way_id IN ({ids})"
-                ))?;
-                let rows =
-                    w.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
-                for row in rows {
-                    let (id, name) = row?;
-                    names.insert(id, name);
-                }
-            }
-            let ways: Vec<Value> = majority_sig
-                .split('|')
-                .filter_map(|w| w.parse::<i64>().ok())
-                .map(|id| {
-                    json!({
-                        "osm_way_id": id,
-                        "name": names.get(&id).cloned().unwrap_or_default(),
-                    })
-                })
-                .collect();
-            *seg = json!({
-                "segment_id": seg_id,
-                "corridor_key": seg["corridor_key"].clone(),
-                "length_m": seg["length_m"].clone(),
-                "way_sig": majority_sig,
-                "ways": ways,
-                "traversals": traversals,
-                "routes": routes,
-            });
-        }
-        pairs.push(json!({
-            "pair_key": pair,
-            "from": from,
-            "to": to,
-            "length_spread_m": spread,
-            "segments": segments,
-        }));
-    }
-    let count = pairs.len();
-    Ok(json!({ "pairs": pairs, "count": count }))
 }
 
 /// `GET /api/qa/outliers?min_snap=&limit=` — worst projections first.

@@ -120,7 +120,7 @@ Dependency map — what each edit invalidates:
 |---|---|
 | stop lat/lon | `path_stop_projection` (per serving route-direction), `stop_bearing`, `station_bearing` |
 | stop name | nothing |
-| stop → other station | `station_bearing` (both sides), split clusters, segment endpoints |
+| stop → other station | `station_bearing` (both sides), split clusters |
 | station name | nothing |
 
 The edit primitive writes `stale_mark` rows in the same tx. Read queries LEFT
@@ -135,8 +135,8 @@ Refresh stays a CLI runbook — the web server never spawns pipeline binaries:
 2. **Projections** (`path_stop_projection`): rm-osm-match gains a
    `--routes <ids>` filter; run it for the stale-marked routes (~1s per
    direction with all cores).
-3. **Segments** (`seg_*`): whole-city rebuild stays manual (minutes). Needed
-   after station regroups, not after position fixes.
+3. **Station splits** (rm-registry `split` pass): whole-city re-run is the
+   manual step after station regroups.
 
 ## Server write path & auth
 
@@ -176,7 +176,6 @@ Refresh stays a CLI runbook — the web server never spawns pipeline binaries:
 - Incremental re-import / upstream-vs-manual conflict resolution.
 - Multi-writer concurrency beyond the app-level mutex (small team).
 - UI buttons that trigger refresh/pipeline runs.
-- Segment editing (phase 4 at the earliest).
 - Per-field permissions, user management UI.
 
 ## Phasing
@@ -188,7 +187,7 @@ Refresh stays a CLI runbook — the web server never spawns pipeline binaries:
    undo UI.
 3. **Refresh runbook**: `--routes` filter in rm-osm-match, bearing re-run
    steps, mark clearing, stale badges verified accurate.
-4. **Authoring**: new stops/stations, route-stop links, segment curation.
+4. **Authoring**: new stops/stations, route-stop links.
 
 ## Testing
 

@@ -25,7 +25,6 @@ fn fixture_expectations() -> Expectations {
         single_dir: Some(1),
         no_polyline: None, // depends on empty-string rows, not asserted here
         main_side_groups: Some(1),
-        shared_pair: None, // fixture registers no segments
     }
 }
 
@@ -37,14 +36,9 @@ fn healthy_fixture_passes_and_writes_exports() {
     let report = rm_verify::run(&conn, batch, &fixture_expectations(), qa.path()).unwrap();
 
     assert!(report.all_pass(), "failing checks: {report:#?}");
-    for name in ["report.json", "segments.geojson", "outlier_stops.csv"] {
+    for name in ["report.json", "outlier_stops.csv"] {
         assert!(qa.path().join(name).exists(), "missing export {name}");
     }
-    // GeoJSON is a parseable FeatureCollection
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(qa.path().join("segments.geojson")).unwrap())
-            .unwrap();
-    assert_eq!(v["type"], "FeatureCollection");
     // CSV has a header line
     let csv = std::fs::read_to_string(qa.path().join("outlier_stops.csv")).unwrap();
     assert!(csv.starts_with("route,"));
@@ -93,78 +87,78 @@ fn sequence_gap_is_caught() {
 }
 
 #[test]
-fn shared_pair_joins_through_route_version() {
-    // route ids deliberately MISALIGNED from route_version ids: joining
-    // route.route_id = seg_traversal.route_version_id misattributes routes
-    let conn = rm_db::open_in_memory().unwrap();
-    conn.execute_batch(
-        "INSERT INTO route (route_id, route_code, ext_uid, revision, created_at, updated_at)
-            VALUES (1, '1', 'tcg:1', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
-                   (2, '9221', 'tcg:9221', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-         INSERT INTO route_version
-            (route_version_id, route_id, version_no, status, valid_from, created_at)
-            VALUES (5, 1, 1, 'PUBLISHED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
-                   (6, 2, 1, 'PUBLISHED', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-         UPDATE route SET current_route_version_id = 5 WHERE route_id = 1;
-         UPDATE route SET current_route_version_id = 6 WHERE route_id = 2;
-         INSERT INTO subroute (subroute_id, route_id, subroute_code, created_at) VALUES
-            (5, 1, '1', '2026-01-01T00:00:00Z'), (6, 2, '9221', '2026-01-01T00:00:00Z');
-         INSERT INTO subroute_version
-            (subroute_version_id, route_version_id, subroute_id, subroute_name, created_at)
-            VALUES (5, 5, 5, 'A - B', '2026-01-01T00:00:00Z'),
-                   (6, 6, 6, 'C - D', '2026-01-01T00:00:00Z');
-         INSERT INTO station (station_id, ext_uid, created_at) VALUES
-            (1, 'tcg:node:1', '2026-01-01T00:00:00Z'),
-            (2, 'tcg:node:2', '2026-01-01T00:00:00Z');
-         INSERT INTO stop (stop_id, ext_uid, created_at) VALUES
-            (1, 'tcg:1:0:1', '2026-01-01T00:00:00Z');
-         INSERT INTO stop_version
-            (stop_version_id, stop_id, station_id, stop_code, stop_name, direction,
-             latitude, longitude, valid_from, created_at)
-            VALUES (1, 1, 1, '1', 'X', 0, 24.14, 120.68, '2026-01-01T00:00:00Z',
-                    '2026-01-01T00:00:00Z');
-         INSERT INTO seg_segment
-            (segment_id, start_station_id, end_station_id, encoded_polyline, length_m, way_count)
-            VALUES ('s1', 1, 2, '_p~iF~ps|U', 100.0, 1);
-         INSERT INTO route_stop_version
-            (route_stop_version_id, subroute_version_id, stop_version_id, direction,
-             stop_sequence, source_order_no, created_at)
-            VALUES (1, 5, 1, 0, 1, 1, '2026-01-01T00:00:00Z'),
-                   (2, 5, 1, 0, 2, 2, '2026-01-01T00:00:00Z'),
-                   (3, 6, 1, 0, 1, 1, '2026-01-01T00:00:00Z'),
-                   (4, 6, 1, 0, 2, 2, '2026-01-01T00:00:00Z');
-         INSERT INTO seg_traversal
-            (route_version_id, subroute_version_id, direction,
-             from_route_stop_version_id, to_route_stop_version_id, segment_id)
-            VALUES (5, 5, 0, 1, 2, 's1'), (6, 6, 0, 3, 4, 's1');",
-    )
+fn pair_length_spread_warns_and_reports() {
+    let (_dir, conn, batch) = setup();
+    // one station pair with two length corridors (395/400 vs 604 m): the
+    // 204 m gap exceeds max(100 m, 3%), the 5 m intra-corridor gap does not
+    let (a, b, sv1): (i64, i64, i64) = conn
+        .query_row(
+            "SELECT rsv1.route_stop_version_id, rsv2.route_stop_version_id,
+                    rsv1.subroute_version_id
+             FROM route_stop_version rsv1
+             JOIN route_stop_version rsv2
+               ON rsv2.subroute_version_id = rsv1.subroute_version_id
+              AND rsv2.direction = rsv1.direction
+              AND rsv2.stop_sequence = rsv1.stop_sequence + 1
+             LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("fixture needs a consecutive stop pair");
+    conn.execute_batch(&format!(
+        "INSERT INTO seg_geometry_draft
+            (subroute_version_id, direction, ordinal,
+             from_route_stop_version_id, to_route_stop_version_id,
+             encoded_polyline, length_m, geometry_method)
+         VALUES
+            ({sv1}, 0, 1, {a}, {b}, '_p~iF~ps|U', 395.0, 'path'),
+            ({sv1}, 0, 2, {a}, {b}, '_p~iF~ps|U', 400.0, 'path'),
+            ({sv1}, 0, 3, {a}, {b}, '_p~iF~ps|U', 604.0, 'path');",
+    ))
     .unwrap();
     let qa = tempfile::tempdir().unwrap();
 
-    let report = rm_verify::run(
-        &conn,
-        1,
-        &Expectations {
-            shared_pair: Some(("tcg:1", "tcg:9221")),
-            ..Expectations::default()
-        },
-        qa.path(),
+    let report = rm_verify::run(&conn, batch, &fixture_expectations(), qa.path()).unwrap();
+
+    assert!(
+        report.all_pass(),
+        "length spread must not fail: {report:#?}"
+    );
+    let warn = report
+        .warnings
+        .iter()
+        .find(|w| w.id == "pair:spread")
+        .expect("pair-spread warning present");
+    assert!(
+        warn.detail.contains("1 pair"),
+        "one split pair flagged: {warn:?}"
+    );
+    assert_eq!(
+        report.stats.get("pair_spread_pairs"),
+        Some(&1.0),
+        "{:?}",
+        report.stats
+    );
+
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(qa.path().join("pair_spread_report.json")).unwrap(),
     )
     .unwrap();
-
-    let pair = report
-        .checks
-        .iter()
-        .find(|c| c.id == "seg:shared-pair")
-        .expect("shared-pair check present");
+    let pairs = v["pairs"].as_array().expect("pairs array");
+    assert_eq!(pairs.len(), 1, "{pairs:?}");
     assert!(
-        pair.pass,
-        "misaligned ids must not hide the shared corridor: {pair:?}"
+        pairs[0]["from"].is_string() && pairs[0]["to"].is_string(),
+        "station names for triage: {pairs:?}"
     );
-    assert!(
-        pair.detail.contains('1'),
-        "expected 1 shared segment: {pair:?}"
-    );
+    let clusters = pairs[0]["clusters"].as_array().expect("clusters array");
+    assert_eq!(clusters.len(), 2, "{clusters:?}");
+    // ascending length: the 395–400 m corridor first, carrying both pieces
+    assert_eq!(clusters[0]["length_min_m"], 395.0);
+    assert_eq!(clusters[0]["length_max_m"], 400.0);
+    assert_eq!(clusters[0]["pieces"], 2);
+    assert_eq!(clusters[0]["routes"].as_array().unwrap().len(), 2);
+    assert_eq!(clusters[1]["length_min_m"], 604.0);
+    assert_eq!(clusters[1]["pieces"], 1);
 }
 
 #[test]
@@ -214,118 +208,6 @@ fn bearing_spread_warns_but_does_not_fail() {
             "member missing direction: {m:?}"
         );
     }
-}
-
-#[test]
-fn segment_variant_split_pair_warns_and_reports() {
-    let (_dir, conn, batch) = setup();
-    // one pair split into two corridor segments (same pair_key) + one
-    // unsplit pair that must not appear
-    let (st_a, st_b): (i64, i64) = conn
-        .query_row(
-            "SELECT MIN(station_id), MAX(station_id) FROM station",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
-    let (rv, sv): (i64, i64) = conn
-        .query_row(
-            "SELECT rv.route_version_id, sv.subroute_version_id
-             FROM route_version rv
-             JOIN subroute_version sv ON sv.route_version_id = rv.route_version_id LIMIT 1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
-    let mut rsvs: Vec<i64> = conn
-        .prepare("SELECT route_stop_version_id FROM route_stop_version ORDER BY 1")
-        .unwrap()
-        .query_map([], |r| r.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    rsvs.truncate(4);
-    assert_eq!(rsvs.len(), 4, "fixture needs two stop pairs: {rsvs:?}");
-    let (rsv_a, rsv_b, rsv_c, rsv_d) = (rsvs[0], rsvs[1], rsvs[2], rsvs[3]);
-    conn.execute_batch(&format!(
-        "INSERT INTO osm_way (osm_way_id, highway, oneway, name)
-            VALUES (100, 'primary', 1, '主線'), (300, 'tertiary', 0, '側線');
-         INSERT INTO seg_segment
-            (segment_id, pair_key, corridor_key, start_station_id, end_station_id,
-             encoded_polyline, length_m, way_count, variant_count, length_spread_m)
-         VALUES
-            ('segx', 'pk1', '390', {st_a}, {st_b}, '', 395.0, 1, 1, 0.0),
-            ('segy', 'pk1', '600', {st_a}, {st_b}, '', 604.0, 1, 1, 0.0),
-            ('segz', 'pk2', '120', {st_a}, {st_b}, '', 118.0, 1, 1, 0.0);
-         INSERT INTO seg_segment_way (segment_id, ordinal, osm_way_id, length_m)
-         VALUES ('segx', 1, 100, 395.0), ('segy', 1, 100, 604.0),
-                ('segz', 1, 100, 118.0);
-         INSERT INTO seg_traversal
-            (route_version_id, subroute_version_id, direction,
-             from_route_stop_version_id, to_route_stop_version_id, segment_id, way_sig)
-         VALUES
-            ({rv}, {sv}, 0, {rsv_a}, {rsv_b}, 'segx', '100'),
-            ({rv}, {sv}, 0, {rsv_c}, {rsv_d}, 'segx', '100|300');",
-    ))
-    .unwrap();
-    let qa = tempfile::tempdir().unwrap();
-
-    let report = rm_verify::run(&conn, batch, &fixture_expectations(), qa.path()).unwrap();
-
-    assert!(
-        report.all_pass(),
-        "corridor split must not fail: {report:#?}"
-    );
-    let warn = report
-        .warnings
-        .iter()
-        .find(|w| w.id == "seg:variants")
-        .expect("seg-variants warning present");
-    assert!(
-        warn.detail.contains("1 pair"),
-        "one split pair flagged: {warn:?}"
-    );
-    assert_eq!(
-        report.stats.get("seg_split_pairs"),
-        Some(&1.0),
-        "{:?}",
-        report.stats
-    );
-
-    let v: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(qa.path().join("segment_variant_report.json")).unwrap(),
-    )
-    .unwrap();
-    let pairs = v["pairs"].as_array().expect("pairs array");
-    assert_eq!(pairs.len(), 1, "unsplit pair not listed: {pairs:?}");
-    assert_eq!(pairs[0]["pair_key"], "pk1");
-    assert!(
-        pairs[0]["from"].is_string() && pairs[0]["to"].is_string(),
-        "station names for triage: {pairs:?}"
-    );
-    let segments = pairs[0]["segments"].as_array().expect("segments array");
-    assert_eq!(segments.len(), 2, "{segments:?}");
-    // ascending length: the 395 m corridor first
-    assert_eq!(segments[0]["segment_id"], "segx");
-    assert_eq!(segments[0]["corridor_key"], "390");
-    assert_eq!(segments[0]["length_m"], 395.0);
-    assert_eq!(segments[0]["way_sig"], "100");
-    assert_eq!(segments[0]["ways"][0]["name"], "主線");
-    // segx carries BOTH variants: majority way list shown (tie -> first),
-    // routes + traversals span every variant, not just the majority
-    assert_eq!(segments[0]["traversals"], 2, "all variants counted");
-    assert_eq!(
-        segments[0]["routes"].as_array().unwrap().len(),
-        2,
-        "segment carries route users: {segments:?}"
-    );
-    assert_eq!(segments[1]["segment_id"], "segy");
-    assert_eq!(segments[1]["traversals"], 0);
-    assert_eq!(
-        segments[1]["routes"].as_array().unwrap().len(),
-        0,
-        "traversal-less member: {segments:?}"
-    );
 }
 
 #[test]

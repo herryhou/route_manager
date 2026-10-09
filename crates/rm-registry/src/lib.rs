@@ -1,8 +1,4 @@
-//! Directed segment registry.
+//! Station finalize: bearing derivation + dual-carriageway station split.
 
 pub mod bearing;
-pub mod hash;
-pub mod registry;
 pub mod split;
-
-pub use registry::{run, Summary};

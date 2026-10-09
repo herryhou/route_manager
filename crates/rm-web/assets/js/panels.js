@@ -79,7 +79,7 @@ export function filterRoutes(routes, q) {
 
 /// Detail panel = two stacked panes, latest only (no tabs): context on top
 /// (route stops / outliers — route info stays put), point detail below
-/// (stop / segment / path-piece drill-down).
+/// (stop / path-piece drill-down).
 /// Re-showing a pane replaces its content and re-wires listeners.
 const PANE_KINDS = ['context', 'point'];
 
@@ -114,14 +114,14 @@ export function closePane(kind) {
 
 /// app.js hook: fires with the pane kind whenever a pane is shown or closed
 /// (closed = true only from closePane), so map state tied to pane content
-/// (segment highlight, pane-current tracking) can follow it.
+/// (piece highlight, pane-current tracking) can follow it.
 let paneChangeHook = null;
 export function setPaneChangeHook(fn) {
   paneChangeHook = fn;
 }
 
 /// Per-pane semantic history for the ←/→ header buttons: reopen closures
-/// (selectSegment(id), …) in back + forward stacks, capped. New content
+/// (selectStop(id), …) in back + forward stacks, capped. New content
 /// pushes the outgoing closure onto back and clears forward; closePane
 /// wipes the pane's stacks.
 const HIST_CAP = 50;
@@ -187,26 +187,6 @@ export function routeChips(routes, onPick) {
     chip.title = r.subroute_name ?? '';
     chip.addEventListener('click', () => onPick(r.route_id, r.direction));
     wrap.append(chip);
-  }
-  return wrap;
-}
-
-/// Incident-segment rows for stop/station panels: arrow says which end this
-/// station is (→ start / ← end), other station, length + way count.
-/// Click loads the full segment detail into the point pane.
-export function segmentRows(segments, { onPick }) {
-  const wrap = document.createElement('div');
-  const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);
-  for (const s of segments ?? []) {
-    const row = document.createElement('div');
-    row.className = 'stop-row seg-row';
-    row.innerHTML = `
-      <span class="stop-seq">${s.is_start ? '→' : '←'}</span>
-      <span class="stop-name">${s.other_station_name ?? `站 ${s.other_station_id}`}</span>
-      <span class="badge">${fmt(s.length_m)} · ${s.way_count} ways</span>`;
-    row.title = `${s.segment_id} · ${s.is_start ? 'to' : 'from'} 站 ${s.other_station_id}`;
-    row.addEventListener('click', () => onPick(s.segment_id));
-    wrap.append(row);
   }
   return wrap;
 }
@@ -301,45 +281,12 @@ export function profileSvg(stops) {
     </svg>`;
 }
 
-/// Segment detail panel: corridor card with clickable endpoints + ways table +
-/// traversing routes.
-export function segmentPanel(d, { onPickRoute, onPickStation }) {
-  const ways = (d.ways ?? [])
-    .map(
-      (w) => `<tr><td>${w.ordinal}</td><td>${w.name ?? '—'}</td><td>${w.highway ?? '—'}</td>
-        <td style="text-align:right">${w.length_m.toFixed(0)}m</td></tr>`
-    )
-    .join('');
-  const stCell = (st) =>
-    `<td class="st-pick" data-sid="${st.station_id}" title="open station detail">${st.station_name ?? st.station_id}</td>`;
-  const pane = showPane('point', `
-    <table class="kv">
-      <tr><td>start</td>${stCell(d.start_station)}</tr>
-      <tr><td>end</td>${stCell(d.end_station)}</tr>
-      <tr><td>length</td><td>${d.length_m.toFixed(0)} m</td></tr>
-    </table>
-    <h3>Ways (${(d.ways ?? []).length})</h3>
-    <table class="kv"><tr><td>#</td><td>name</td><td>highway</td><td style="text-align:right">len</td></tr>${ways}</table>
-    <h3>Routes (${uniqRoutes(d.routes).length})</h3>
-    <div class="segment-routes"></div>
-  `, `Segment ${d.segment_id.slice(0, 12)}…`);
-  pane.querySelectorAll('.st-pick').forEach((el) =>
-    el.addEventListener('click', () => onPickStation(Number(el.dataset.sid)))
-  );
-  pane.querySelector('.segment-routes').append(routeChips(uniqRoutes(d.routes), onPickRoute));
-}
-
 /// Route path piece detail (point pane, polyline click): provider draft piece
 /// or OSM way run — shape depends on the route-geom select the map drew.
-/// Draft pieces carry their seg_traversal segment as a drill-through.
-export function pathPiecePanel(p, { onPickSegment }) {
+export function pathPiecePanel(p) {
   const fmt = (m) => `${(m ?? 0).toFixed(0)}m`;
   const isWay = p.osm_way_id != null;
-  const segRow = p.segment_id
-    ? `<tr><td>segment</td><td><span class="st-pick" data-seg="${p.segment_id}"
-        title="open segment detail">${p.segment_id.slice(0, 12)}…</span></td></tr>`
-    : '';
-  const pane = showPane(
+  showPane(
     'point',
     isWay
       ? kv([
@@ -355,12 +302,8 @@ export function pathPiecePanel(p, { onPickSegment }) {
         <tr><td>method</td><td>${p.geometry_method}</td></tr>
         <tr><td>length</td><td>${fmt(p.length_m)}</td></tr>
         <tr><td>stop span</td><td>${p.from_seq} → ${p.to_seq}</td></tr>
-        ${segRow}
       </table>`,
     isWay ? `Way ${p.name ?? `#${p.osm_way_id}`}` : `Piece #${p.ordinal} ${p.geometry_method ?? ''}`.trim()
-  );
-  pane.querySelectorAll('[data-seg]').forEach((el) =>
-    el.addEventListener('click', () => onPickSegment(el.dataset.seg))
   );
 }
 
@@ -409,40 +352,6 @@ export function matchDevPanel(rows, { onOpenRoute }) {
   `, `Path dev (${(rows ?? []).length})`);
   pane.querySelectorAll('.matchdev-row').forEach((row, i) => {
     row.addEventListener('click', () => onOpenRoute(rows[i]));
-  });
-}
-
-/// Segment-split list panel (topbar split pairs chip): station pairs whose
-/// routes ride genuinely different corridors, one segment per corridor —
-/// click a member segment to open its detail on the map.
-export function variantPanel(rows, { onOpenSegment }) {
-  const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);
-  const items = (rows ?? [])
-    .map((p) => {
-      const segs = (p.segments ?? [])
-        .map(
-          (s) => `<div class="variant-row variant-seg" data-segment-id="${s.segment_id}" title="${(s.routes ?? []).join(', ')}">
-            <span class="badge">${fmt(s.length_m)}</span>
-            <span>${(s.ways ?? []).map((w) => w.name || w.osm_way_id).slice(0, 3).join('→')}${(s.ways ?? []).length > 3 ? '…' : ''}</span>
-            <span class="muted">${(s.routes ?? []).join(', ')}</span>
-          </div>`
-        )
-        .join('');
-      return `<div class="variant-pair" title="${p.from} → ${p.to} · ${p.segments?.length ?? 0} corridors · gap ${fmt(p.length_spread_m)}">
-        <div class="stop-row">
-          <span class="stop-name">${p.from} → ${p.to}</span>
-          <span class="badge ${p.length_spread_m >= 500 ? 'bad' : 'warn'}">${fmt(p.length_spread_m)}</span>
-        </div>
-        ${segs}
-      </div>`;
-    })
-    .join('');
-  const pane = showPane('context', `
-    <p class="muted">pairs split into corridor segments by length — click a segment to open it</p>
-    ${items || '<p class="muted">none</p>'}
-  `, `Split pairs (${(rows ?? []).length})`);
-  pane.querySelectorAll('.variant-seg').forEach((row) => {
-    row.addEventListener('click', () => onOpenSegment({ segment_id: row.dataset.segmentId }));
   });
 }
 
@@ -550,8 +459,8 @@ function otherStationChips(members, selfId, onPickStation) {
 }
 
 /// Station detail panel (point pane): axis/spread kv, other group stations,
-/// incident segments, member stops, routes.
-export function stationPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
+/// member stops, routes.
+export function stationPanel(d, { onPickRoute, onPickStation }) {
   const stops = d.stops ?? [];
   const rows = stops
     .map((s) => `<div class="stop-row" title="${esc(s.stop_name)}">
@@ -570,8 +479,6 @@ export function stationPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
   ])}
     <h3>其它 Stations (${others.length})</h3>
     <div class="other-station-chips"></div>
-    <h3>Segments (${(d.segments ?? []).length})</h3>
-    <div class="segment-rows"></div>
     <h3>Stops (${stops.length})</h3>
     ${rows}
     <h3>Routes (${uniqRoutes(d.routes).length})</h3>
@@ -580,13 +487,12 @@ export function stationPanel(d, { onPickRoute, onPickSegment, onPickStation }) {
   pane.querySelector('.other-station-chips').append(
     otherStationChips(d.group_members, d.station.station_id, onPickStation)
   );
-  pane.querySelector('.segment-rows').append(segmentRows(d.segments, { onPick: onPickSegment }));
   pane.querySelector('.station-routes').append(routeChips(uniqRoutes(d.routes), onPickRoute));
   return pane;
 }
 
-/// Stop drill-down panel: stop → station → group + incident segments + serving routes.
-export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation, onEditStop }) {
+/// Stop drill-down panel: stop → station → group + serving routes.
+export function stopPanel(d, { onPickRoute, onPickStation, onEditStop }) {
   const stCell = (st) =>
     `<td class="st-pick" data-sid="${st.station_id}" title="open station detail">${st.station_name ?? st.station_id}</td>`;
   const pane = showPane('point', `
@@ -606,8 +512,6 @@ export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation, onEdit
     </table>
     <h3>其它 Stations (${(d.group_members ?? []).filter((m) => m.station_id !== d.station.station_id).length})</h3>
     <div class="group-chips"></div>
-    <h3>Segments (${(d.segments ?? []).length})</h3>
-    <div class="segment-rows"></div>
     <h3>Routes serving this stop (${uniqRoutes(d.routes_by_stop).length})</h3>
     <div class="routes-stop-chips"></div>
     <h3>Routes serving station (${uniqRoutes(d.routes_by_station).length})</h3>
@@ -621,7 +525,6 @@ export function stopPanel(d, { onPickRoute, onPickSegment, onPickStation, onEdit
     pane.querySelectorAll('.mini-btn').forEach((el) =>
       el.addEventListener('click', () => onEditStop(el.dataset.act, d.stop)));
   }
-  pane.querySelector('.segment-rows').append(segmentRows(d.segments, { onPick: onPickSegment }));
   pane.querySelector('.group-chips').append(
     otherStationChips(d.group_members, d.station.station_id, onPickStation)
   );

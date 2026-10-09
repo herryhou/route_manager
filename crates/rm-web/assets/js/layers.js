@@ -1,5 +1,5 @@
-// Leaflet layer management: route path/stops, highlights, viewport segments.
-import { METHOD_COLORS, routeCountColor } from './colors.js';
+// Leaflet layer management: route path/stops, highlights, viewport stops.
+import { METHOD_COLORS } from './colors.js';
 import { esc } from './panels.js';
 
 export const layers = {};
@@ -14,7 +14,6 @@ export function initLayers(map) {
   layers.routePath = L.layerGroup().addTo(map);
   layers.routeStops = L.layerGroup().addTo(map);
   layers.highlight = L.layerGroup().addTo(map);
-  layers.segments = L.layerGroup().addTo(map);
   layers.segHighlight = L.layerGroup().addTo(map);
   layers.stopsLayer = L.layerGroup().addTo(map);
   layers.raw = L.layerGroup().addTo(map);
@@ -103,17 +102,16 @@ export function highlightGroup(members) {
   }
 }
 
-/// Red indicator polyline for the pane-selected segment / path piece / way
-/// run. Own group so the stop/group rings in layers.highlight survive its
-/// clears.
-export function drawSegmentHighlight(geometry, label = 'selected segment') {
-  clearSegmentHighlight();
+/// Red indicator polyline for the pane-selected path piece / way run. Own
+/// group so the stop/group rings in layers.highlight survive its clears.
+export function drawPieceHighlight(geometry, label = 'selected piece') {
+  clearPieceHighlight();
   L.geoJSON(geometry, { style: { color: '#cf3e3e', weight: 5, opacity: 0.9 } })
     .bindTooltip(label, { direction: 'top' })
     .addTo(layers.segHighlight);
 }
 
-export function clearSegmentHighlight() {
+export function clearPieceHighlight() {
   layers.segHighlight.clearLayers();
 }
 
@@ -126,25 +124,6 @@ export function flashStop(lat, lon) {
     fillOpacity: 0.2,
   }).addTo(layers.highlight);
   m.bindTooltip('outlier', { direction: 'top' });
-}
-
-/// Viewport-driven canonical-segment corridors, colored by route_count heat.
-export function drawSegments(fc, { onSegmentClick }) {
-  layers.segments.clearLayers();
-  L.geoJSON(fc, {
-    style: (f) => ({
-      color: routeCountColor(f.properties.route_count ?? 1),
-      weight: 2.5,
-      opacity: 0.75,
-    }),
-  })
-    .bindTooltip((l) => `${l.feature.properties.route_count} routes · ${Math.round(l.feature.properties.length_m)}m`)
-    .on('click', (e) => onSegmentClick(e.layer.feature.properties.segment_id))
-    .addTo(layers.segments);
-}
-
-export function clearSegments() {
-  layers.segments.clearLayers();
 }
 
 /// Raw staging compare: dashed blue src_route_point + square raw stops.

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-/// Map explorer for the published route/stop/segment data.
+/// Map explorer for the published route/stop data.
 #[derive(Parser)]
 struct Args {
     /// Path to the pipeline SQLite database

@@ -1,7 +1,9 @@
 # Segment corridor split — 設計 handoff
 
 日期：2026-10-07
-狀態：**已實作**（commit bd1aaab）。三城結果：taichung 9954 segments / 22 split pairs、taipei 7317 / 25、tainan 5019 / 18。
+狀態：**歷史決策記錄**。segment registry 已於 2026-10-09 移除（migration 0011）；其長度聚類閾值語意由 rm-verify 的 `pair:spread` 檢查延續（gap > max(100m, 3% × 較短)）。本文保留為設計史。
+
+原本狀態：**已實作**（commit bd1aaab）。三城結果：taichung 9954 segments / 22 split pairs、taipei 7317 / 25、tainan 5019 / 18。
 前置：docs/segment-canonical-cut.md（pair-only identity，commit 0d9e69f）
 
 ## 背景

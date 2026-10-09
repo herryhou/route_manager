@@ -1,8 +1,8 @@
 # route_manger — Taiwan bus pipeline
 
 All-Rust pipeline turning raw city ebus captures (Taichung 392, Taipei 406,
-Tainan 113 routes) into one versioned SQLite database per city plus a
-directed OSM-aligned segment registry, implementing
+Tainan 113 routes) into one versioned SQLite database per city with
+OSM-aligned route geometry and station bearings, implementing
 `docs/Architecture_design_spec.md` and `docs/DB_Schema_Spec.md`.
 
 ## Layout
@@ -17,7 +17,7 @@ crates/
 ├── rm-segments     polyline decode, stop projection (chainage), geometry cuts
 ├── rm-osm-prepare  PBF -> road graph tables
 ├── rm-osm-match    Viterbi way-run matcher (Newson-Krumm + A* gap repair)
-├── rm-registry     directed segment registry (blake3 identity) + stop/station bearings
+├── rm-registry     stop/station bearings + dual-carriageway station split
 └── rm-verify       invariant checks, count cross-checks, QA exports
 ```
 
@@ -41,10 +41,8 @@ cargo run -r -p rm-segments      # projections + geometry drafts
 cargo run -r -p rm-osm-prepare \ # PBF -> osm_* tables
     -- --pbf assets/taiwan-261004.osm.pbf --clip "23.89,120.41,24.53,121.42"
 cargo run -r -p rm-osm-match     # way runs + match stats
-cargo run -r -p rm-registry      # stop_bearing / station_bearing, dual-
-                                  #   carriageway station split, then
-                                  #   seg_segment / seg_segment_way /
-                                  #   seg_traversal
+cargo run -r -p rm-registry      # stop_bearing / station_bearing +
+                                  #   dual-carriageway station split
 
 # 3. verify + QA exports (exits non-zero on any failed check)
 cargo run -r -p rm-verify -- --preset taichung   # | taipei | tainan
@@ -53,8 +51,8 @@ cargo run -r -p rm-verify -- --preset taichung   # | taipei | tainan
 All bins accept `--db` (default `data/taichung.db`) and `--batch`
 (default: latest batch, any status; `rm-identity`: latest OPEN).
 `rm-verify` writes `qa/report.json`,
-`qa/segments.geojson`, `qa/outlier_stops.csv`, `qa/bearing_report.json`,
-`qa/match_dev_report.json`, `qa/segment_variant_report.json`, and
+`qa/outlier_stops.csv`, `qa/bearing_report.json`,
+`qa/match_dev_report.json`, `qa/pair_spread_report.json`, and
 `qa/grouping_report.json`.
 
 ## Bearings
@@ -82,22 +80,18 @@ See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
 
 - Station identity = API `node.id` (`station.ext_uid = tcg:node:{id}`);
   stop identity = `(route, direction, sid)` (`tcg:{xno}:{dir}:{sid}`).
-- Directed segments: identity is the directed station pair —
-  `pair_key = blake3_128("tcg:node:{A} | tcg:node:{B}")`. A pair's cuts are
-  length-clustered into corridors; each cluster is its own segment with
-  `segment_id = blake3_128(pair over A | B | corridor_key)`, where
-  `corridor_key` is the cluster's median length bucketed to 10 m. The
-  reverse corridor hashes differently (two ids per physical corridor);
-  per-route path variants (dual carriageways, detours) stay as
-  `way_sig` data on `seg_traversal`, not identity.
-- Shared-segment surface: `seg_traversal` grouped by `segment_id` with
-  `COUNT(DISTINCT route_version_id) > 1`.
+- Stop-pair way lists: for any pair of consecutive stops, the ordered OSM
+  way list is the `seg_match_way` runs intersecting the
+  `path_stop_projection` chainage window `[chainage(from), chainage(to)]` —
+  derived per route, no registry needed. (The cross-route
+  `seg_segment`/`seg_segment_way`/`seg_traversal` registry was removed on
+  2026-10-09, migration 0011 — see `docs/segment-handoff.md`.)
 
 ## Known limits (V1)
 
 - 17 of 784 directions have no drawn polyline in the source data at all, so
-  they match no way runs (surfaced as skipped pairs in the registry summary
-  and `qa/report.json` stats); every direction with a polyline matches on the
+  they match no way runs (surfaced as skipped pairs in `qa/report.json`
+  stats); every direction with a polyline matches on the
   full-Taiwan extract (clipped to the routes' bbox + 10 km). 1 of the 767
   matched directions (352延) still strays > 50 m p95 from its polyline —
   warn-only, in `qa/match_dev_report.json` and the rm-web matchdev chip.

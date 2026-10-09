@@ -17,14 +17,11 @@
     <span class="chip" id="chip-routes" title="Routes">routes <b>—</b></span>
     <span class="chip" id="chip-stops" title="Current stop versions">stops <b>—</b></span>
     <span class="chip" id="chip-stations" title="Current station versions">stations <b>—</b></span>
-    <span class="chip" id="chip-segments" title="Canonical segments">segments <b>—</b></span>
     <span class="chip" id="chip-match" title="Directions with match stats / total directions">matched <b>—</b></span>
     <span class="chip chip-click" id="chip-outliers" title="Outlier stops — click to list">outliers <b>—</b></span>
     <span class="chip chip-click" id="chip-matchdev"
       title="Directions whose matched OSM path strays from the src polyline (p95) — click to list">path dev
       <b>—</b></span>
-    <span class="chip chip-click" id="chip-variants"
-      title="Station pairs split into multiple corridor segments by length — click to list">split pairs <b>—</b></span>
     <button id="edit-toggle" class="chip chip-click" hidden title="toggle edit mode">✎ edit</button>
   </header>
   <div id="main">
@@ -36,13 +33,6 @@
         <h3>Layers</h3>
         <label><input type="checkbox" id="layer-stops"> Stops / stations</label>
         <label><input type="checkbox" id="layer-bearings" checked> Bearings <small>(dot + arrow)</small></label>
-        <label><input type="checkbox" id="layer-segments"> Segments</label>
-        <label class="layer-sub">geometry
-          <select id="segment-geom">
-            <option value="provider">provider polyline</option>
-            <option value="osm">OSM ways</option>
-          </select>
-        </label>
         <label class="layer-sub">route path
           <select id="route-geom">
             <option value="provider">provider polyline</option>

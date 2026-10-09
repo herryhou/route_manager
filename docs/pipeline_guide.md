@@ -4,7 +4,7 @@ A plain-language tour of what this project builds and how.
 
 ## What the pipeline does
 
-It turns two raw inputs — a city bus authority's JSON captures (Taichung 392 routes; Taipei and Tainan via the same capture-tree contract) and a local OpenStreetMap extract — into a single SQLite database per city that knows: every bus stop, every route, and exactly which streets each route takes between consecutive stops. The last part is the point: two routes running down the same road get the same "segment" ID, so you can later detect shared corridors and build arrival-time predictions on top.
+It turns two raw inputs — a city bus authority's JSON captures (Taichung 392 routes; Taipei and Tainan via the same capture-tree contract) and a local OpenStreetMap extract — into a single SQLite database per city that knows: every bus stop, every route, and exactly which streets each route takes between consecutive stops. The last part is the point: for any stop pair you can derive the ordered OSM way list directly from the pieces and way runs, so you can later detect shared corridors and build arrival-time predictions on top.
 
 ## The seven stages, in order
 
@@ -20,18 +20,19 @@ It turns two raw inputs — a city bus authority's JSON captures (Taichung 392 r
 
 6. **Match** (`rm-osm-match`) — for each route direction, snap its drawn path onto real OSM streets. Uses a hidden-Markov-style matcher (the standard map-matching technique): it finds the most likely sequence of streets given the GPS-like trace, tolerates gaps by searching for short connecting paths, and records the result as a list of "way runs" with cumulative distances.
 
-7. **Register segments** (`rm-registry`) — the payoff. It runs three passes:
+7. **Finalize stations** (`rm-registry`) — the payoff. It runs two passes:
 
    - **Bearings** — the departure heading of the bus at each stop (from the matched OSM way when one covers it, otherwise from the drawn polyline) and, per station, the travel axis of its stops' headings (a one-way pole keeps its signed heading; two-way poles fold headings 180° apart onto one axis) plus the largest deviation from it.
    - **Station split** — a station whose member headings form 2+ clusters over 90° apart (poles across a dual carriageway) is split into per-side stations; the biggest cluster keeps the parent, and station bearings are rebuilt afterwards.
-   - **Registry** — for each pair of consecutive stops, take the street ways between them. Segment identity is the directed station pair: `pair_key = hash(station A, station B)`. A pair's cuts are clustered by length into corridors (adjacent gap over 100 m starts a new one), and each corridor is its own segment: `segment_id = hash(A, B, corridor_key)` where the corridor key is the cluster's median length bucketed to 10 m. Same pair + similar length = same ID, whichever route you came from; reverse direction hashes differently (streets are directed). Per-route path variants (dual carriageways, detours) survive as data — `way_sig` on each traversal — instead of fragmenting identity.
 
-Finally **verify** (`rm-verify`) re-checks the invariants and counts against per-city known-good numbers (`--preset taichung|taipei|tainan`) and writes the QA files (`qa/report.json`, a GeoJSON map of all segments, a CSV of badly-placed stops, bearing / match-deviation / segment-variant / grouping reports). It exits non-zero if anything is off. Warnings never fail the run: stations whose member stops sit more than 45° off the axis, directions whose matched path strays > 50 m p95 from the source polyline, station pairs split into multiple corridors, and groups that chain-drifted too far.
+   (An earlier design also built a cross-route "segment registry" here. It was removed on 2026-10-09 — the station pair is the identity, and each route's ordered way list derives directly from its pieces × way runs; see `docs/segment-handoff.md`.)
+
+Finally **verify** (`rm-verify`) re-checks the invariants and counts against per-city known-good numbers (`--preset taichung|taipei|tainan`) and writes the QA files (`qa/report.json`, a CSV of badly-placed stops, bearing / match-deviation / pair-spread / grouping reports). It exits non-zero if anything is off. Warnings never fail the run: stations whose member stops sit more than 45° off the axis, directions whose matched path strays > 50 m p95 from the source polyline, station pairs whose piece lengths spread beyond `max(100 m, 3%)`, and groups that chain-drifted too far.
 
 ## What you get out
 
-- One SQLite DB per city (`data/taichung.db`, `data/taipei.db`, `data/tainan.db`) — the whole model: routes, stops, stations, groups, OSM graph, match stats, segment registry
-- Taichung: 36,531 traversals, 9,954 segments, 6,040 shared by more than one route, 22 station pairs split into corridor variants (routes 1 and 9221 share 22 — the built-in sanity pair). Taipei: 27,381 / 7,317 / 4,307 / 25. Tainan: 8,330 / 5,019 / 1,770 / 18.
+- One SQLite DB per city (`data/taichung.db`, `data/taipei.db`, `data/tainan.db`) — the whole model: routes, stops, stations, groups, OSM graph, match stats, per-route path pieces with their ordered OSM way runs
+- Taichung: 36,531 path pieces; ~22 station pairs flagged by the pair-spread check. Taipei: 27,381 / ~25. Tainan: 8,330 / ~18.
 
 ## Known limits
 
@@ -66,12 +67,11 @@ Then open the address in a browser. Flags: `--db` (default `data/taichung.db`), 
 
 What you can do:
 
-- **Route browsing** — search the sidebar (route code/name or station name — station search hits the server); click a route: its path (provider polyline or matched OSM ways — a geometry selector) and stops draw on the map, with a stop list and direction toggle (去程/返程) in the panel. Clicking a path piece opens its pane with the piece highlighted and a jump to the segment containing it.
-- **Stop drill-down** — click any stop: its station, station group (rings on the map), incident segments, and every route serving it at stop / station / group level; every cross-reference is clickable.
-- **QA review** — three clickable chips (red on non-zero): *outliers* (worst stop placements — OUTLIER/NO_PATH or snap > 50 m), *path dev* (directions whose matched path strays > 50 m p95 from the source polyline — the detours snap stats can't see), *split pairs* (station pairs split into corridor variants). Each route has a snap-distance profile chart; direction dots in the route list are colored by match quality.
-- **Segment registry** — enable *segments*: canonical corridors colored by how many routes share them (zoom ≥ 13), with a provider-polyline / OSM-ways geometry selector; click one for its geometry, ways, and traversing routes.
+- **Route browsing** — search the sidebar (route code/name or station name — station search hits the server); click a route: its path (provider polyline or matched OSM ways — a geometry selector) and stops draw on the map, with a stop list and direction toggle (去程/返程) in the panel. Clicking a path piece opens its pane with the piece highlighted.
+- **Stop drill-down** — click any stop: its station, station group (rings on the map), and every route serving it at stop / station / group level; every cross-reference is clickable.
+- **QA review** — two clickable chips (red on non-zero): *outliers* (worst stop placements — OUTLIER/NO_PATH or snap > 50 m), *path dev* (directions whose matched path strays > 50 m p95 from the source polyline — the detours snap stats can't see). Each route has a snap-distance profile chart; direction dots in the route list are colored by match quality.
 - **OSM overlay** — with a route selected, the OSM-ways geometry setting draws the matched street ways (entry/exit-trimmed) under the route.
 - **Raw compare** — *Raw compare* draws the raw staging polyline and raw stop squares against the canonical view.
 - **Bearings** — dot-and-arrow markers per stop (and a station's axis), on by default.
 
-The detail panel is two stacked panes (context + point), each with its own back/forward history; `Esc` closes popup → point → context, `/` focuses search, the sidebar hides behind a topbar toggle. The server opens the database with SQLite read-only flags and never runs migrations, so it can run while the pipeline writes. Views are shareable via URL hash (`#route=1&dir=0`, `#stop=123`, `#station=45`, `#segment=<id>`).
+The detail panel is two stacked panes (context + point), each with its own back/forward history; `Esc` closes popup → point → context, `/` focuses search, the sidebar hides behind a topbar toggle. The server opens the database with SQLite read-only flags and never runs migrations, so it can run while the pipeline writes. Views are shareable via URL hash (`#route=1&dir=0`, `#stop=123`, `#station=45`).

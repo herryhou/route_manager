@@ -13,7 +13,7 @@ struct Args {
     #[arg(long)]
     batch: Option<i64>,
 
-    /// Directory for QA exports (report.json, segments.geojson, outlier_stops.csv)
+    /// Directory for QA exports (report.json, outlier_stops.csv)
     #[arg(long, default_value = "qa")]
     qa_dir: String,
 

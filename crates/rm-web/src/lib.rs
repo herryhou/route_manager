@@ -1,4 +1,4 @@
-//! rm-web: map explorer for the published route/stop/segment data.
+//! rm-web: map explorer for the published route/stop data.
 
 pub mod db;
 pub mod error;

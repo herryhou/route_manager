@@ -29,13 +29,6 @@ export function matchedBadge(ratio) {
   return { cls: 'bad', text: `${Math.round(ratio * 100)}%` };
 }
 
-// Shared-corridor heat for segments (route_count).
-export function routeCountColor(n) {
-  if (n <= 1) return '#7da7d9';
-  if (n <= 3) return '#d19a00';
-  return '#cf3e3e';
-}
-
 export const METHOD_COLORS = {
   PROJECTED: '#2e9e44',
   ENDPOINT: '#7da7d9',

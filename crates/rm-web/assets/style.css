@@ -330,7 +330,7 @@ body {
   }
 }
 
-/* Two stacked panes: context (route/outliers/segment) 2/3, point detail 1/3. */
+/* Two stacked panes: context (route/outliers) 2/3, point detail 1/3. */
 .dpane {
   display: flex;
   flex-direction: column;
@@ -481,34 +481,8 @@ body {
   white-space: nowrap;
 }
 
-/* Corridor-split pair: header row per pair, clickable member segments. */
-.variant-pair {
-  padding: 2px 0;
-  border-bottom: 1px solid var(--border);
-}
-
 #title {
   font-size: 1.1rem;
-}
-
-.variant-row {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  padding: 2px 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.variant-seg {
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background-color .12s;
-}
-
-.variant-seg:hover {
-  background: var(--bg);
 }
 
 .badge {
@@ -767,7 +741,7 @@ table.kv td:first-child {
   overflow-y: auto;
 }
 
-/* Segment panel endpoint stations: clickable drill-through to station detail */
+/* Clickable station cells in panels: drill-through to station detail */
 .st-pick {
   color: var(--accent);
   cursor: pointer;
@@ -793,7 +767,6 @@ table.kv td:first-child {
   .route-row,
   .station-row,
   .stop-row,
-  .variant-seg,
   .chip-click,
   .chip-route,
   .tabs button,

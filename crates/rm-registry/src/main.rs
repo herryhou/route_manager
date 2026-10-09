@@ -1,6 +1,6 @@
 use clap::Parser;
 
-/// Directed segment registry: cut way runs at stop chainages, hash segments.
+/// Station finalize: bearing derivation + dual-carriageway station split.
 #[derive(Parser)]
 struct Args {
     /// Path to the SQLite database
@@ -44,11 +44,6 @@ fn main() -> anyhow::Result<()> {
     println!(
         "batch {} split: {} stations split, {} created, {} stops moved",
         batch, sp.stations_split, sp.stations_created, sp.stops_moved
-    );
-    let s = rm_registry::run(&conn, batch)?;
-    println!(
-        "batch {} registry: {} directions, {} traversals, {} segments, {} skipped pairs",
-        s.batch_id, s.directions, s.traversals, s.segments, s.skipped_pairs
     );
     Ok(())
 }

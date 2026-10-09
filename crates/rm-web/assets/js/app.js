@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, variantPanel, segmentPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable } from './panels.js';
-import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawSegments, clearSegments, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawSegmentHighlight, clearSegmentHighlight } from './layers.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable } from './panels.js';
+import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -19,8 +19,8 @@ export function status(msg) {
   document.getElementById('status-msg').textContent = msg ?? '';
 }
 
-/// Spinner in the statusbar — on while a primary fetch runs (route/segment/
-/// station/QA panel loads), off in finally. Background layers don't touch it.
+/// Spinner in the statusbar — on while a primary fetch runs (route/station/
+/// QA panel loads), off in finally. Background layers don't touch it.
 function busy(on) {
   document.getElementById('busy').hidden = !on;
 }
@@ -116,15 +116,15 @@ async function selectRoute(r, dir = 0) {
     ]);
     if (selectedRoute?.route_id !== route_id || selectedRoute.dir !== dir) return; // stale
     const onStopClick = (stop, marker) => openStopPopup(stop.stop_version_id, marker);
-    // Path click: point pane + red highlight of that piece / way run, same
-    // selectSegment pattern (pane change hook clears it). The reopen closure
-    // replays it from the captured properties — no refetch.
+    // Path click: point pane + red highlight of that piece / way run (pane
+    // change hook clears it). The reopen closure replays it from the captured
+    // properties — no refetch.
     const onPathClick = (feature) => {
       const p = feature.properties;
       const show = () => {
-        pathPiecePanel(p, { onPickSegment: selectSegment });
+        pathPiecePanel(p);
         if (feature.geometry) {
-          drawSegmentHighlight(feature.geometry, p.osm_way_id != null ? 'selected way' : 'selected piece');
+          drawPieceHighlight(feature.geometry, p.osm_way_id != null ? 'selected way' : 'selected piece');
         }
       };
       paneOpen('point', `piece:${route_id}:${dir}:${p.ordinal}:${p.osm_way_id ?? 'draft'}`, show);
@@ -168,7 +168,7 @@ async function openStopPopup(stopVersionId, marker) {
     const el = stopPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
-    stopPanel(d, { onPickRoute, onPickSegment: selectSegment, onPickStation: selectStation, onEditStop });
+    stopPanel(d, { onPickRoute, onPickStation: selectStation, onEditStop });
   } catch (e) {
     status(`stop load failed: ${e.message}`);
   }
@@ -183,7 +183,7 @@ async function openStationPopup(stationId, marker) {
     const el = stationPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
-    stationPanel(d, { onPickRoute, onPickSegment: selectSegment, onPickStation: selectStation });
+    stationPanel(d, { onPickRoute, onPickStation: selectStation });
   } catch (e) {
     status(`station load failed: ${e.message}`);
   }
@@ -205,7 +205,7 @@ async function selectStation(stationId) {
     }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([st.lat, st.lon], { animate: true });
-    stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickSegment: selectSegment, onPickStation: selectStation });
+    stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickStation: selectStation });
     location.hash = `#station=${stationId}`;
   } catch (e) {
     status(`station load failed: ${e.message}`);
@@ -228,7 +228,7 @@ async function popupStop(stopVersionId) {
     m.bindPopup(stopPopupEl(d, { onPickRoute }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([s.lat, s.lon], { animate: true });
-    stopPanel(d, { onPickRoute, onPickSegment: selectSegment, onPickStation: selectStation, onEditStop });
+    stopPanel(d, { onPickRoute, onPickStation: selectStation, onEditStop });
   } catch (e) {
     status(`stop load failed: ${e.message}`);
   }
@@ -240,7 +240,7 @@ async function selectStop(stopVersionId) {
     const d = await api.stopDetail(stopVersionId);
     paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     highlightGroup(d.group_members);
-    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickSegment: selectSegment, onPickStation: selectStation, onEditStop });
+    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickStation: selectStation, onEditStop });
     map.panTo([d.stop.lat, d.stop.lon], {
       animate: true,
     });
@@ -365,23 +365,6 @@ async function openMatchDevs() {
   }
 }
 
-async function openVariants() {
-  busy(true);
-  try {
-    const v = await api.variants();
-    paneOpen('context', 'variants', openVariants);
-    variantPanel(v.pairs ?? [], {
-      onOpenSegment: (seg) => selectSegment(seg.segment_id),
-    });
-    location.hash = '#variants';
-  } catch (e) {
-    status(`seg variants load failed: ${e.message}`);
-  } finally {
-    busy(false);
-  }
-}
-
-/// Viewport segments layer: checkbox + zoom ≥13 gated, debounced on moveend.
 /// Viewport stops/stations layer: checkbox + zoom gated
 /// (<12 off, 12–14 stations, ≥15 stops), debounced on moveend.
 let stopsTimer = null;
@@ -409,49 +392,6 @@ async function refreshStopsLayer() {
   }
 }
 
-let segmentsTimer = null;
-async function refreshSegments() {
-  if (!document.getElementById('layer-segments').checked) return;
-  const b = map.getBounds();
-  if (map.getZoom() < 13) {
-    clearSegments();
-    status('segments need zoom ≥13');
-    return;
-  }
-  const pad = 0.05;
-  const bbox = [
-    b.getWest() - pad, b.getSouth() - pad, b.getEast() + pad, b.getNorth() + pad,
-  ].map((x) => x.toFixed(4)).join(',');
-  try {
-    const geom = document.getElementById('segment-geom').value;
-    const v = await api.segmentsBbox(bbox, 0, geom);
-    drawSegments(v, { onSegmentClick: selectSegment });
-    if (v.truncated) status('segments truncated — zoom in');
-  } catch (e) {
-    status(`segments load failed: ${e.message}`);
-  }
-}
-
-/// Segment drill-down: point pane + red highlight polyline, kept until the
-/// point pane is closed or replaced (pane change hook clears it).
-async function selectSegment(segmentId) {
-  busy(true);
-  try {
-    const d = await api.segmentDetail(segmentId);
-    paneOpen('point', `seg:${segmentId}`, () => selectSegment(segmentId));
-    segmentPanel(d, {
-      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
-      onPickStation: selectStation,
-    });
-    if (d.geometry) drawSegmentHighlight(d.geometry);
-    location.hash = `#segment=${segmentId}`;
-  } catch (e) {
-    status(`segment load failed: ${e.message}`);
-  } finally {
-    busy(false);
-  }
-}
-
 function parseHash() {
   const h = location.hash.replace(/^#/, '');
   const m = Object.fromEntries(
@@ -466,7 +406,7 @@ function parseHash() {
 async function boot() {
   setPaneChangeHook((kind, closed) => {
     if (closed) paneCurrent[kind] = null;
-    if (kind === 'point') clearSegmentHighlight();
+    if (kind === 'point') clearPieceHighlight();
   });
   for (const kind of ['context', 'point']) {
     document.querySelector(`.dpane-${kind} .dpane-back`).addEventListener('click', () => paneBack(kind));
@@ -499,15 +439,6 @@ async function boot() {
   });
   document.getElementById('chip-outliers').addEventListener('click', openOutliers);
   document.getElementById('chip-matchdev').addEventListener('click', openMatchDevs);
-  document.getElementById('chip-variants').addEventListener('click', openVariants);
-  const segToggle = document.getElementById('layer-segments');
-  segToggle.addEventListener('change', () => {
-    if (segToggle.checked) refreshSegments();
-    else clearSegments();
-  });
-  document.getElementById('segment-geom').addEventListener('change', () => {
-    if (segToggle.checked) refreshSegments();
-  });
   document.getElementById('route-geom').addEventListener('change', () => {
     if (selectedRoute) selectRouteById(selectedRoute.route_id, selectedRoute.dir);
   });
@@ -527,9 +458,7 @@ async function boot() {
     if (lastRouteDraw) drawRoute(lastRouteDraw.p, lastRouteDraw.s, { onStopClick: lastRouteDraw.onStopClick, onPathClick: lastRouteDraw.onPathClick });
   });
   map.on('moveend', () => {
-    clearTimeout(segmentsTimer);
     clearTimeout(stopsTimer);
-    segmentsTimer = setTimeout(refreshSegments, 250);
     stopsTimer = setTimeout(refreshStopsLayer, 250);
   });
 
@@ -539,11 +468,9 @@ async function boot() {
     setChip('chip-routes', c.routes ?? '—');
     setChip('chip-stops', c.stops ?? '—');
     setChip('chip-stations', c.stations ?? '—');
-    setChip('chip-segments', c.segments ?? '—');
     setChip('chip-match', `${s.match?.directions_with_stats ?? '—'}/${s.match?.directions_total ?? '—'}`);
     setChip('chip-outliers', s.outlier_stops ?? '—');
     setChip('chip-matchdev', s.match?.directions_dev_p95_over_50m ?? '—');
-    setChip('chip-variants', s.variants?.split_pairs ?? '—');
     if (s.edit_enabled) {
       const btn = document.getElementById('edit-toggle');
       btn.hidden = false;
@@ -562,8 +489,6 @@ async function boot() {
       selectStop(Number(h.stop));
     } else if (h.station) {
       selectStation(Number(h.station));
-    } else if (h.segment) {
-      selectSegment(h.segment);
     }
   } catch (e) {
     status(`boot failed: ${e.message}`);

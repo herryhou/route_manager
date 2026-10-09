@@ -1,7 +1,9 @@
 # Segment canonical cut（跨 route 統一切點）handoff
 
 日期：2026-10-07
-狀態：**已實作**（pair-only identity，commit 0d9e69f；後續 corridor split 見 `segment-corridor-split.md`）。前期工作（方案 A：snap-down + sliver + dedup）已完成，見 `segment-handoff.md`。
+狀態：**歷史決策記錄**。segment registry 已於 2026-10-09 移除（migration 0011，`seg_segment`/`seg_segment_way`/`seg_traversal` 三表刪除）——站對即識別、per-route way 清單可由 piece × way run 直接導出。本文保留為設計史。
+
+原本狀態：**已實作**（pair-only identity，commit 0d9e69f；後續 corridor split 見 `segment-corridor-split.md`）。前期工作（方案 A：snap-down + sliver + dedup）已完成，見 `segment-handoff.md`。
 
 ## 脈絡
 

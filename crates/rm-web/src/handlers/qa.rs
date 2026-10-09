@@ -29,28 +29,6 @@ pub async fn outliers(
     Ok(Json(v))
 }
 
-/// `GET /api/qa/variants` — station pairs split into multiple corridor
-/// segments (grouped by pair_key), member length gap desc.
-pub async fn variants(
-    State(state): State<AppState>,
-    Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, ApiError> {
-    let min_spread = params
-        .get("min_spread")
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0);
-    let limit = params
-        .get("limit")
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(200)
-        .clamp(1, 1000);
-    let v = run_db(state, move |conn| {
-        crate::queries::qa::variants(conn, min_spread, limit)
-    })
-    .await?;
-    Ok(Json(v))
-}
-
 /// `GET /api/qa/matchdev` — worst path-vs-polyline deviations, dev-desc.
 pub async fn matchdev(
     State(state): State<AppState>,

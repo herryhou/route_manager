@@ -1,7 +1,9 @@
 # Segment 重複問題 handoff
 
 日期：2026-10-07
-狀態：方案 A 已實作（taichung 驗證通過）；規則為 **snap-down** 變體，見下文「實作結果」
+狀態：**歷史決策記錄**。segment registry 已於 2026-10-09 移除（migration 0011）——站對即識別、per-route way 清單可由 piece × way run 直接導出，無需註冊表。本文保留為設計史。
+
+原本狀態：方案 A 已實作（taichung 驗證通過）；規則為 **snap-down** 變體，見下文「實作結果」
 
 > 實作筆記：最初採「最近 junction」雙向 snap，天冷案例殘留 3 個 segment（短 run
 > 17m、站點近中間，最近邊界方向逐 route 翻轉）。定案改 **單向 snap-down**：
