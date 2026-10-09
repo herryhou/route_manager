@@ -213,7 +213,7 @@ mod db {
         let conn = rm_db::open_in_memory().unwrap();
         let old = fixture(&conn);
         // synthesize a pre-scenario legacy row: {field:{old,new}} without a
-        // kind marker — exactly what old rm_db::edit_stop wrote
+        // kind marker — exactly what the pre-rm-edit stop edit wrote
         let e = rm_edit::edit_stop(&conn, old, StopEdit { stop_name: Some("N".into()), ..Default::default() }, "h", "n").unwrap();
         conn.execute(
             "UPDATE edit_log SET changes = '{\"stop_name\":{\"old\":\"Old\",\"new\":\"N\"}}' WHERE edit_id = ?1",

@@ -95,8 +95,8 @@ fn undo_station_rename_refuses_when_pole_edited_after_rename() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
     let renamed = rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "").unwrap();
-    rm_db::edit_stop(&conn, renamed.poles[0].new_svi,
-        &rm_db::StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+    rm_edit::edit_stop(&conn, renamed.poles[0].new_svi,
+        rm_edit::StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
     let err = undo_station_rename(&conn, renamed.edit_id, "herry", "").unwrap_err();
     assert!(err.to_string().contains("cannot be undone"), "{err}");
 }
@@ -106,7 +106,7 @@ fn undo_station_rename_refuses_stop_edit_row() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
     // a plain stop-edit row: entity='stop', no station_rename kind
-    let out = rm_db::edit_stop(&conn, 10, &rm_db::StopEdit {
+    let out = rm_edit::edit_stop(&conn, 10, rm_edit::StopEdit {
         stop_name: Some("N".into()), ..Default::default()
     }, "h", "n").unwrap();
     let err = undo_station_rename(&conn, out.edit_id, "herry", "").unwrap_err();

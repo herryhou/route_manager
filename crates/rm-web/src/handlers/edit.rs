@@ -70,13 +70,25 @@ pub struct StopEditBody {
     note: Option<String>,
 }
 
-/// `rm_db::EditError` means the request lost a race with another editor
-/// (consumed version id, un-undoable edit) — 409, not the blanket 500.
+/// `rm_edit::EditError` splits into request problems (400: empty/no-op
+/// edit) and races / bad targets (409: version no longer current,
+/// un-undoable edit, unknown regroup target).
 fn edit_conflict(err: ApiError) -> ApiError {
-    match err.downcast_ref::<rm_db::EditError>() {
-        Some(e) => ApiError::conflict(&e.to_string()),
-        None => err,
+    if let Some(e) = err.downcast_ref::<rm_edit::EditError>() {
+        return match e {
+            rm_edit::EditError::EmptyEdit | rm_edit::EditError::NoOpEdit
+            | rm_edit::EditError::EmptyNewName | rm_edit::EditError::NoOpRename => {
+                ApiError::bad_request(&e.to_string())
+            }
+            rm_edit::EditError::NotCurrent(_)
+            | rm_edit::EditError::StationNotCurrent(_)
+            | rm_edit::EditError::NotUndoable(_)
+            | rm_edit::EditError::UnknownStation(_) => {
+                ApiError::conflict(&e.to_string())
+            }
+        };
     }
+    err
 }
 
 /// POST /api/edit/stop/{stop_version_id} — append a manual stop version.
@@ -105,20 +117,21 @@ pub async fn edit_stop(
             return Err(ApiError::bad_request("lon out of range"));
         }
     }
-    let edit = rm_db::StopEdit {
-        lat,
-        lon,
-        stop_name,
-    };
     let note = note.unwrap_or_default();
     let out = run_db_write(state, move |conn| {
-        rm_db::edit_stop(conn, stop_version_id, &edit, &editor, &note)
+        rm_edit::edit_stop(
+            conn,
+            stop_version_id,
+            rm_edit::StopEdit { lat, lon, stop_name },
+            &editor,
+            &note,
+        )
     })
     .await
     .map_err(edit_conflict)?;
     Ok(Json(json!({
         "edit_id": out.edit_id,
-        "new_stop_version_id": out.new_version_id,
+        "new_stop_version_id": out.new_stop_version_id,
         "stale_routes": out.stale_routes,
     })))
 }
@@ -156,12 +169,12 @@ pub async fn undo(
     ApiJson(b): ApiJson<UndoBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let out = run_db_write(state, move |conn| {
-        rm_db::undo(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
+        rm_edit::undo_stop(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
     })
     .await
     .map_err(edit_conflict)?;
     Ok(Json(json!({
         "edit_id": out.edit_id,
-        "new_stop_version_id": out.new_version_id,
+        "new_stop_version_id": out.new_stop_version_id,
     })))
 }

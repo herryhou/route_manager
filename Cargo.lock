@@ -1151,6 +1151,7 @@ dependencies = [
  "clap",
  "rm-core",
  "rm-db",
+ "rm-edit",
  "rm-identity",
  "rm-ingest",
  "rm-osm-match",

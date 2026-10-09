@@ -1,17 +1,10 @@
 //! Manual edit primitive: version-append edits + audit + staleness marks.
 
-use anyhow::{ensure, Result};
+use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use serde_json::json;
 use thiserror::Error;
-
-#[derive(Debug, Default)]
-pub struct StopEdit {
-    pub lat: Option<f64>,
-    pub lon: Option<f64>,
-    pub stop_name: Option<String>,
-}
 
 #[derive(Debug, Error)]
 pub enum EditError {
@@ -43,106 +36,8 @@ pub struct EditLogRow {
     pub undo_of: Option<i64>,
 }
 
-pub fn edit_stop(
-    conn: &Connection,
-    stop_version_id: i64,
-    edit: &StopEdit,
-    editor: &str,
-    note: &str,
-) -> Result<EditOutcome> {
-    ensure!(
-        edit.lat.is_some() || edit.lon.is_some() || edit.stop_name.is_some(),
-        "empty edit"
-    );
-    let tx = conn.unchecked_transaction()?;
-    let old: (i64, i64, String, String, i64, f64, f64) = match tx.query_row(
-        "SELECT stop_id, station_id, stop_code, stop_name, direction, latitude, longitude
-         FROM stop_version WHERE stop_version_id = ?1 AND valid_to IS NULL",
-        [stop_version_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
-    ) {
-        Ok(v) => v,
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            return Err(EditError::NotCurrent(stop_version_id).into())
-        }
-        Err(e) => return Err(e.into()),
-    };
-    let (stop_id, station_id, stop_code, old_name, direction, old_lat, old_lon) = old;
-    let now = crate::now_rfc3339();
-    let new_id = crate::mint(&tx, "stop_version")?;
-    tx.execute(
-        "UPDATE stop_version SET valid_to = ?1 WHERE stop_version_id = ?2",
-        params![now, stop_version_id],
-    )?;
-    tx.execute(
-        "INSERT INTO stop_version
-            (stop_version_id, stop_id, station_id, stop_code, stop_name, direction,
-             latitude, longitude, valid_from, created_at, source)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, 'manual')",
-        params![
-            new_id,
-            stop_id,
-            station_id,
-            stop_code,
-            edit.stop_name.clone().unwrap_or(old_name.clone()),
-            direction,
-            edit.lat.unwrap_or(old_lat),
-            edit.lon.unwrap_or(old_lon),
-            now
-        ],
-    )?;
-    tx.execute(
-        "UPDATE route_stop_version SET stop_version_id = ?1 WHERE stop_version_id = ?2",
-        params![new_id, stop_version_id],
-    )?;
-    tx.execute(
-        "DELETE FROM stop_bearing WHERE stop_version_id = ?1",
-        params![stop_version_id],
-    )?;
-
-    let mut changes = serde_json::Map::new();
-    if let Some(v) = &edit.stop_name {
-        changes.insert("stop_name".into(), json!({"old": old_name, "new": v}));
-    }
-    if let Some(v) = edit.lat {
-        changes.insert("latitude".into(), json!({"old": old_lat, "new": v}));
-    }
-    if let Some(v) = edit.lon {
-        changes.insert("longitude".into(), json!({"old": old_lon, "new": v}));
-    }
-
-    tx.execute(
-        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, version_before, version_after)
-         VALUES (?1, ?2, 'stop', ?3, 'update', ?4, ?5, ?6, ?7)",
-        params![
-            now,
-            editor,
-            stop_id,
-            serde_json::Value::Object(changes).to_string(),
-            if note.is_empty() { None } else { Some(note) },
-            stop_version_id,
-            new_id
-        ],
-    )?;
-    let edit_id = tx.last_insert_rowid();
-
-    let mut stale_routes = Vec::new();
-    // stop_bearing rows are deleted unconditionally above → always marked;
-    // position-dependent data only when the position moved
-    mark_bearings_stale(&tx, edit_id, &now)?;
-    if edit.lat.is_some() || edit.lon.is_some() {
-        stale_routes = mark_position_stale(&tx, new_id, edit_id, &now)?;
-    }
-    tx.commit()?;
-    Ok(EditOutcome {
-        edit_id,
-        new_version_id: new_id,
-        stale_routes,
-    })
-}
-
 /// The edited/restored version's `stop_bearing` rows were deleted (every
-/// edit_stop/undo does), so the whole table's derived data is stale until
+/// edit/undo does), so the whole table's derived data is stale until
 /// the bearing refresh re-runs. Idempotent via INSERT OR IGNORE.
 fn mark_bearings_stale(tx: &Connection, edit_id: i64, now: &str) -> Result<()> {
     tx.execute(
@@ -541,96 +436,6 @@ pub fn apply_stop_undo(
     Ok(EditOutcome {
         edit_id: undo_edit_id,
         new_version_id: op.old_svi,
-        stale_routes,
-    })
-}
-
-pub fn undo(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result<EditOutcome> {
-    let tx = conn.unchecked_transaction()?;
-    let row: (String, i64, String, Option<i64>, Option<i64>, String) = match tx.query_row(
-        "SELECT entity, entity_id, action, version_before, version_after, changes
-         FROM edit_log WHERE edit_id = ?1",
-        [edit_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
-    ) {
-        Ok(v) => v,
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            return Err(EditError::NotUndoable(edit_id).into())
-        }
-        Err(e) => return Err(e.into()),
-    };
-    let (entity, stable_id, action, version_before, version_after, changes) = row;
-    if entity != "stop" || action == "undo" {
-        return Err(EditError::NotUndoable(edit_id).into());
-    }
-    let (Some(before), Some(after)) = (version_before, version_after) else {
-        return Err(EditError::NotUndoable(edit_id).into());
-    };
-    // `after` must still be the current version for the undo to apply
-    let valid_to: Option<String> = match tx
-        .query_row(
-            "SELECT valid_to FROM stop_version WHERE stop_version_id = ?1",
-            [after],
-            |r| r.get(0),
-        )
-        .optional()?
-    {
-        Some(v) => v,
-        None => return Err(EditError::NotUndoable(edit_id).into()),
-    };
-    if valid_to.is_some() {
-        return Err(EditError::NotUndoable(edit_id).into());
-    }
-    // a position change was undone: the derived data recomputed at the
-    // edited position is stale again (spec §Staleness — any position change)
-    let changes_json: serde_json::Value = serde_json::from_str(&changes)?;
-    let position_changed = changes_json.get("latitude").is_some()
-        || changes_json.get("longitude").is_some();
-
-    let now = crate::now_rfc3339();
-    tx.execute(
-        "UPDATE stop_version SET valid_to = ?1 WHERE stop_version_id = ?2",
-        params![now, after],
-    )?;
-    tx.execute(
-        "UPDATE stop_version SET valid_to = NULL WHERE stop_version_id = ?1",
-        params![before],
-    )?;
-    tx.execute(
-        "UPDATE route_stop_version SET stop_version_id = ?1 WHERE stop_version_id = ?2",
-        params![before, after],
-    )?;
-    tx.execute(
-        "DELETE FROM stop_bearing WHERE stop_version_id = ?1",
-        params![after],
-    )?;
-    tx.execute(
-        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, undo_of, version_before, version_after)
-         VALUES (?1, ?2, 'stop', ?3, 'undo', '{}', ?4, ?5, ?6, ?7)",
-        params![
-            now,
-            editor,
-            stable_id,
-            if note.is_empty() { None } else { Some(note) },
-            edit_id,
-            after,
-            before
-        ],
-    )?;
-    let undo_edit_id = tx.last_insert_rowid();
-
-    let mut stale_routes = Vec::new();
-    // the undo deleted the restored-from edit's bearing rows → always mark;
-    // position-dependent data only when the undone edit moved the stop
-    mark_bearings_stale(&tx, undo_edit_id, &now)?;
-    if position_changed {
-        // route_stop_version already points at `before` (repointed above)
-        stale_routes = mark_position_stale(&tx, before, undo_edit_id, &now)?;
-    }
-    tx.commit()?;
-    Ok(EditOutcome {
-        edit_id: undo_edit_id,
-        new_version_id: before,
         stale_routes,
     })
 }
@@ -1061,7 +866,7 @@ pub struct StationRenameUndone {
 /// Guards (inside the tx, before any write): the rename's station version
 /// must still be current and manual (`StationNotCurrent` otherwise); every
 /// minted pole version must still be current and manual (`NotUndoable`
-/// otherwise — a post-rename edit_stop on any pole makes the rename
+/// otherwise — a post-rename edit on any pole makes the rename
 /// non-undoable). Every reopen/close UPDATE checks rows-affected == 1.
 pub fn apply_station_rename_undo(
     conn: &Connection,
@@ -1208,139 +1013,13 @@ mod tests {
     }
 
     #[test]
-    fn edit_stop_appends_version_and_repoints_links() {
-        let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
-        let out = edit_stop(&conn, old, &StopEdit { lat: Some(24.001), lon: None, stop_name: Some("New".into()) }, "herry", "fix").unwrap();
-        // old closed, new current + manual
-        let (to, _src): (Option<String>, Option<String>) = conn.query_row(
-            "SELECT valid_to, source FROM stop_version WHERE stop_version_id = ?1", [old], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
-        assert!(to.is_some());
-        let (name, lat, src2): (String, f64, String) = conn.query_row(
-            "SELECT stop_name, latitude, source FROM stop_version WHERE stop_version_id = ?1", [out.new_version_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
-        assert_eq!((name.as_str(), lat, src2.as_str()), ("New", 24.001, "manual"));
-        // FK repointed
-        let sv: i64 = conn.query_row("SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1", [], |r| r.get(0)).unwrap();
-        assert_eq!(sv, out.new_version_id);
-        // edit_log row
-        let (ent, eid, act): (String, i64, String) = conn.query_row(
-            "SELECT entity, entity_id, action FROM edit_log WHERE edit_id = ?1", [out.edit_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
-        assert_eq!((ent.as_str(), eid, act.as_str()), ("stop", 1, "update"));
-        // stale marks: position changed → projection route + both bearing tables
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
-        assert_eq!(n, 3);
-    }
-
-    #[test]
-    fn name_only_edit_marks_only_bearings() {
-        let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
-        let out = edit_stop(&conn, old, &StopEdit { lat: None, lon: None, stop_name: Some("N2".into()) }, "herry", "rename").unwrap();
-        // the rename deleted the stop's bearing rows → only that mark; no
-        // route projections or station bearing
-        let (tbl, key): (String, String) = conn.query_row(
-            "SELECT table_name, key FROM stale_mark", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
-        assert_eq!((tbl.as_str(), key.as_str()), ("stop_bearing", "*"));
-        assert!(out.stale_routes.is_empty());
-    }
-
-    #[test]
-    fn edit_stop_rejects_non_current_version() {
-        let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
-        edit_stop(&conn, old, &StopEdit { stop_name: Some("a".into()), ..Default::default() }, "herry", "n").unwrap();
-        let err = edit_stop(&conn, old, &StopEdit { stop_name: Some("b".into()), ..Default::default() }, "herry", "n").unwrap_err();
-        assert!(err.to_string().contains("not the current version"), "{err}");
-    }
-
-    #[test]
-    fn second_edit_of_same_version_rejected() {
-        let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
-        let a = edit_stop(&conn, old, &StopEdit { lat: Some(24.001), lon: None, stop_name: None }, "herry", "first").unwrap();
-        // duplicate submit of the SAME version id: a.new_version_id is current now
-        let b = edit_stop(&conn, old, &StopEdit { lat: Some(24.002), lon: None, stop_name: None }, "herry", "second");
-        assert!(b.is_err(), "second edit of same version must be rejected");
-        // and no partial state: exactly one manual version exists
-        let n: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
-        assert_eq!(n, 1);
-        // the current version is a's
-        let cur: i64 = conn.query_row(
-            "SELECT stop_version_id FROM stop_version WHERE valid_to IS NULL", [], |r| r.get(0)).unwrap();
-        assert_eq!(cur, a.new_version_id);
-    }
-
-    #[test]
-    fn undo_restores_predecessor() {
-        let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
-        let out = edit_stop(&conn, old, &StopEdit { stop_name: Some("New".into()), ..Default::default() }, "herry", "fix").unwrap();
-        let u = undo(&conn, out.edit_id, "herry", "revert").unwrap();
-        assert_eq!(u.new_version_id, old);
-        let (to, name): (Option<String>, String) = conn.query_row(
-            "SELECT valid_to, stop_name FROM stop_version WHERE stop_version_id = ?1", [old], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
-        assert!(to.is_none());
-        assert_eq!(name, "Old");
-        let sv: i64 = conn.query_row("SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1", [], |r| r.get(0)).unwrap();
-        assert_eq!(sv, old);
-    }
-
-    #[test]
-    fn undo_validates_current_and_rejects_undo_of_undo() {
-        let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
-        let a = edit_stop(&conn, old, &StopEdit { stop_name: Some("A".into()), ..Default::default() }, "h", "n").unwrap();
-        // edit again → a.version_after no longer current
-        let b = edit_stop(&conn, a.new_version_id, &StopEdit { stop_name: Some("B".into()), ..Default::default() }, "h", "n").unwrap();
-        assert!(undo(&conn, a.edit_id, "h", "n").is_err());
-        // fresh chain: edit then undo, then undo the undo → rejected
-        // (the brief targeted `old` here, but old was closed by edit a — the
-        // current version is b.new_version_id)
-        let c = edit_stop(&conn, b.new_version_id, &StopEdit { stop_name: Some("C".into()), ..Default::default() }, "h", "n").unwrap();
-        let u = undo(&conn, c.edit_id, "h", "n").unwrap();
-        assert!(undo(&conn, u.edit_id, "h", "n").is_err());
-    }
-
-    #[test]
-    fn undo_of_position_edit_remarks_stale() {
-        let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
-        let out = edit_stop(&conn, old, &StopEdit { lat: Some(24.001), lon: None, stop_name: None }, "herry", "move").unwrap();
-        // simulate a refresh having consumed the edit's marks: undo must
-        // re-mark the derived data for the restored position
-        conn.execute("DELETE FROM stale_mark", []).unwrap();
-        let u = undo(&conn, out.edit_id, "herry", "revert").unwrap();
-        // route 1 (serving the repointed version) + both bearing tables
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
-        assert_eq!(n, 3);
-        let causes: Vec<i64> = conn.prepare("SELECT DISTINCT cause_edit_id FROM stale_mark").unwrap()
-            .query_map([], |r| r.get(0)).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(causes, vec![u.edit_id], "marks must come from the undo itself");
-        assert_eq!(u.stale_routes, vec![1]);
-    }
-
-    #[test]
-    fn undo_of_name_only_edit_marks_only_bearings() {
-        let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
-        let out = edit_stop(&conn, old, &StopEdit { stop_name: Some("N".into()), ..Default::default() }, "herry", "rename").unwrap();
-        // simulate a refresh having consumed the edit's mark: the undo
-        // deletes stop_bearing rows too, so it must re-mark them itself
-        conn.execute("DELETE FROM stale_mark", []).unwrap();
-        let u = undo(&conn, out.edit_id, "herry", "revert").unwrap();
-        let (tbl, key): (String, String) = conn.query_row(
-            "SELECT table_name, key FROM stale_mark", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
-        assert_eq!((tbl.as_str(), key.as_str()), ("stop_bearing", "*"));
-        assert!(u.stale_routes.is_empty());
-    }
-
-    #[test]
     fn entity_history_lists_newest_first() {
         let conn = open_in_memory().unwrap();
         let old = fixture(&conn);
-        let a = edit_stop(&conn, old, &StopEdit { stop_name: Some("A".into()), ..Default::default() }, "h", "n1").unwrap();
-        undo(&conn, a.edit_id, "h", "n2").unwrap();
+        let a = apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: old, stop_name: Some("A".into()), ..Default::default()
+        }, "h", "n1").unwrap();
+        apply_stop_undo(&conn, &stop_edit_undo_op(a.edit_id, 1, old, a.new_version_id), "h", "n2").unwrap();
         let rows = entity_history(&conn, "stop", 1).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].action, "undo");
@@ -1387,7 +1066,9 @@ mod tests {
     fn load_stop_snapshot_none_for_non_current_or_missing() {
         let conn = open_in_memory().unwrap();
         let old = fixture(&conn);
-        edit_stop(&conn, old, &StopEdit { stop_name: Some("N".into()), ..Default::default() }, "h", "n").unwrap();
+        apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: old, stop_name: Some("N".into()), ..Default::default()
+        }, "h", "n").unwrap();
         // old is now closed; the minted version is current
         assert!(load_stop_snapshot(&conn, old).unwrap().is_none());
         assert!(load_stop_snapshot(&conn, 999).unwrap().is_none());
@@ -1607,11 +1288,13 @@ mod tests {
     fn apply_aborts_when_pole_not_current() {
         let conn = open_in_memory().unwrap();
         rename_fixture(&conn);
-        // churn pole 10 behind the plan's back (name-only edit_stop)
-        edit_stop(&conn, 10, &StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+        // churn pole 10 behind the plan's back (name-only edit)
+        apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: 10, stop_name: Some("shadowed".into()), ..Default::default()
+        }, "h", "n").unwrap();
         let err = apply_station_rename(&conn, &all_poles_op(), "herry", "stale pole").unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");
-        // whole tx rolled back (the edit_stop's own manual stop_version and
+        // whole tx rolled back (the setup edit's own manual stop_version and
         // stop_bearing mark stay — they are not this tx's): no manual
         // station version, no station edit_log row
         let n: i64 = conn.query_row(
@@ -1629,7 +1312,9 @@ mod tests {
         // pole 11's staleness aborts it — the rollback of that churn is the
         // property under test (no partial station/pole mix). all_poles_op
         // lists [10, 11]; churn 11 behind the plan's back so it's stale.
-        edit_stop(&conn, 11, &StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+        apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 2, stop_version_id: 11, stop_name: Some("shadowed".into()), ..Default::default()
+        }, "h", "n").unwrap();
         let err = apply_station_rename(&conn, &all_poles_op(), "herry", "stale last").unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");
         // pole 10's churn rolled back: original row current again, name 'S'
@@ -1646,7 +1331,7 @@ mod tests {
             "SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1", [], |r| r.get(0)).unwrap();
         assert_eq!(sv, 10);
         // no trace of this tx: no manual station version, no station edit_log,
-        // and the only manual stop_version is edit_stop's churn of pole 11
+        // and the only manual stop_version is the setup edit's churn of pole 11
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM station_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0);
@@ -1654,7 +1339,7 @@ mod tests {
         assert_eq!(n, 0);
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
-        assert_eq!(n, 1, "only edit_stop's churn of pole 11");
+        assert_eq!(n, 1, "only the setup edit's churn of pole 11");
     }
 
     #[test]
@@ -1768,9 +1453,11 @@ mod tests {
     fn undo_refuses_when_pole_edited_after_rename() {
         let conn = open_in_memory().unwrap();
         let applied = seed_renamed(&conn);
-        // post-rename pole edit: edit_stop churns pole 1's minted version
-        edit_stop(&conn, applied.poles[0].new_svi,
-            &StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+        // post-rename pole edit: churns pole 1's minted version
+        apply_stop_edit(&conn, &StopEditOp {
+            stop_id: applied.poles[0].stop_id, stop_version_id: applied.poles[0].new_svi,
+            stop_name: Some("shadowed".into()), ..Default::default()
+        }, "h", "n").unwrap();
         let err = apply_station_rename_undo(&conn, &undo_op(&applied), "herry", "revert").unwrap_err();
         assert!(err.to_string().contains("cannot be undone"), "{err}");
         // zero partial state: minted station version still current, no undo row
@@ -1789,8 +1476,10 @@ mod tests {
         // stale pole listed LAST: all pole guards run before any UPDATE, so
         // pole 2's staleness refuses the tx before pole 1 is touched —
         // pole 1's untouched state is the property under test
-        edit_stop(&conn, applied.poles[1].new_svi,
-            &StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+        apply_stop_edit(&conn, &StopEditOp {
+            stop_id: applied.poles[1].stop_id, stop_version_id: applied.poles[1].new_svi,
+            stop_name: Some("shadowed".into()), ..Default::default()
+        }, "h", "n").unwrap();
         let err = apply_station_rename_undo(&conn, &undo_op(&applied), "herry", "revert").unwrap_err();
         assert!(err.to_string().contains("cannot be undone"), "{err}");
         // pole 1's inversion rolled back: minted version current again,
