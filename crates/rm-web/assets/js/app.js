@@ -275,6 +275,20 @@ function disableEditMode() {
   status('');
 }
 
+/// Post-edit reload: re-fetch what's on screen so the new version shows —
+/// the selected route's markers + stop list, and the viewport stops layer.
+async function refreshAfterEdit() {
+  if (selectedRoute) await selectRouteById(selectedRoute.route_id, selectedRoute.dir);
+  if (document.getElementById('layer-stops').checked) refreshStopsLayer();
+}
+
+/// Edit failure → status bar; a rejected token also drops the stored one, so
+/// the next edit-mode toggle re-prompts instead of looping 403s.
+function editFail(what, e) {
+  if (/HTTP 40[13]/.test(e.message)) sessionStorage.removeItem('rm-edit-token');
+  status(`${what} failed: ${e.message}`);
+}
+
 /// stop-panel edit actions: rename now, move = one-shot place mode.
 function onEditStop(act, stop) {
   if (!editMode) return;
@@ -284,8 +298,12 @@ function onEditStop(act, stop) {
     const note = prompt('note (required):', '') ?? '';
     if (!note) return;
     api.editStop(stop.stop_version_id, { stop_name: name, note })
-      .then((r) => { status('renamed'); return selectStop(r.new_stop_version_id); })
-      .catch((e) => status(`rename failed: ${e.message}`));
+      .then(async (r) => {
+        status('renamed');
+        await refreshAfterEdit();
+        return selectStop(r.new_stop_version_id);
+      })
+      .catch((e) => editFail('rename', e));
   } else if (act === 'move') {
     status('click the map to place the stop');
     const handler = (e) => {
@@ -297,8 +315,12 @@ function onEditStop(act, stop) {
       const note = prompt('note (required):', '') ?? '';
       if (!note) return status('');
       api.editStop(stop.stop_version_id, { lat: e.latlng.lat, lon: e.latlng.lng, note })
-        .then((r) => { status(`moved ${dist} m`); return selectStop(r.new_stop_version_id); })
-        .catch((err) => status(`move failed: ${err.message}`));
+        .then(async (r) => {
+          status(`moved ${dist} m`);
+          await refreshAfterEdit();
+          return selectStop(r.new_stop_version_id);
+        })
+        .catch((err) => editFail('move', err));
     };
     if (pendingPlace) map.off('click', pendingPlace);
     pendingPlace = handler;

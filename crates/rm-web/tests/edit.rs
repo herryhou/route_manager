@@ -11,8 +11,9 @@ fn edit_state(dir: &tempfile::TempDir) -> rm_web::state::AppState {
     let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
     fixture(&conn);
     drop(conn);
+    // name → token, same direction as main.rs parse_tokens ("herry:sekrit")
     let mut tokens = HashMap::new();
-    tokens.insert("sekrit".to_string(), "herry".to_string());
+    tokens.insert("herry".to_string(), "sekrit".to_string());
     rm_web::state::AppState::with_edit(dir.path().join("t.db"), None, tokens)
 }
 
@@ -146,6 +147,11 @@ async fn stop_edit_happy_path_writes_version_and_marks() {
         )
         .unwrap();
     assert_eq!(src, "manual");
+    // the bearer TOKEN resolved to the editor NAME (map is name → token)
+    let editor: String = conn
+        .query_row("SELECT editor FROM edit_log", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(editor, "herry");
     let stats = get_json(&app, "/api/stats").await;
     assert_eq!(stats["edit_enabled"], serde_json::Value::Bool(true));
 }
@@ -297,7 +303,7 @@ async fn edit_state_keeps_tiles() {
     fixture(&conn);
     drop(conn);
     let mut tokens = HashMap::new();
-    tokens.insert("sekrit".to_string(), "herry".to_string());
+    tokens.insert("herry".to_string(), "sekrit".to_string());
     let state = rm_web::state::AppState::with_edit(
         dir.path().join("t.db"),
         Some("https://tiles.internal/{z}/{x}/{y}.png".to_string()),

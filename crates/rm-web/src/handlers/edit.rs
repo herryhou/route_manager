@@ -32,10 +32,14 @@ where
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
             .ok_or_else(|| ApiError::unauthorized("missing bearer token"))?;
+        // tokens maps editor name → token, so the presented token is a VALUE:
+        // reverse lookup, then report the matched name as the editor.
         let editor = tokens
-            .get(hdr)
+            .iter()
+            .find(|(_, tok)| tok.as_str() == hdr)
+            .map(|(name, _)| name.clone())
             .ok_or_else(|| ApiError::forbidden("unknown token"))?;
-        Ok(Editor(editor.clone()))
+        Ok(Editor(editor))
     }
 }
 

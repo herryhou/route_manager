@@ -57,7 +57,7 @@ impl AppState {
         self.edit_tokens.is_some()
     }
 
-    /// Token → editor map (edit mode only).
+    /// Editor name → token map (edit mode only).
     pub fn write_tokens(&self) -> Option<&HashMap<String, String>> {
         self.edit_tokens.as_deref()
     }
