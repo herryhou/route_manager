@@ -26,6 +26,10 @@ struct Args {
     /// Edit tokens as comma-separated `name:token` entries (or RM_EDIT_TOKENS env)
     #[arg(long, env = "RM_EDIT_TOKENS")]
     edit_tokens: Option<String>,
+
+    /// Apply pending migrations to the DB, then exit (brings pre-edit DBs to 0010+)
+    #[arg(long)]
+    migrate: bool,
 }
 
 /// Parse `name:token` entries, comma-separated. Bails by entry index — the
@@ -56,6 +60,11 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let args = Args::parse();
+    if args.migrate {
+        rm_db::open(&args.db)?;
+        println!("migrations applied: {}", args.db.display());
+        return Ok(());
+    }
     let edit_tokens = if args.edit {
         let raw = args
             .edit_tokens
