@@ -913,4 +913,40 @@ mod tests {
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log WHERE entity = 'station'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0);
     }
+
+    #[test]
+    fn apply_rolls_back_earlier_poles_when_later_pole_stale() {
+        let conn = open_in_memory().unwrap();
+        rename_fixture(&conn);
+        // stale pole listed LAST: pole 10 churns fully inside the tx before
+        // pole 11's staleness aborts it — the rollback of that churn is the
+        // property under test (no partial station/pole mix). all_poles_op
+        // lists [10, 11]; churn 11 behind the plan's back so it's stale.
+        edit_stop(&conn, 11, &StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+        let err = apply_station_rename(&conn, &all_poles_op(), "herry", "stale last").unwrap_err();
+        assert!(err.to_string().contains("not the current version"), "{err}");
+        // pole 10's churn rolled back: original row current again, name 'S'
+        let (to, name): (Option<String>, String) = conn.query_row(
+            "SELECT valid_to, stop_name FROM stop_version WHERE stop_version_id = 10", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert!(to.is_none(), "pole 10 unclosed by rollback");
+        assert_eq!(name, "S");
+        // its bearing row came back to svi 10 (exactly one row, on svi 10)
+        let (n, on10): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*), SUM(CASE WHEN stop_version_id = 10 THEN 1 ELSE 0 END) FROM stop_bearing", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((n, on10), (1, 1));
+        // rsv still points at svi 10
+        let sv: i64 = conn.query_row(
+            "SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(sv, 10);
+        // no trace of this tx: no manual station version, no station edit_log,
+        // and the only manual stop_version is edit_stop's churn of pole 11
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM station_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log WHERE entity = 'station'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "only edit_stop's churn of pole 11");
+    }
 }
