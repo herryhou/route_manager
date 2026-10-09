@@ -58,6 +58,14 @@ pub enum EditError {
     NoOpRename,
     #[error("edit {0} cannot be undone (not current, or is itself an undo)")]
     NotUndoable(i64),
+    #[error("stop version {0} is not the current version (or does not exist)")]
+    NotCurrent(i64),
+    #[error("station {0} does not exist or is not current")]
+    UnknownStation(i64),
+    #[error("edit changes nothing")]
+    EmptyEdit,
+    #[error("edit sets no field to a new value")]
+    NoOpEdit,
 }
 
 /// Pure planning policy: pick which poles follow the rename. No I/O.
