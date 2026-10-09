@@ -1,3 +1,4 @@
+use rm_edit::{plan_regroup, RegroupStop};
 use rm_edit::{plan_stop_edit, EditError, StopEdit};
 use rm_db::StopSnapshot;
 
@@ -41,6 +42,16 @@ fn plan_copies_snapshot_ids() {
     let p = plan_stop_edit(&snap(), StopEdit { lon: Some(120.5), ..Default::default() }).unwrap();
     assert_eq!((p.stop_id, p.station_id, p.stop_version_id), (1, 1, 10));
     assert_eq!(p.lon, Some(120.5));
+}
+
+#[test]
+fn plan_regroup_rejects_same_station() {
+    assert!(matches!(
+        plan_regroup(&snap(), RegroupStop { stop_version_id: 10, new_station_id: 1 }),
+        Err(EditError::NoOpEdit)
+    ));
+    let p = plan_regroup(&snap(), RegroupStop { stop_version_id: 10, new_station_id: 2 }).unwrap();
+    assert_eq!((p.stop_id, p.stop_version_id, p.old_station_id, p.new_station_id), (1, 10, 1, 2));
 }
 
 mod db {
@@ -118,5 +129,22 @@ mod db {
         rm_edit::edit_stop(&conn, old, StopEdit { stop_name: Some("A".into()), ..Default::default() }, "h", "n").unwrap();
         let err = rm_edit::edit_stop(&conn, old, StopEdit { stop_name: Some("B".into()), ..Default::default() }, "h", "n").unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");
+    }
+
+    #[test]
+    fn regroup_service_roundtrip_and_guards() {
+        let conn = rm_db::open_in_memory().unwrap();
+        let old = fixture(&conn);
+        second_station(&conn);
+        // unknown target
+        let err = rm_edit::regroup_stop(&conn, RegroupStop { stop_version_id: old, new_station_id: 42 }, "h", "n").unwrap_err();
+        assert!(err.to_string().contains("does not exist or is not current"), "{err}");
+        // same station
+        let err = rm_edit::regroup_stop(&conn, RegroupStop { stop_version_id: old, new_station_id: 1 }, "h", "n").unwrap_err();
+        assert!(err.to_string().contains("sets no field"), "{err}");
+        // happy path
+        let out = rm_edit::regroup_stop(&conn, RegroupStop { stop_version_id: old, new_station_id: 2 }, "herry", "regroup").unwrap();
+        assert!(out.new_stop_version_id > old);
+        assert!(out.stale_routes.is_empty());
     }
 }

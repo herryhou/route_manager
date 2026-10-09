@@ -92,3 +92,60 @@ pub fn edit_stop(
         stale_routes: applied.stale_routes,
     })
 }
+
+#[derive(Debug)]
+pub struct RegroupStop {
+    pub stop_version_id: i64,
+    pub new_station_id: i64,
+}
+
+#[derive(Debug)]
+pub struct RegroupPlan {
+    pub stop_id: i64,
+    pub stop_version_id: i64,
+    pub old_station_id: i64,
+    pub new_station_id: i64,
+}
+
+/// Pure policy: regrouping to the current station is a no-op. Target
+/// existence/currency is a load-time fact, checked by the service.
+pub fn plan_regroup(
+    snapshot: &rm_db::StopSnapshot,
+    cmd: RegroupStop,
+) -> Result<RegroupPlan, EditError> {
+    if cmd.new_station_id == snapshot.station_id {
+        return Err(EditError::NoOpEdit);
+    }
+    Ok(RegroupPlan {
+        stop_id: snapshot.stop_id,
+        stop_version_id: snapshot.stop_version_id,
+        old_station_id: snapshot.station_id,
+        new_station_id: cmd.new_station_id,
+    })
+}
+
+/// Application service: load → target check → plan (pure) → apply (one tx).
+pub fn regroup_stop(
+    conn: &Connection,
+    cmd: RegroupStop,
+    editor: &str,
+    note: &str,
+) -> Result<StopOutcome> {
+    let snapshot = rm_db::load_stop_snapshot(conn, cmd.stop_version_id)?
+        .ok_or(EditError::NotCurrent(cmd.stop_version_id))?;
+    if !rm_db::station_is_current(conn, cmd.new_station_id)? {
+        return Err(EditError::UnknownStation(cmd.new_station_id).into());
+    }
+    let plan = plan_regroup(&snapshot, cmd)?;
+    let op = rm_db::StopRegroupOp {
+        stop_id: plan.stop_id,
+        stop_version_id: plan.stop_version_id,
+        new_station_id: plan.new_station_id,
+    };
+    let applied = rm_db::apply_stop_regroup(conn, &op, editor, note).map_err(map_db_err)?;
+    Ok(StopOutcome {
+        edit_id: applied.edit_id,
+        new_stop_version_id: applied.new_version_id,
+        stale_routes: applied.stale_routes,
+    })
+}
