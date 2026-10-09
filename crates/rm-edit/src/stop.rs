@@ -33,9 +33,9 @@ pub fn plan_stop_edit(
     if cmd.lat.is_none() && cmd.lon.is_none() && cmd.stop_name.is_none() {
         return Err(EditError::EmptyEdit);
     }
-    let no_op = cmd.lat.map_or(true, |v| v == snapshot.latitude)
-        && cmd.lon.map_or(true, |v| v == snapshot.longitude)
-        && cmd.stop_name.as_ref().map_or(true, |v| *v == snapshot.stop_name);
+    let no_op = cmd.lat.is_none_or(|v| v == snapshot.latitude)
+        && cmd.lon.is_none_or(|v| v == snapshot.longitude)
+        && cmd.stop_name.as_ref().is_none_or(|v| *v == snapshot.stop_name);
     if no_op {
         return Err(EditError::NoOpEdit);
     }
