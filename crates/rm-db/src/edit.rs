@@ -1294,9 +1294,9 @@ mod tests {
         }, "h", "n").unwrap();
         let err = apply_station_rename(&conn, &all_poles_op(), "herry", "stale pole").unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");
-        // whole tx rolled back (the setup edit's own manual stop_version and
-        // stop_bearing mark stay — they are not this tx's): no manual
-        // station version, no station edit_log row
+        // whole tx rolled back (the setup name-only edit writes zero marks:
+        // bearing carried, no stop_bearing mark; its manual stop_version is
+        // not this tx's): no manual station version, no station edit_log row
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM station_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0);
@@ -1781,7 +1781,9 @@ mod tests {
         }, "h", "n").unwrap();
         let err = apply_stop_undo(&conn, &stop_edit_undo_op(a.edit_id, 1, old, a.new_version_id), "h", "n").unwrap_err();
         assert!(err.to_string().contains("cannot be undone"), "{err}");
-        // bogus old_svi: rows-affected guard
+        // bogus old_svi: the pre-write existence (COUNT) guard rejects it
+        // before any write; the reopen rows-affected check is
+        // defense-in-depth behind it
         let err = apply_stop_undo(&conn, &stop_edit_undo_op(b.edit_id, 1, 999, b.new_version_id), "h", "n").unwrap_err();
         assert!(err.to_string().contains("cannot be undone"), "{err}");
         // zero partial state: no undo rows, versions as after edit b
