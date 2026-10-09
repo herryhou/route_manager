@@ -283,10 +283,12 @@ export function profileSvg(stops) {
 
 /// Route path piece detail (point pane, polyline click): provider draft piece
 /// or OSM way run — shape depends on the route-geom select the map drew.
+/// Draft pieces get an empty `.piece-ways` container app.js fills with the
+/// OSM ways covering the piece's chainage window (returned; null for way runs).
 export function pathPiecePanel(p) {
   const fmt = (m) => `${(m ?? 0).toFixed(0)}m`;
   const isWay = p.osm_way_id != null;
-  showPane(
+  const pane = showPane(
     'point',
     isWay
       ? kv([
@@ -302,9 +304,12 @@ export function pathPiecePanel(p) {
         <tr><td>method</td><td>${p.geometry_method}</td></tr>
         <tr><td>length</td><td>${fmt(p.length_m)}</td></tr>
         <tr><td>stop span</td><td>${p.from_seq} → ${p.to_seq}</td></tr>
-      </table>`,
+      </table>
+      <h3>OSM ways</h3>
+      <div class="piece-ways"><p class="muted">…</p></div>`,
     isWay ? `Way ${p.name ?? `#${p.osm_way_id}`}` : `Piece #${p.ordinal} ${p.geometry_method ?? ''}`.trim()
   );
+  return isWay ? null : pane.querySelector('.piece-ways');
 }
 
 /// Outlier list panel (topbar outliers chip).

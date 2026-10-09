@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -101,6 +101,52 @@ async function selectRouteById(routeId, dir = 0) {
   else status(`route ${routeId} not in list`);
 }
 
+/// Way-run properties per `route_id:dir`, cached for piece-panel lookup —
+/// the same data the ways overlay draws, fetched once per direction.
+const wayRunsCache = {};
+async function wayRuns(routeId, dir) {
+  const key = `${routeId}:${dir}`;
+  if (!wayRunsCache[key]) {
+    const v = await api.routeWays(routeId, dir);
+    wayRunsCache[key] = (v.features ?? []).map((f) => f.properties);
+  }
+  return wayRunsCache[key];
+}
+
+/// Fill the piece panel's `.piece-ways` container: the ordered OSM way runs
+/// covering the draft piece's stop-to-stop chainage window (the per-route
+/// derivation that replaced the segment registry). `stops` is captured at
+/// click time — pane-history replays must not read another route's stops.
+/// Async — the panel is already shown; ways land when the fetch resolves.
+async function fillPieceWays(el, routeId, dir, stops, p) {
+  const from = stops.find((x) => x.stop_sequence === p.from_seq);
+  const to = stops.find((x) => x.stop_sequence === p.to_seq);
+  const lo = from?.chainage_m;
+  const hi = to?.chainage_m;
+  if (lo == null || hi == null || hi <= lo) {
+    el.innerHTML = '<p class="muted">no chainage window</p>';
+    return;
+  }
+  try {
+    const runs = await wayRuns(routeId, dir);
+    const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m.toFixed(0)}m`);
+    const covering = runs
+      .map((r) => ({ ...r, overlap: Math.min(r.cum_end_m, hi) - Math.max(r.cum_start_m, lo) }))
+      .filter((r) => r.overlap > 0.5)
+      .sort((a, b) => a.cum_start_m - b.cum_start_m);
+    el.innerHTML = covering.length
+      ? `<table class="kv">${covering
+          .map(
+            (r) =>
+              `<tr><td>${esc(r.name ?? '—')} (#${r.osm_way_id})</td><td style="text-align:right">${fmt(r.overlap)}</td></tr>`
+          )
+          .join('')}</table>`
+      : '<p class="muted">no ways cover this piece</p>';
+  } catch (e) {
+    el.innerHTML = `<p class="muted">ways load failed: ${esc(e.message)}</p>`;
+  }
+}
+
 async function selectRoute(r, dir = 0) {
   selectedKey = `${r.route_id}`;
   selectedRoute = { route_id: r.route_id, dir };
@@ -121,8 +167,10 @@ async function selectRoute(r, dir = 0) {
     // properties — no refetch.
     const onPathClick = (feature) => {
       const p = feature.properties;
+      const dirStops = s.stops ?? [];
       const show = () => {
-        pathPiecePanel(p);
+        const waysEl = pathPiecePanel(p);
+        if (waysEl) fillPieceWays(waysEl, route_id, dir, dirStops, p);
         if (feature.geometry) {
           drawPieceHighlight(feature.geometry, p.osm_way_id != null ? 'selected way' : 'selected piece');
         }
