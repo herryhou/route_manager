@@ -18,6 +18,7 @@ pub use batch::{create_batch, latest_batch, latest_open_batch, set_batch_status}
 pub use edit::{
     edit_stop, entity_history, undo, EditError, EditLogRow, EditOutcome, StopEdit,
     StationSnapshot, PoleSnapshot, load_station_snapshot,
+    StationRenameOp, PoleOp, StationRenameApplied, PoleApplied, apply_station_rename,
 };
 pub use migrate::migrate;
 
