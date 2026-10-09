@@ -1058,10 +1058,11 @@ pub struct StationRenameUndone {
 /// stop_bearing row back (PK invariant). One edit_log undo row, ZERO
 /// stale marks (nothing derived changed). Mints nothing.
 ///
-/// Guards (inside the tx): the rename's station version must still be
-/// current (`StationNotCurrent` otherwise); every minted pole version
-/// must still be current (`NotUndoable` otherwise — a post-rename
-/// edit_stop on any pole makes the rename non-undoable).
+/// Guards (inside the tx, before any write): the rename's station version
+/// must still be current and manual (`StationNotCurrent` otherwise); every
+/// minted pole version must still be current and manual (`NotUndoable`
+/// otherwise — a post-rename edit_stop on any pole makes the rename
+/// non-undoable). Every reopen/close UPDATE checks rows-affected == 1.
 pub fn apply_station_rename_undo(
     conn: &Connection,
     op: &StationRenameUndoOp,
@@ -1071,8 +1072,12 @@ pub fn apply_station_rename_undo(
     let tx = conn.unchecked_transaction()?;
     let now = crate::now_rfc3339();
 
+    // guards BEFORE any write; the manual-source assertion is on the rows
+    // being CLOSED (the rename's output) — the predecessors being reopened
+    // are pipeline rows, often source != 'manual'
     let n: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM station_version WHERE station_version_id = ?1 AND valid_to IS NULL",
+        "SELECT COUNT(*) FROM station_version
+         WHERE station_version_id = ?1 AND valid_to IS NULL AND source = 'manual'",
         [op.new_station_version_id],
         |r| r.get(0),
     )?;
@@ -1081,7 +1086,8 @@ pub fn apply_station_rename_undo(
     }
     for pole in &op.poles {
         let n: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM stop_version WHERE stop_version_id = ?1 AND valid_to IS NULL",
+            "SELECT COUNT(*) FROM stop_version
+             WHERE stop_version_id = ?1 AND valid_to IS NULL AND source = 'manual'",
             [pole.new_svi],
             |r| r.get(0),
         )?;
@@ -1090,24 +1096,38 @@ pub fn apply_station_rename_undo(
         }
     }
 
-    tx.execute(
-        "UPDATE station_version SET valid_to = ?1 WHERE station_version_id = ?2",
+    let n = tx.execute(
+        "UPDATE station_version SET valid_to = ?1
+         WHERE station_version_id = ?2 AND valid_to IS NULL",
         params![now, op.new_station_version_id],
     )?;
-    tx.execute(
+    if n != 1 {
+        return Err(EditError::NotUndoable(op.edit_id).into());
+    }
+    let n = tx.execute(
         "UPDATE station_version SET valid_to = NULL WHERE station_version_id = ?1",
         params![op.old_station_version_id],
     )?;
+    if n != 1 {
+        return Err(EditError::NotUndoable(op.edit_id).into());
+    }
 
     for pole in &op.poles {
-        tx.execute(
-            "UPDATE stop_version SET valid_to = ?1 WHERE stop_version_id = ?2",
+        let n = tx.execute(
+            "UPDATE stop_version SET valid_to = ?1
+             WHERE stop_version_id = ?2 AND valid_to IS NULL",
             params![now, pole.new_svi],
         )?;
-        tx.execute(
+        if n != 1 {
+            return Err(EditError::NotUndoable(op.edit_id).into());
+        }
+        let n = tx.execute(
             "UPDATE stop_version SET valid_to = NULL WHERE stop_version_id = ?1",
             params![pole.old_svi],
         )?;
+        if n != 1 {
+            return Err(EditError::NotUndoable(op.edit_id).into());
+        }
         tx.execute(
             "UPDATE route_stop_version SET stop_version_id = ?1 WHERE stop_version_id = ?2",
             params![pole.old_svi, pole.new_svi],
