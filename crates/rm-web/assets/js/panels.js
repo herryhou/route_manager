@@ -7,7 +7,7 @@ export const setEditable = (b) => { editable = b; };
 
 /// Escape editor-writable text (stop_name) interpolated into HTML —
 /// attribute contexts included.
-const esc = (s) =>
+export const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export function renderRouteList(routes, { onSelect, selectedKey }) {

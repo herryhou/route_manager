@@ -1,5 +1,6 @@
 // Leaflet layer management: route path/stops, highlights, viewport segments.
 import { METHOD_COLORS, routeCountColor } from './colors.js';
+import { esc } from './panels.js';
 
 export const layers = {};
 
@@ -59,7 +60,7 @@ export function drawRoute(pathFc, stopsJson, { onStopClick, onPathClick }) {
       fillColor: METHOD_COLORS[s.method] ?? '#7da7d9',
       fillOpacity: 1,
     });
-    m.bindTooltip(`${s.stop_sequence}. ${s.stop_name}`, { direction: 'top' });
+    m.bindTooltip(`${s.stop_sequence}. ${esc(s.stop_name)}`, { direction: 'top' });
     m.on('click', () => onStopClick(s, m));
     m.addTo(layers.routeStops);
 

@@ -96,7 +96,7 @@ mod tests {
         )
         .unwrap();
         // closing the NEWEST batch is what discriminates: an OPEN-only
-        // filter would return None here, the any-status default returns id2
+        // filter would return id1 here, the any-status default returns id2
         set_batch_status(&conn, id2, "CLOSED").unwrap();
         assert_eq!(latest_batch(&conn).unwrap(), Some(id2));
     }
