@@ -21,6 +21,8 @@ pub enum EditError {
     StationNotCurrent(i64),
     #[error("edit {0} cannot be undone (not current, or is itself an undo)")]
     NotUndoable(i64),
+    #[error("station {0} does not exist or is not current")]
+    UnknownStation(i64),
 }
 
 #[derive(Debug)]
@@ -322,6 +324,100 @@ pub fn apply_stop_edit(
         edit_id,
         new_version_id: new_id,
         stale_routes,
+    })
+}
+
+#[derive(Debug)]
+pub struct StopRegroupOp {
+    pub stop_id: i64,
+    pub stop_version_id: i64, // must be the current version
+    pub new_station_id: i64,
+}
+
+/// Whole-tx regroup: move a pole to another station. Membership lives in
+/// the child version (INV-17), so this is single-row churn. Position is
+/// untouched ⇒ the bearing value survives (carried over); the station
+/// circular mean goes stale on both sides — one whole-table mark covers
+/// both (whole-table rebuild). No projection marks: an rsv repoint alone
+/// invalidates nothing (scenario-1 precedent).
+pub fn apply_stop_regroup(
+    conn: &Connection,
+    op: &StopRegroupOp,
+    editor: &str,
+    note: &str,
+) -> Result<EditOutcome> {
+    let tx = conn.unchecked_transaction()?;
+    let old: (i64, String, String, i64, f64, f64) = match tx.query_row(
+        "SELECT station_id, stop_code, stop_name, direction, latitude, longitude
+         FROM stop_version WHERE stop_version_id = ?1 AND valid_to IS NULL",
+        [op.stop_version_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(EditError::NotCurrent(op.stop_version_id).into())
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let (old_station_id, stop_code, old_name, direction, lat, lon) = old;
+    let n: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM station_version WHERE station_id = ?1 AND valid_to IS NULL",
+        [op.new_station_id],
+        |r| r.get(0),
+    )?;
+    if n == 0 {
+        return Err(EditError::UnknownStation(op.new_station_id).into());
+    }
+    let now = crate::now_rfc3339();
+    let new_id = crate::mint(&tx, "stop_version")?;
+    let closed = tx.execute(
+        "UPDATE stop_version SET valid_to = ?1 WHERE stop_version_id = ?2",
+        params![now, op.stop_version_id],
+    )?;
+    if closed != 1 {
+        // the SELECT guard above saw this row current; a 0-row close means it
+        // vanished mid-tx — refuse before any further write (tx aborts)
+        return Err(EditError::NotCurrent(op.stop_version_id).into());
+    }
+    tx.execute(
+        "INSERT INTO stop_version
+            (stop_version_id, stop_id, station_id, stop_code, stop_name, direction,
+             latitude, longitude, valid_from, created_at, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, 'manual')",
+        params![new_id, op.stop_id, op.new_station_id, stop_code, old_name, direction, lat, lon, now],
+    )?;
+    tx.execute(
+        "UPDATE route_stop_version SET stop_version_id = ?1 WHERE stop_version_id = ?2",
+        params![new_id, op.stop_version_id],
+    )?;
+    carry_bearing(&tx, op.stop_version_id, new_id)?;
+
+    let changes = json!({"station_id": {"old": old_station_id, "new": op.new_station_id}});
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, version_before, version_after)
+         VALUES (?1, ?2, 'stop', ?3, 'move_station', ?4, ?5, ?6, ?7)",
+        params![
+            now,
+            editor,
+            op.stop_id,
+            changes.to_string(),
+            if note.is_empty() { None } else { Some(note) },
+            op.stop_version_id,
+            new_id
+        ],
+    )?;
+    let edit_id = tx.last_insert_rowid();
+
+    tx.execute(
+        "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+         VALUES ('station_bearing', '*', ?1, ?2)",
+        params![edit_id, now],
+    )?;
+    tx.commit()?;
+    Ok(EditOutcome {
+        edit_id,
+        new_version_id: new_id,
+        stale_routes: Vec::new(),
     })
 }
 
@@ -1613,5 +1709,78 @@ mod tests {
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM stop_version WHERE stop_id = 1", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 2);
+    }
+
+    fn regroup_op(old: i64, new_station: i64) -> StopRegroupOp {
+        StopRegroupOp { stop_id: 1, stop_version_id: old, new_station_id: new_station }
+    }
+
+    fn second_station(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO station (station_id, ext_uid, created_at)
+             VALUES (2, 'tcg:node:2', '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO station_version (station_version_id, station_id, station_group_id, station_name, latitude, longitude, valid_from, created_at)
+             VALUES (21, 2, 1, 'T', 24.1, 120.1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')", []).unwrap();
+        conn.execute(
+            "INSERT INTO id_sequence (table_name, next_value) VALUES ('station_version', 22)", []).unwrap();
+    }
+
+    #[test]
+    fn apply_stop_regroup_churns_membership_carries_bearing() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn); // fixture has no bearing row — seed one
+        conn.execute(
+            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+             VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')", []).unwrap();
+        second_station(&conn);
+        let out = apply_stop_regroup(&conn, &regroup_op(old, 2), "herry", "regroup").unwrap();
+        // new version carries the new station_id, same position, manual
+        let (st, lat, lon, src): (i64, f64, f64, String) = conn.query_row(
+            "SELECT station_id, latitude, longitude, source FROM stop_version WHERE stop_version_id = ?1",
+            [out.new_version_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap();
+        assert_eq!((st, lat, lon, src.as_str()), (2, 24.0, 120.0, "manual"));
+        // old closed
+        let to: Option<String> = conn.query_row(
+            "SELECT valid_to FROM stop_version WHERE stop_version_id = ?1", [old], |r| r.get(0)).unwrap();
+        assert!(to.is_some());
+        // bearing carried over to the new svi (position unchanged)
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = ?1",
+            [out.new_version_id], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+        // rsv repointed
+        let sv: i64 = conn.query_row(
+            "SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1",
+            [], |r| r.get(0)).unwrap();
+        assert_eq!(sv, out.new_version_id);
+        // marks: station_bearing ONLY
+        let rows: Vec<(String, String)> = conn.prepare("SELECT table_name, key FROM stale_mark").unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+            .collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(rows, vec![("station_bearing".into(), "*".into())]);
+        assert!(out.stale_routes.is_empty());
+        // edit_log: action='move_station', changes={station_id:{old,new}}
+        let (act, changes): (String, String) = conn.query_row(
+            "SELECT action, changes FROM edit_log WHERE edit_id = ?1",
+            [out.edit_id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(act, "move_station");
+        let c: serde_json::Value = serde_json::from_str(&changes).unwrap();
+        assert_eq!(c["station_id"]["old"], 1);
+        assert_eq!(c["station_id"]["new"], 2);
+    }
+
+    #[test]
+    fn apply_stop_regroup_refuses_unknown_target_and_stale_source() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        second_station(&conn);
+        let err = apply_stop_regroup(&conn, &regroup_op(old, 42), "h", "n").unwrap_err();
+        assert!(err.to_string().contains("does not exist or is not current"), "{err}");
+        // stale source: regroup twice from the same version
+        let out = apply_stop_regroup(&conn, &regroup_op(old, 2), "h", "n").unwrap();
+        let err = apply_stop_regroup(&conn, &regroup_op(old, 2), "h", "n").unwrap_err();
+        assert!(err.to_string().contains("not the current version"), "{err}");
+        let _ = out;
     }
 }
