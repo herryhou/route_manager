@@ -1,0 +1,11 @@
+[package]
+name = "rm-edit"
+description = "Manual edit domain + application services (no SQL)"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+rm-db.workspace = true
+rusqlite.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
