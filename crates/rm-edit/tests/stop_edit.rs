@@ -1,6 +1,6 @@
-use rm_edit::{plan_regroup, RegroupStop};
+use rm_edit::{plan_regroup, plan_stop_undo, RegroupStop, StopUndoOp};
 use rm_edit::{plan_stop_edit, EditError, StopEdit};
-use rm_db::StopSnapshot;
+use rm_db::{StopEditRow, StopSnapshot};
 
 fn snap() -> StopSnapshot {
     StopSnapshot {
@@ -52,6 +52,32 @@ fn plan_regroup_rejects_same_station() {
     ));
     let p = plan_regroup(&snap(), RegroupStop { stop_version_id: 10, new_station_id: 2 }).unwrap();
     assert_eq!((p.stop_id, p.stop_version_id, p.old_station_id, p.new_station_id), (1, 10, 1, 2));
+}
+
+fn row(entity: &str, action: &str) -> StopEditRow {
+    StopEditRow {
+        edit_id: 7,
+        entity: entity.into(),
+        stop_id: 1,
+        action: action.into(),
+        old_stop_version_id: Some(10),
+        new_stop_version_id: Some(11),
+        changes: serde_json::json!({"latitude": {"old": 24.0, "new": 24.001}}),
+    }
+}
+
+#[test]
+fn plan_stop_undo_guards() {
+    let p = plan_stop_undo(&row("stop", "update")).unwrap();
+    assert_eq!(p, StopUndoOp { edit_id: 7, stop_id: 1, old_svi: 10, cur_svi: 11 });
+    // undo rows are not undoable
+    assert!(matches!(plan_stop_undo(&row("stop", "undo")), Err(EditError::NotUndoable(7))));
+    // wrong entity (a station rename row) is refused
+    assert!(matches!(plan_stop_undo(&row("station", "update")), Err(EditError::NotUndoable(7))));
+    // missing version ids
+    let mut r = row("stop", "update");
+    r.old_stop_version_id = None;
+    assert!(matches!(plan_stop_undo(&r), Err(EditError::NotUndoable(7))));
 }
 
 mod db {
@@ -146,5 +172,53 @@ mod db {
         let out = rm_edit::regroup_stop(&conn, RegroupStop { stop_version_id: old, new_station_id: 2 }, "herry", "regroup").unwrap();
         assert!(out.new_stop_version_id > old);
         assert!(out.stale_routes.is_empty());
+    }
+
+    #[test]
+    fn undo_roundtrips_all_three_kinds() {
+        let conn = rm_db::open_in_memory().unwrap();
+        let old = fixture(&conn);
+        second_station(&conn);
+
+        // move
+        let m = rm_edit::edit_stop(&conn, old, StopEdit { lat: Some(24.001), ..Default::default() }, "h", "m").unwrap();
+        let u = rm_edit::undo_stop(&conn, m.edit_id, "h", "rev").unwrap();
+        assert_eq!(u.new_stop_version_id, old);
+        assert_eq!(u.stale_routes, vec![1], "move undo re-marks projections");
+
+        // regroup
+        let g = rm_edit::regroup_stop(&conn, RegroupStop { stop_version_id: old, new_station_id: 2 }, "h", "g").unwrap();
+        let u = rm_edit::undo_stop(&conn, g.edit_id, "h", "rev").unwrap();
+        assert_eq!(u.new_stop_version_id, old);
+
+        // name
+        let n = rm_edit::edit_stop(&conn, old, StopEdit { stop_name: Some("N".into()), ..Default::default() }, "h", "n").unwrap();
+        let u = rm_edit::undo_stop(&conn, n.edit_id, "h", "rev").unwrap();
+        assert_eq!(u.new_stop_version_id, old);
+        assert!(u.stale_routes.is_empty());
+    }
+
+    #[test]
+    fn undo_of_undo_refused() {
+        let conn = rm_db::open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let e = rm_edit::edit_stop(&conn, old, StopEdit { stop_name: Some("N".into()), ..Default::default() }, "h", "n").unwrap();
+        let u = rm_edit::undo_stop(&conn, e.edit_id, "h", "rev").unwrap();
+        let err = rm_edit::undo_stop(&conn, u.edit_id, "h", "rev").unwrap_err();
+        assert!(err.to_string().contains("cannot be undone"), "{err}");
+    }
+
+    #[test]
+    fn undo_stop_accepts_legacy_row_without_kind() {
+        let conn = rm_db::open_in_memory().unwrap();
+        let old = fixture(&conn);
+        // synthesize a pre-scenario legacy row: {field:{old,new}} without a
+        // kind marker — exactly what old rm_db::edit_stop wrote
+        let e = rm_edit::edit_stop(&conn, old, StopEdit { stop_name: Some("N".into()), ..Default::default() }, "h", "n").unwrap();
+        conn.execute(
+            "UPDATE edit_log SET changes = '{\"stop_name\":{\"old\":\"Old\",\"new\":\"N\"}}' WHERE edit_id = ?1",
+            [e.edit_id]).unwrap();
+        let u = rm_edit::undo_stop(&conn, e.edit_id, "h", "rev").unwrap();
+        assert_eq!(u.new_stop_version_id, old);
     }
 }

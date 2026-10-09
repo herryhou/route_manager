@@ -149,3 +149,52 @@ pub fn regroup_stop(
         stale_routes: applied.stale_routes,
     })
 }
+
+#[derive(Debug, PartialEq)]
+pub struct StopUndoOp {
+    pub edit_id: i64,
+    pub stop_id: i64,
+    pub old_svi: i64,
+    pub cur_svi: i64,
+}
+
+/// Pure guard: only a non-undo stop row with both version ids is
+/// invertible. Kind-agnostic — legacy rows whose `changes` carry no
+/// `kind` stay undoable; the generic predecessor restore covers every
+/// single-row stop edit (move, name, regroup).
+pub fn plan_stop_undo(edit: &rm_db::StopEditRow) -> Result<StopUndoOp, EditError> {
+    if edit.entity != "stop" || edit.action == "undo" {
+        return Err(EditError::NotUndoable(edit.edit_id));
+    }
+    let (Some(old_svi), Some(cur_svi)) = (edit.old_stop_version_id, edit.new_stop_version_id) else {
+        return Err(EditError::NotUndoable(edit.edit_id));
+    };
+    if old_svi == cur_svi {
+        return Err(EditError::NotUndoable(edit.edit_id));
+    }
+    Ok(StopUndoOp { edit_id: edit.edit_id, stop_id: edit.stop_id, old_svi, cur_svi })
+}
+
+/// Application service: load → plan (pure) → apply (one tx).
+pub fn undo_stop(
+    conn: &Connection,
+    edit_id: i64,
+    editor: &str,
+    note: &str,
+) -> Result<StopOutcome> {
+    let row = rm_db::load_stop_edit(conn, edit_id)?
+        .ok_or(EditError::NotUndoable(edit_id))?;
+    let plan = plan_stop_undo(&row)?;
+    let op = rm_db::StopEditUndoOp {
+        edit_id: plan.edit_id,
+        stop_id: plan.stop_id,
+        old_svi: plan.old_svi,
+        cur_svi: plan.cur_svi,
+    };
+    let applied = rm_db::apply_stop_undo(conn, &op, editor, note).map_err(map_db_err)?;
+    Ok(StopOutcome {
+        edit_id: applied.edit_id,
+        new_stop_version_id: applied.new_version_id,
+        stale_routes: applied.stale_routes,
+    })
+}
