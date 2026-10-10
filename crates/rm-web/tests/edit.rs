@@ -82,6 +82,12 @@ fn fixture(conn: &Connection) -> i64 {
         [],
     )
     .unwrap();
+    conn.execute(
+        "INSERT INTO import_batch (batch_id, source_dir, file_count, captured_at, valid_from, status, created_at)
+         VALUES (1, 'assets/x', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'CLOSED', '2026-01-01T00:00:00Z')", []).unwrap();
+    conn.execute(
+        "INSERT INTO src_route_point (batch_id, xno, direction, encoded)
+         VALUES (1, '1', 1, '_p~iF~ps|U_ulLnnqC')", []).unwrap();
     10
 }
 
@@ -192,6 +198,20 @@ async fn edit_routes_absent_without_edit_flag() {
                 .method("POST")
                 .uri("/api/edit/stop/10")
                 .header("authorization", "Bearer sekrit")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/edit/polyline/1/1/piece")
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
                 .body(Body::from("{}"))
                 .unwrap(),
         )
@@ -695,4 +715,119 @@ async fn undo_unknown_edit_still_conflicts() {
     let state = edit_state(&dir);
     let res = undo_edit(&state, 999).await;
     assert_eq!(res.status(), StatusCode::CONFLICT);
+}
+
+fn piece_body() -> serde_json::Value {
+    serde_json::json!({
+        "points": [[38.5, -120.2], [40.7, -120.95]],
+        "anchor_start": [38.5, -120.2],
+        "anchor_end": [40.7, -120.95],
+        "note": "fix loop"
+    })
+}
+
+#[tokio::test]
+async fn piece_post_happy_path_and_raw_readback() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = rm_web::router_with(edit_state(&dir));
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/edit/polyline/1/1/piece")
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(piece_body().to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["created"], true);
+    assert_eq!(v["piece_id"], 1);
+    // raw endpoint exposes the manual piece decoded
+    let raw = get_json(&app, "/api/routes/1/directions/1/raw").await;
+    assert_eq!(raw["manual_pieces"][0]["piece_id"], 1);
+    assert_eq!(raw["manual_pieces"][0]["points"][0], serde_json::json!([38.5, -120.2]));
+}
+
+#[tokio::test]
+async fn piece_post_requires_auth_and_valid_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = rm_web::router_with(edit_state(&dir));
+    let post = |app: &axum::Router, uri: &str, body: serde_json::Value, auth: Option<&str>| {
+        let mut b = Request::builder().method("POST").uri(uri)
+            .header("content-type", "application/json");
+        if let Some(a) = auth {
+            b = b.header("authorization", a);
+        }
+        app.clone().oneshot(b.body(Body::from(body.to_string())).unwrap())
+    };
+    // 401 absent token
+    let res = post(&app, "/api/edit/polyline/1/1/piece", piece_body(), None).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    // 403 bad token
+    let res = post(&app, "/api/edit/polyline/1/1/piece", piece_body(), Some("Bearer nope")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    // 400 single point
+    let mut bad = piece_body();
+    bad["points"] = serde_json::json!([[38.5, -120.2]]);
+    let res = post(&app, "/api/edit/polyline/1/1/piece", bad, Some("Bearer sekrit")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    // 400 unknown route
+    let res = post(&app, "/api/edit/polyline/999/1/piece", piece_body(), Some("Bearer sekrit")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    // 400 piece_id scoped to another direction: create under dir 1, replay
+    // the id under dir 2 (no expectation) → PieceScope, never silent reuse
+    let res = post(&app, "/api/edit/polyline/1/1/piece", piece_body(), Some("Bearer sekrit")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let created = body_json(res).await;
+    let mut foreign = piece_body();
+    foreign["piece_id"] = serde_json::json!(created["piece_id"]);
+    let res = post(&app, "/api/edit/polyline/1/2/piece", foreign, Some("Bearer sekrit")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn piece_post_stale_expectation_409() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = rm_web::router_with(edit_state(&dir));
+    let auth = |req: axum::http::request::Builder| req.header("authorization", "Bearer sekrit").header("content-type", "application/json");
+    let res = app.clone().oneshot(auth(Request::builder().method("POST").uri("/api/edit/polyline/1/1/piece")).body(Body::from(piece_body().to_string())).unwrap()).await.unwrap();
+    let first = body_json(res).await;
+    // second POST with the SAME (now-stale) expectation → 409
+    let mut body = piece_body();
+    body["piece_id"] = serde_json::json!(first["piece_id"]);
+    body["expected_updated_at"] = serde_json::json!("2020-01-01T00:00:00Z");
+    let res = app.oneshot(auth(Request::builder().method("POST").uri("/api/edit/polyline/1/1/piece")).body(Body::from(body.to_string())).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn piece_undo_via_route_deletes_piece() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = rm_web::router_with(edit_state(&dir));
+    let auth = |req: axum::http::request::Builder| req.header("authorization", "Bearer sekrit").header("content-type", "application/json");
+    let res = app.clone().oneshot(auth(Request::builder().method("POST").uri("/api/edit/polyline/1/1/piece")).body(Body::from(piece_body().to_string())).unwrap()).await.unwrap();
+    let first = body_json(res).await;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder().method("POST").uri(format!("/api/edit/undo/{}", first["edit_id"]))
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"note":"rev"}"#.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["restored"]["piece_id"], first["piece_id"]);
+    assert_eq!(v["restored"]["deleted"], true);
+    // readback: no manual pieces left
+    let raw = get_json(&app, "/api/routes/1/directions/1/raw").await;
+    assert_eq!(raw["manual_pieces"].as_array().map(Vec::len), Some(0));
 }
