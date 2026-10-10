@@ -1172,6 +1172,181 @@ pub fn apply_piece_edit(
     Ok(PieceApplied { edit_id, piece_id, updated_at: now, created })
 }
 
+/// One `entity='polyline'` edit_log row (the undo loader). Filtering on
+/// entity in the WHERE keeps other entities' rows returning `None` — the
+/// plan's kind guard stays the discriminator within the polyline entity.
+#[derive(Debug)]
+pub struct PolylineEditRow {
+    pub edit_id: i64,
+    pub entity_id: i64, // route_id
+    pub action: String,
+    pub ts: String,
+    pub changes: serde_json::Value,
+}
+
+pub fn load_polyline_edit(conn: &Connection, edit_id: i64) -> Result<Option<PolylineEditRow>> {
+    let row = conn
+        .query_row(
+            "SELECT entity_id, action, ts, changes FROM edit_log
+             WHERE edit_id = ?1 AND entity = 'polyline'",
+            [edit_id],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    Ok(row
+        .map(|(entity_id, action, ts, changes)| -> Result<PolylineEditRow> {
+            Ok(PolylineEditRow {
+                edit_id,
+                entity_id,
+                action,
+                ts,
+                changes: serde_json::from_str(&changes)?,
+            })
+        })
+        .transpose()?)
+}
+
+/// The state an undo writes back. `None` = the undone edit was a create →
+/// undo deletes the piece row (back to pure src).
+#[derive(Debug)]
+pub struct PieceRestoreState {
+    pub encoded: String,
+    pub anchor_start_lat: f64,
+    pub anchor_start_lon: f64,
+    pub anchor_end_lat: f64,
+    pub anchor_end_lon: f64,
+}
+
+/// Write-side op for the piece undo: restore-as-forward-write (or delete).
+/// `undone_ts` is the undone edit's ts — the currency token the apply tx
+/// re-validates against the row.
+#[derive(Debug)]
+pub struct PieceUndoOp {
+    pub edit_id: i64,
+    pub route_id: i64,
+    pub xno: String,
+    pub direction: i64,
+    pub piece_id: i64,
+    pub undone_ts: String,
+    pub restored: Option<PieceRestoreState>,
+}
+
+#[derive(Debug)]
+pub struct PieceUndone {
+    pub edit_id: i64,
+    pub piece_id: i64,
+    pub deleted: bool,
+}
+
+/// Undo a manual piece edit in ONE transaction. Currency guard (the piece's
+/// `updated_at` must still equal the undone edit's ts) runs before any
+/// write, so a superseded undo is a clean 409 with zero partial state.
+/// The undo log row carries the swapped payload shape (spec deviation from
+/// `'{}'`: the payload is what future tooling reads the piece history from).
+pub fn apply_piece_undo(
+    conn: &Connection,
+    op: &PieceUndoOp,
+    editor: &str,
+    note: &str,
+) -> Result<PieceUndone> {
+    let tx = conn.unchecked_transaction()?;
+    let now = crate::now_rfc3339();
+
+    let (updated_at, cur_encoded, cur_aslat, cur_aslon, cur_aelat, cur_aelon) = match tx
+        .query_row(
+            "SELECT updated_at, encoded, anchor_start_lat, anchor_start_lon,
+                    anchor_end_lat, anchor_end_lon
+             FROM polyline_piece
+             WHERE piece_id = ?1 AND xno = ?2 AND direction = ?3",
+            params![op.piece_id, op.xno, op.direction],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, f64>(2)?,
+                    r.get::<_, f64>(3)?,
+                    r.get::<_, f64>(4)?,
+                    r.get::<_, f64>(5)?,
+                ))
+            },
+        )
+        .optional()?
+    {
+        Some(v) => v,
+        None => return Err(EditError::PieceNotCurrent(op.piece_id).into()),
+    };
+    if updated_at != op.undone_ts {
+        return Err(EditError::PieceNotCurrent(op.piece_id).into());
+    }
+
+    let (deleted, new_encoded, new_anchors) = match &op.restored {
+        Some(r) => {
+            tx.execute(
+                "UPDATE polyline_piece SET encoded = ?1, anchor_start_lat = ?2,
+                        anchor_start_lon = ?3, anchor_end_lat = ?4, anchor_end_lon = ?5,
+                        updated_at = ?6
+                 WHERE piece_id = ?7",
+                params![
+                    r.encoded,
+                    r.anchor_start_lat,
+                    r.anchor_start_lon,
+                    r.anchor_end_lat,
+                    r.anchor_end_lon,
+                    now,
+                    op.piece_id
+                ],
+            )?;
+            (false, json!(r.encoded), json!([
+                [r.anchor_start_lat, r.anchor_start_lon],
+                [r.anchor_end_lat, r.anchor_end_lon]
+            ]))
+        }
+        None => {
+            tx.execute(
+                "DELETE FROM polyline_piece WHERE piece_id = ?1",
+                [op.piece_id],
+            )?;
+            (true, serde_json::Value::Null, serde_json::Value::Null)
+        }
+    };
+
+    let changes = json!({
+        "kind": "polyline_piece",
+        "xno": op.xno,
+        "direction": op.direction,
+        "piece_id": op.piece_id,
+        "encoded": { "old": cur_encoded, "new": new_encoded },
+        "anchors": { "old": json!([
+            [cur_aslat, cur_aslon],
+            [cur_aelat, cur_aelon]
+        ]), "new": new_anchors },
+    })
+    .to_string();
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, undo_of)
+         VALUES (?1, ?2, 'polyline', ?3, 'undo', ?4, ?5, ?6)",
+        params![
+            now,
+            editor,
+            op.route_id,
+            changes,
+            if note.is_empty() { None } else { Some(note) },
+            op.edit_id
+        ],
+    )?;
+    let edit_id = tx.last_insert_rowid();
+
+    tx.commit()?;
+    Ok(PieceUndone { edit_id, piece_id: op.piece_id, deleted })
+}
+
 /// Write-side op for the station-rename undo (rm-edit maps a
 /// RenameUndoOp into this; the rows come from the append-only log).
 #[derive(Debug)]
@@ -2543,5 +2718,122 @@ mod tests {
         // missing src row (direction 2 exists as a route but no capture) → Some with src None
         let snap2 = load_polyline_snapshot(&conn, "1", 2).unwrap().unwrap();
         assert!(snap2.src_encoded.is_none());
+    }
+
+    fn piece_undo_op(
+        edit_id: i64,
+        piece_id: i64,
+        restored: Option<(&str, [f64; 2], [f64; 2])>,
+    ) -> PieceUndoOp {
+        PieceUndoOp {
+            edit_id,
+            route_id: 1,
+            xno: "1".into(),
+            direction: 1,
+            piece_id,
+            undone_ts: String::new(), // set per-test from the applied row
+            restored: restored.map(|(encoded, s, e)| PieceRestoreState {
+                encoded: encoded.into(),
+                anchor_start_lat: s[0],
+                anchor_start_lon: s[1],
+                anchor_end_lat: e[0],
+                anchor_end_lon: e[1],
+            }),
+        }
+    }
+
+    #[test]
+    fn apply_piece_undo_of_create_deletes_row() {
+        let conn = open_in_memory().unwrap();
+        let _ = fixture(&conn);
+        src_fixture(&conn);
+        let first = apply_piece_edit(&conn, &piece_op(None), "herry", "a").unwrap();
+        let mut op = piece_undo_op(first.edit_id, first.piece_id, None);
+        op.undone_ts = first.updated_at.clone();
+        let out = apply_piece_undo(&conn, &op, "h", "rev").unwrap();
+        assert!(out.deleted);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM polyline_piece", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        // undo row: action undo, undo_of set, payload decides delete (new null)
+        let (act, undo_of, changes): (String, i64, String) = conn.query_row(
+            "SELECT action, undo_of, changes FROM edit_log WHERE edit_id = ?1",
+            [out.edit_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((act.as_str(), undo_of), ("undo", first.edit_id));
+        let c: serde_json::Value = serde_json::from_str(&changes).unwrap();
+        assert_eq!(c["kind"], "polyline_piece");
+        assert_eq!(c["piece_id"], first.piece_id);
+        assert!(c["encoded"]["new"].is_null());
+        assert_eq!(c["encoded"]["old"], "_ulLnnqC_p~iF~ps|U");
+    }
+
+    #[test]
+    fn apply_piece_undo_of_update_restores_old_state() {
+        let conn = open_in_memory().unwrap();
+        let _ = fixture(&conn);
+        src_fixture(&conn);
+        let first = apply_piece_edit(&conn, &piece_op(None), "herry", "a").unwrap();
+        let mut second = piece_op(Some(first.piece_id));
+        second.expected_updated_at = Some(first.updated_at.clone());
+        second.encoded = "_p~iF~ps|U_ulLnnqC".into();
+        second.anchor_start_lat = 40.7;
+        second.anchor_start_lon = -120.95;
+        second.anchor_end_lat = 38.5;
+        second.anchor_end_lon = -120.2;
+        let edit2 = apply_piece_edit(&conn, &second, "herry", "b").unwrap();
+        let mut op = piece_undo_op(
+            edit2.edit_id,
+            first.piece_id,
+            Some(("_ulLnnqC_p~iF~ps|U", [38.5, -120.2], [40.7, -120.95])),
+        );
+        op.undone_ts = edit2.updated_at.clone();
+        let out = apply_piece_undo(&conn, &op, "h", "rev").unwrap();
+        assert!(!out.deleted);
+        let (enc, s, e): (String, f64, f64) = conn.query_row(
+            "SELECT encoded, anchor_start_lat, anchor_end_lat FROM polyline_piece WHERE piece_id = ?1",
+            [first.piece_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((enc.as_str(), s, e), ("_ulLnnqC_p~iF~ps|U", 38.5, 40.7));
+    }
+
+    #[test]
+    fn apply_piece_undo_refuses_after_second_edit_zero_partial() {
+        let conn = open_in_memory().unwrap();
+        let _ = fixture(&conn);
+        src_fixture(&conn);
+        let first = apply_piece_edit(&conn, &piece_op(None), "herry", "a").unwrap();
+        let mut second = piece_op(Some(first.piece_id));
+        second.expected_updated_at = Some(first.updated_at.clone());
+        second.encoded = "_p~iF~ps|U_ulLnnqC".into();
+        let _edit2 = apply_piece_edit(&conn, &second, "herry", "b").unwrap();
+        // undo of the FIRST edit: piece has moved on → refuse. now_rfc3339 is
+        // second-granular (progress.md Task 2), so both edits share one
+        // second and the live row's updated_at still equals first.updated_at;
+        // induce the mismatch the same way Task 2's stale-expectation test does.
+        let mut op = piece_undo_op(first.edit_id, first.piece_id, None);
+        op.undone_ts = "2020-01-01T00:00:00Z".into();
+        let err = apply_piece_undo(&conn, &op, "h", "rev").unwrap_err();
+        assert!(err.to_string().contains("edited by someone else"), "{err}");
+        // zero partial: no undo log row, piece still present at second's state
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM edit_log WHERE action = 'undo'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(conn.query_row("SELECT encoded FROM polyline_piece WHERE piece_id = ?1", [first.piece_id], |r| r.get::<_, String>(0)).unwrap(), "_p~iF~ps|U_ulLnnqC");
+    }
+
+    #[test]
+    fn load_polyline_edit_filters_entity_and_returns_ts() {
+        let conn = open_in_memory().unwrap();
+        // single fixture call (PK 1 rows are insert-once); `old` is the
+        // stop_version_id reused by the stop-edit leg below.
+        let old = fixture(&conn);
+        src_fixture(&conn);
+        let first = apply_piece_edit(&conn, &piece_op(None), "herry", "a").unwrap();
+        let row = load_polyline_edit(&conn, first.edit_id).unwrap().unwrap();
+        assert_eq!((row.entity_id, row.action.as_str()), (1, "create"));
+        assert_eq!(row.ts, first.updated_at);
+        assert_eq!(row.changes["kind"], "polyline_piece");
+        // stop-entity row → None (kind guard discipline: the caller refuses).
+        // Same construction as the existing `edit_entity_returns_entity_or_none`
+        // test (fixture returns the stop_version_id).
+        let stop_edit = apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: old, stop_name: Some("N".into()), ..Default::default()
+        }, "h", "n").unwrap();
+        assert!(load_polyline_edit(&conn, stop_edit.edit_id).unwrap().is_none());
     }
 }

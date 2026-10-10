@@ -28,6 +28,8 @@ pub use edit::{
     apply_station_undo,
     PieceRow, PolylineSnapshot, load_polyline_snapshot,
     PieceEditOp, PieceApplied, apply_piece_edit,
+    PolylineEditRow, load_polyline_edit,
+    PieceRestoreState, PieceUndoOp, PieceUndone, apply_piece_undo,
 };
 pub use migrate::migrate;
 
