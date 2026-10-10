@@ -10,6 +10,10 @@ struct Args {
     /// Import batch to process (default: latest batch)
     #[arg(long)]
     batch: Option<i64>,
+
+    /// Refresh marked bearing staleness instead of processing a batch
+    #[arg(long)]
+    stale: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -27,6 +31,14 @@ fn main() -> anyhow::Result<()> {
         None => rm_db::latest_batch(&conn)?
             .ok_or_else(|| anyhow::anyhow!("no import batch; pass --batch"))?,
     };
+    if args.stale {
+        if rm_registry::run_stale(&conn, batch)? {
+            println!("stale: bearings rebuilt, split re-run, marks cleared");
+        } else {
+            println!("nothing stale");
+        }
+        return Ok(());
+    }
     let b = rm_registry::bearing::run(&conn, batch)?;
     println!(
         "batch {} bearings: {} stops ({} OSM, {} polyline, {} skipped), {} stations",
