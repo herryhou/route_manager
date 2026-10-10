@@ -552,3 +552,80 @@ async fn rename_stale_svi_conflicts() {
     let res = rename_st(&state, 999, r#"{"new_name": "N", "level": "all", "note": "x"}"#).await;
     assert_eq!(res.status(), StatusCode::CONFLICT);
 }
+
+async fn move_st(state: &rm_web::state::AppState, svi: i64, body: &str) -> axum::response::Response {
+    rm_web::router_with(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/api/edit/station/{svi}/move"))
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn move_station_mints_version_zero_marks_and_leaves_poles() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    {
+        let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
+        station_fixture(&conn);
+    }
+    let res = move_st(&state, 1, r#"{"lat": 24.001, "lon": 120.001, "note": "m"}"#).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["new_station_version_id"].as_i64(), Some(2), "{v}");
+    let conn = rm_db::open_readonly(&dir.path().join("t.db")).unwrap();
+    let (lat, lon, src): (f64, f64, String) = conn
+        .query_row(
+            "SELECT latitude, longitude, source FROM station_version WHERE valid_to IS NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!((lat, lon, src), (24.001, 120.001, "manual".to_string()));
+    // poles stay put — the pole's current version is untouched
+    let (plat, plon): (f64, f64) = conn
+        .query_row(
+            "SELECT latitude, longitude FROM stop_version WHERE stop_id = 1 AND valid_to IS NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((plat, plon), (24.0, 120.0));
+    // station coords derive nothing: ZERO stale marks
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+    // log row: move kind + coord old/new pairs
+    let (kind, lat_new): (String, f64) = conn
+        .query_row(
+            "SELECT json_extract(changes, '$.kind'), json_extract(changes, '$.latitude.new') FROM edit_log",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((kind.as_str(), lat_new), ("station_move", 24.001));
+}
+
+#[tokio::test]
+async fn move_station_validates_body_and_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    for (body, want) in [
+        (r#"{"lat": 91.0, "lon": 120.0, "note": "x"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"lat": 24.0, "lon": -181.0, "note": "x"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"lat": 24.0, "note": "x"}"#, StatusCode::BAD_REQUEST),
+    ] {
+        let res = move_st(&state, 1, body).await;
+        assert_eq!(res.status(), want, "body {body}");
+    }
+    let res = move_st(&state, 999, r#"{"lat": 24.0, "lon": 120.0, "note": "x"}"#).await;
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+}

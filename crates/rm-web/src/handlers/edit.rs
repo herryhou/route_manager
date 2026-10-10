@@ -252,3 +252,45 @@ pub async fn rename_station(
         "new_station_version_id": out.new_station_version_id,
     })))
 }
+
+#[derive(Deserialize)]
+pub struct StationMoveBody {
+    lat: f64,
+    lon: f64,
+    note: Option<String>,
+}
+
+/// POST /api/edit/station/{station_version_id}/move — move the station's
+/// own coords. Poles stay where they are; nothing derives from station
+/// coords, so no stale marks fire.
+pub async fn move_station(
+    Path(station_version_id): Path<i64>,
+    State(state): State<AppState>,
+    Editor(editor): Editor,
+    ApiJson(b): ApiJson<StationMoveBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !(-90.0..=90.0).contains(&b.lat) {
+        return Err(ApiError::bad_request("lat out of range"));
+    }
+    if !(-180.0..=180.0).contains(&b.lon) {
+        return Err(ApiError::bad_request("lon out of range"));
+    }
+    let out = run_db_write(state, move |conn| {
+        rm_edit::move_station(
+            conn,
+            rm_edit::StationMove {
+                station_version_id,
+                latitude: b.lat,
+                longitude: b.lon,
+            },
+            &editor,
+            b.note.as_deref().unwrap_or(""),
+        )
+    })
+    .await
+    .map_err(edit_conflict)?;
+    Ok(Json(json!({
+        "edit_id": out.edit_id,
+        "new_station_version_id": out.new_station_version_id,
+    })))
+}

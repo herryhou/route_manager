@@ -62,6 +62,10 @@ pub fn router_with(state: AppState) -> Router {
             "/api/edit/station/{station_version_id}",
             axum::routing::post(handlers::edit::rename_station),
         )
+        .route(
+            "/api/edit/station/{station_version_id}/move",
+            axum::routing::post(handlers::edit::move_station),
+        )
         .with_state(state)
     } else {
         r.with_state(state)
