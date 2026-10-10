@@ -341,29 +341,12 @@ git commit -m "rm-db: apply_station_move — append-only station reposition, zer
 **Interfaces:**
 - Produces: `crate::map_db_err(anyhow::Error) -> anyhow::Error` (1:1 four-variant map) and `crate::map_station_db_err(anyhow::Error) -> anyhow::Error` (additionally remaps `NotCurrent` → `StationNotCurrent`). Task 4's service uses `map_station_db_err`; Task 8's `undo_station` uses `map_db_err`.
 
-- [ ] **Step 1: Write the failing test** — add to `crates/rm-edit/tests/rename.rs` (fixture + helpers already there; this pins the scenario-1 remap semantics that the helper must preserve):
+- [ ] **Step 1: Pin the remap semantics on the helpers** (execution correction, 2026-10-10: the originally planned end-to-end characterization test is unsatisfiable — `load_station_snapshot` filters poles by `valid_to IS NULL`, so a pole closed behind apply's back never reaches apply's per-pole guard; the rename succeeds and the test's `unwrap_err()` panics. The remap is only reachable at helper level, so pin it there.) — add a `#[cfg(test)] mod tests` to `crates/rm-edit/src/lib.rs` asserting, for `map_db_err`: all four `rm_db::EditError` variants map 1:1 and non-EditError errors pass through unchanged; for `map_station_db_err`: `NotCurrent` remaps to `StationNotCurrent`, `StationNotCurrent`/`NotUndoable`/`UnknownStation` pass through 1:1, and delegation covers the rest.
 
-```rust
-#[test]
-fn rename_surfaces_stale_pole_as_station_error() {
-    let conn = open_in_memory().unwrap();
-    fixture(&conn);
-    // close pole 1's current version behind apply's back: the rename op
-    // still lists svi 10, so apply's per-pole guard fires
-    conn.execute_batch(
-        "UPDATE stop_version SET valid_to = '2026-01-02T00:00:00Z' WHERE stop_version_id = 10",
-    )
-    .unwrap();
-    let err = rename_station(&conn, cmd("N", RenameLevel::AllPoles), "herry", "").unwrap_err();
-    // scenario-1 semantics: a stale pole surfaces as the station-level error
-    assert!(err.to_string().contains("station version"), "{err}");
-}
-```
+- [ ] **Step 2: Run the unit tests**
 
-- [ ] **Step 2: Run test to verify it fails for the right reason**
-
-Run: `cargo test -p rm-edit --test rename rename_surfaces_stale_pole`
-Expected: this may already PASS (the inline match exists today). If it passes, it is a characterization test — keep it and continue; the step's real gate is Step 5 (all suites green after the refactor).
+Run: `cargo test -p rm-edit --lib`
+Expected: PASS immediately (the helpers are tested against the mapping they already implement — this is a characterization pin; the step's real gate is Step 5, all suites green after the refactor).
 
 - [ ] **Step 3: Implement the shared mappers** — in `crates/rm-edit/src/lib.rs`:
 
