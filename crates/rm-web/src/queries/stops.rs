@@ -420,11 +420,13 @@ pub fn station_search(conn: &Connection, q: &str) -> Result<Value> {
 
 /// `GET /api/stations/nearest?lat=&lon=&max_m=` — nearest current station to
 /// a point, for the regroup map-click pick. A degree bbox prefilter (lon side
-/// widened by 1/cos(lat)) keeps the scan index-friendly; the bundled SQLite
-/// has no math functions, so the haversine runs in Rust over the (small)
-/// candidate set and the radius cut is applied on the computed distance.
+/// widened by 1/cos(lat)) narrows the current-station scan; the bundled
+/// SQLite has no math functions, so the haversine runs in Rust over the
+/// (small) candidate set and the radius cut is applied on the computed
+/// distance. The box divisor (111,000 < the true 111,195 m/deg at R=6371 km)
+/// deliberately over-widens, so the bbox is a strict superset of the circle.
 pub fn station_nearest(conn: &Connection, lat: f64, lon: f64, max_m: f64) -> Result<Option<Value>> {
-    let lat_delta = max_m / 111_320.0;
+    let lat_delta = max_m / 111_000.0;
     let lon_delta = lat_delta / f64::max(lat.to_radians().cos().abs(), 0.01);
     let mut stmt = conn.prepare(
         "SELECT st.station_id, stv.station_name, stv.latitude, stv.longitude

@@ -154,7 +154,7 @@ pub struct RegroupBody {
 }
 
 /// POST /api/edit/stop/{stop_version_id}/regroup — move a stop to another
-/// station (same group). The regroup primitive writes `action='move_station'`.
+/// station. The regroup primitive writes `action='move_station'`.
 pub async fn regroup(
     Path(stop_version_id): Path<i64>,
     State(state): State<AppState>,

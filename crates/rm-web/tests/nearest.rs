@@ -91,6 +91,45 @@ async fn nearest_misses_when_nothing_within_max_m() {
     );
 }
 
+/// The bbox prefilter must be a provable superset of the radius circle: a
+/// station just inside max_m due north (worst case — the bbox lat side is
+/// the tight one) is found, not 404'd. 0.000899° north ≈ 99.96 m, inside
+/// max_m=100 but outside a lat box cut at 100/111320 (0.00089831°).
+#[tokio::test]
+async fn nearest_bbox_covers_radius_band_due_north() {
+    let dir = tempfile::tempdir().unwrap();
+    let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
+    conn.execute(
+        "INSERT INTO station_group (station_group_id, created_at) VALUES (1, '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO station_group_version (station_group_version_id, station_group_id, station_group_name, source, valid_from, created_at)
+         VALUES (1, 1, 'g', 'capture', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO station (station_id, ext_uid, created_at) VALUES (3, 'tcg:node:3', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO station_version (station_version_id, station_id, station_group_id, station_name, latitude, longitude, valid_from, created_at)
+         VALUES (3, 3, 1, 'N', 24.000899, 120.0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let app = router_with(state(dir.path().join("t.db")));
+    let (s, v) = get(&app, "/api/stations/nearest?lat=24.0&lon=120.0&max_m=100").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["station_id"], 3);
+    let d = v["distance_m"].as_f64().unwrap();
+    assert!((99.0..=100.0).contains(&d), "distance {d}");
+}
+
 #[tokio::test]
 async fn nearest_validates_params() {
     let (_dir, app) = nearest_state();
