@@ -823,6 +823,101 @@ pub fn apply_station_rename(
     })
 }
 
+/// Write-side op for the station move (rm-edit maps a StationMovePlan into
+/// this; rm-db knows nothing about the domain types).
+#[derive(Debug)]
+pub struct StationMoveOp {
+    pub station_id: i64,
+    pub old_station_version_id: i64,
+    pub new_latitude: f64,
+    pub new_longitude: f64,
+}
+
+#[derive(Debug)]
+pub struct StationMoveApplied {
+    pub edit_id: i64,
+    pub new_station_version_id: i64,
+}
+
+/// Apply a station move in ONE transaction: version-append the station with
+/// the new coords (`source='manual'`), everything else carried. Nothing
+/// references station_version_id and no derived table reads station coords,
+/// so there is no repoint step and ZERO stale marks. One edit_log row whose
+/// changes carry `{kind, latitude:{old,new}, longitude:{old,new}}` for the
+/// kind-agnostic station undo.
+pub fn apply_station_move(
+    conn: &Connection,
+    op: &StationMoveOp,
+    editor: &str,
+    note: &str,
+) -> Result<StationMoveApplied> {
+    let tx = conn.unchecked_transaction()?;
+    let now = crate::now_rfc3339();
+
+    // re-validate inside the tx: the old station version must still be current
+    let (station_group_id, station_name, old_lat, old_lon): (i64, String, f64, f64) = match tx
+        .query_row(
+            "SELECT station_group_id, station_name, latitude, longitude FROM station_version
+             WHERE station_version_id = ?1 AND valid_to IS NULL",
+            [op.old_station_version_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+    {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(EditError::StationNotCurrent(op.old_station_version_id).into())
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let n = tx.execute(
+        "UPDATE station_version SET valid_to = ?1 WHERE station_version_id = ?2",
+        params![now, op.old_station_version_id],
+    )?;
+    if n != 1 {
+        return Err(EditError::StationNotCurrent(op.old_station_version_id).into());
+    }
+    let new_station_version_id = crate::mint(&tx, "station_version")?;
+    tx.execute(
+        "INSERT INTO station_version
+            (station_version_id, station_id, station_group_id, station_name,
+             latitude, longitude, valid_from, created_at, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 'manual')",
+        params![
+            new_station_version_id,
+            op.station_id,
+            station_group_id,
+            station_name,
+            op.new_latitude,
+            op.new_longitude,
+            now
+        ],
+    )?;
+
+    let changes = json!({
+        "kind": "station_move",
+        "latitude": {"old": old_lat, "new": op.new_latitude},
+        "longitude": {"old": old_lon, "new": op.new_longitude},
+    })
+    .to_string();
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, version_before, version_after)
+         VALUES (?1, ?2, 'station', ?3, 'update', ?4, ?5, ?6, ?7)",
+        params![
+            now,
+            editor,
+            op.station_id,
+            changes,
+            if note.is_empty() { None } else { Some(note) },
+            op.old_station_version_id,
+            new_station_version_id
+        ],
+    )?;
+    let edit_id = tx.last_insert_rowid();
+
+    tx.commit()?;
+    Ok(StationMoveApplied { edit_id, new_station_version_id })
+}
+
 /// Write-side op for the station-rename undo (rm-edit maps a
 /// RenameUndoOp into this; the rows come from the append-only log).
 #[derive(Debug)]
@@ -1799,5 +1894,70 @@ mod tests {
             "SELECT stop_version_id FROM stop_version WHERE stop_id = 1 AND valid_to IS NULL",
             [], |r| r.get(0)).unwrap();
         assert_eq!(cur, b.new_version_id);
+    }
+
+    fn move_op(old: i64) -> StationMoveOp {
+        StationMoveOp {
+            station_id: 1,
+            old_station_version_id: old,
+            new_latitude: 24.001,
+            new_longitude: 120.001,
+        }
+    }
+
+    #[test]
+    fn apply_station_move_appends_version_zero_marks() {
+        let conn = open_in_memory().unwrap();
+        let old = rename_fixture(&conn);
+        let (sv_before, sb_before, rsv_before): (i64, i64, i64) = (
+            conn.query_row("SELECT COUNT(*) FROM stop_version", [], |r| r.get(0)).unwrap(),
+            conn.query_row("SELECT COUNT(*) FROM stop_bearing", [], |r| r.get(0)).unwrap(),
+            conn.query_row("SELECT COUNT(*) FROM route_stop_version", [], |r| r.get(0)).unwrap(),
+        );
+        let out = apply_station_move(&conn, &move_op(old), "herry", "fix").unwrap();
+        assert_eq!(out.new_station_version_id, 21);
+        // old closed, new current + manual, coords applied, name/group carried
+        let (to, _): (Option<String>, Option<String>) = conn.query_row(
+            "SELECT valid_to, source FROM station_version WHERE station_version_id = ?1",
+            [old], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert!(to.is_some());
+        let (lat, lon, name, group, src): (f64, f64, String, i64, String) = conn.query_row(
+            "SELECT latitude, longitude, station_name, station_group_id, source
+             FROM station_version WHERE station_version_id = ?1",
+            [out.new_station_version_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap();
+        assert_eq!((lat, lon, name.as_str(), group, src.as_str()), (24.001, 120.001, "S", 1, "manual"));
+        // zero collateral: poles, bearings, rsv untouched; zero stale marks
+        let sv_after: i64 = conn.query_row("SELECT COUNT(*) FROM stop_version", [], |r| r.get(0)).unwrap();
+        let sb_after: i64 = conn.query_row("SELECT COUNT(*) FROM stop_bearing", [], |r| r.get(0)).unwrap();
+        let rsv_after: i64 = conn.query_row("SELECT COUNT(*) FROM route_stop_version", [], |r| r.get(0)).unwrap();
+        assert_eq!((sv_after, sb_after, rsv_after), (sv_before, sb_before, rsv_before));
+        let marks: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        assert_eq!(marks, 0);
+        // edit_log: {kind + field:{old,new}} shape
+        let (ent, act, changes, vb, va): (String, String, String, i64, i64) = conn.query_row(
+            "SELECT entity, action, changes, version_before, version_after FROM edit_log WHERE edit_id = ?1",
+            [out.edit_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap();
+        assert_eq!((ent.as_str(), act.as_str(), vb, va), ("station", "update", old, out.new_station_version_id));
+        let c: serde_json::Value = serde_json::from_str(&changes).unwrap();
+        assert_eq!(c["kind"], "station_move");
+        assert_eq!(c["latitude"]["old"], 24.0);
+        assert_eq!(c["latitude"]["new"], 24.001);
+        assert_eq!(c["longitude"]["old"], 120.0);
+        assert_eq!(c["longitude"]["new"], 120.001);
+    }
+
+    #[test]
+    fn apply_station_move_refuses_stale_zero_partial() {
+        let conn = open_in_memory().unwrap();
+        let old = rename_fixture(&conn);
+        let first = apply_station_move(&conn, &move_op(old), "herry", "a").unwrap();
+        let err = apply_station_move(&conn, &move_op(old), "herry", "b").unwrap_err();
+        assert!(err.to_string().contains("station version"), "{err}");
+        // zero partial: still exactly the two versions and one log row
+        let versions: i64 = conn.query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get(0)).unwrap();
+        let current: i64 = conn.query_row("SELECT COUNT(*) FROM station_version WHERE valid_to IS NULL", [], |r| r.get(0)).unwrap();
+        let logs: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log", [], |r| r.get(0)).unwrap();
+        assert_eq!((versions, current, logs), (2, 1, 1));
+        let _ = first;
     }
 }

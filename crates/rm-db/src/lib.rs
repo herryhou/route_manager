@@ -23,6 +23,7 @@ pub use edit::{
     station_is_current,
     StationRenameOp, PoleOp, StationRenameApplied, PoleApplied, apply_station_rename,
     StationRenameEdit, load_station_rename_edit,
+    StationMoveOp, apply_station_move, StationMoveApplied,
     StationRenameUndoOp, PoleUndoOp, StationRenameUndone, apply_station_rename_undo,
 };
 pub use migrate::migrate;
