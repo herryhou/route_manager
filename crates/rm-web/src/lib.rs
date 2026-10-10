@@ -49,6 +49,10 @@ pub fn router_with(state: AppState) -> Router {
             "/api/edit/stop/{stop_version_id}",
             axum::routing::post(handlers::edit::edit_stop),
         )
+        .route(
+            "/api/edit/stop/{stop_version_id}/regroup",
+            axum::routing::post(handlers::edit::regroup),
+        )
         .route("/api/edit/log", axum::routing::get(handlers::edit::log))
         .route(
             "/api/edit/undo/{edit_id}",

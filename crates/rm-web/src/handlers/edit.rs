@@ -147,6 +147,39 @@ pub struct UndoBody {
     note: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct RegroupBody {
+    new_station_id: i64,
+    note: Option<String>,
+}
+
+/// POST /api/edit/stop/{stop_version_id}/regroup — move a stop to another
+/// station (same group). The regroup primitive writes `action='move_station'`.
+pub async fn regroup(
+    Path(stop_version_id): Path<i64>,
+    State(state): State<AppState>,
+    Editor(editor): Editor,
+    ApiJson(b): ApiJson<RegroupBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let out = run_db_write(state, move |conn| {
+        rm_edit::regroup_stop(
+            conn,
+            rm_edit::RegroupStop {
+                stop_version_id,
+                new_station_id: b.new_station_id,
+            },
+            &editor,
+            b.note.as_deref().unwrap_or(""),
+        )
+    })
+    .await
+    .map_err(edit_conflict)?;
+    Ok(Json(json!({
+        "edit_id": out.edit_id,
+        "new_stop_version_id": out.new_stop_version_id,
+    })))
+}
+
 /// GET /api/edit/log?entity=stop&entity_id=1 — audit trail for one entity
 /// (unauthenticated: the log is not secret; notes are for the team).
 pub async fn log(

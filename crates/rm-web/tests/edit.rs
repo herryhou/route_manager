@@ -315,3 +315,106 @@ async fn edit_state_keeps_tiles() {
     );
     assert!(state.edit_enabled());
 }
+
+/// Second station in group 1 — a regroup target distinct from stop 10's
+/// current station 1.
+fn second_station(conn: &Connection) {
+    conn.execute(
+        "INSERT INTO station (station_id, ext_uid, created_at) VALUES (2, 'tcg:node:2', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO station_version (station_version_id, station_id, station_group_id, station_name, latitude, longitude, valid_from, created_at)
+         VALUES (2, 2, 1, 'T', 24.0, 120.0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+}
+
+async fn regroup(state: &rm_web::state::AppState, body: &str) -> axum::response::Response {
+    rm_web::router_with(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/edit/stop/10/regroup")
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn regroup_happy_path_mints_version_and_move_station_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    {
+        let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
+        second_station(&conn);
+    }
+    let res = regroup(&state, r#"{"new_station_id": 2, "note": "fix"}"#).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert!(v["new_stop_version_id"].as_i64().unwrap() > 10);
+    assert!(v["edit_id"].as_i64().is_some());
+    assert!(v.get("stale_routes").is_none(), "{v}");
+    // readback: stop now belongs to station 2 as a manual version, and the
+    // log row records the membership move
+    let conn = rm_db::open_readonly(&dir.path().join("t.db")).unwrap();
+    let (station_id, src): (i64, String) = conn
+        .query_row(
+            "SELECT station_id, source FROM stop_version WHERE valid_to IS NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((station_id, src), (2, "manual".to_string()));
+    let action: String = conn
+        .query_row("SELECT action FROM edit_log", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(action, "move_station");
+}
+
+#[tokio::test]
+async fn regroup_rejects_unknown_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    let res = regroup(&state, r#"{"new_station_id": 999, "note": "x"}"#).await;
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn regroup_rejects_same_station() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    let res = regroup(&state, r#"{"new_station_id": 1, "note": "x"}"#).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn regroup_validates_body() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    for body in ["{}", r#"{"new_station_id": "x"}"#] {
+        let res = regroup(&state, body).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "body {body}");
+    }
+}
+
+#[tokio::test]
+async fn regroup_stale_svi_conflicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    {
+        let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
+        second_station(&conn);
+    }
+    let res = regroup(&state, r#"{"new_station_id": 2, "note": "first"}"#).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    // the consumed version id is gone: a second editor's stale panel conflicts
+    let res = regroup(&state, r#"{"new_station_id": 2, "note": "again"}"#).await;
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+}
