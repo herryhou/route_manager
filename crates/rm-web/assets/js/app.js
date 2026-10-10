@@ -427,9 +427,10 @@ async function openEditLog(stop) {
 
 /// Undo one logged stop edit: confirm → note → POST undo → reload what's
 /// on screen at the restored version, then re-fetch the log. A 409
-/// NotUndoable (row superseded by a newer edit / already an undo) lands
-/// in the status bar via editFail.
+/// NotUndoable/NotCurrent (stale hint, row already undone) lands in the
+/// status bar via editFail.
 async function undoStopEdit(stop, editId) {
+  if (!editMode) return;
   if (!confirm(`undo edit #${editId} on stop #${stop.stop_code}?`)) return;
   const note = prompt('note (required):', '') ?? '';
   if (!note) return;

@@ -344,9 +344,8 @@ function changeText(changes) {
   let c;
   try { c = JSON.parse(changes); } catch { return changes; }
   if (!c || typeof c !== 'object') return '';
-  const f = (x) => (typeof x === 'number' ? x.toFixed(5) : x);
+  const f = (x) => (typeof x === 'number' ? x.toFixed(5) : '—');
   const parts = [];
-  if (c.kind === 'station_rename') parts.push(`站名 ${c.old_name}→${c.new_name}`);
   if (c.stop_name) parts.push(`名 ${c.stop_name.old}→${c.stop_name.new}`);
   if (c.latitude != null || c.longitude != null) {
     parts.push(`移動 (${f(c.latitude?.old)},${f(c.longitude?.old)})→(${f(c.latitude?.new)},${f(c.longitude?.new)})`);
@@ -362,18 +361,23 @@ const ACTION_BADGE = { update: 'warn', move_station: 'warn', undo: 'good' };
 /// Undoable rows (action !== 'undo') carry an ↩ button when canUndo — the
 /// server stays the authority (a superseded row still 409s NotUndoable).
 export function editLogPanel(rows, { onUndo, canUndo }) {
-  // rows already undone by a newer entry lose their ↩ hint — the server
-  // would 409 those anyway; the hint just saves the dead-end click.
+  // Exact hint, not a per-row guess: undo requires the edit's version_after
+  // to still be current, so only the newest non-undone row can undo — every
+  // older ↩ is a guaranteed 409 (NotCurrent). The server stays the
+  // authority either way; this just hides the dead-end clicks.
   const undone = new Set((rows ?? []).map((r) => r.undo_of).filter((x) => x != null));
+  const undoableEid = (rows ?? []).find(
+    (r) => r.action !== 'undo' && !undone.has(r.edit_id)
+  )?.edit_id;
   const items = (rows ?? [])
     .map((r) => {
-      const undoBtn = canUndo && r.action !== 'undo' && !undone.has(r.edit_id)
+      const undoBtn = canUndo && r.edit_id === undoableEid
         ? `<button class="mini-btn log-undo" data-eid="${r.edit_id}" title="undo this edit">↩</button>`
         : '';
       const undoOf = r.undo_of != null ? ` · ↩ #${r.undo_of}` : '';
       const meta = `${r.ts} · ${esc(r.editor)}${r.note ? ` · ${esc(r.note)}` : ''}${undoOf}`;
       return `<div class="stop-row log-row">
-        <span class="badge ${ACTION_BADGE[r.action] ?? 'nodata'}">${r.action}</span>
+        <span class="badge ${ACTION_BADGE[r.action] ?? 'nodata'}">${esc(r.action)}</span>
         <span class="stop-name" title="${esc(r.changes)}">${esc(changeText(r.changes)) || '—'}</span>
         <span class="log-meta" title="${meta}">${esc(meta)}</span>
         ${undoBtn}
