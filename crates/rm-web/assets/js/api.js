@@ -50,3 +50,5 @@ export const editStop = (svi, body) => editFetch(`/api/edit/stop/${svi}`, body);
 export const regroupStop = (svi, body) => editFetch(`/api/edit/stop/${svi}/regroup`, body);
 export const undoEdit = (id, note) => editFetch(`/api/edit/undo/${id}`, { note });
 export const editLog = (entity, id) => fetchJson(`/api/edit/log?entity=${entity}&entity_id=${id}`);
+export const renameStation = (svi, body) => editFetch(`/api/edit/station/${svi}`, body);
+export const moveStation = (svi, body) => editFetch(`/api/edit/station/${svi}/move`, body);

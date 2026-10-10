@@ -346,6 +346,7 @@ function changeText(changes) {
   if (!c || typeof c !== 'object') return '';
   const f = (x) => (typeof x === 'number' ? x.toFixed(5) : '—');
   const parts = [];
+  if (c.kind === 'station_rename') parts.push(`名 ${c.old_name}→${c.new_name} · ${c.level}`);
   if (c.stop_name) parts.push(`名 ${c.stop_name.old}→${c.stop_name.new}`);
   if (c.latitude != null || c.longitude != null) {
     parts.push(`移動 (${f(c.latitude?.old)},${f(c.longitude?.old)})→(${f(c.latitude?.new)},${f(c.longitude?.new)})`);
@@ -524,7 +525,7 @@ function otherStationChips(members, selfId, onPickStation) {
 
 /// Station detail panel (point pane): axis/spread kv, other group stations,
 /// member stops, routes.
-export function stationPanel(d, { onPickRoute, onPickStation }) {
+export function stationPanel(d, { onPickRoute, onPickStation, onEditStation }) {
   const stops = d.stops ?? [];
   const rows = stops
     .map((s) => `<div class="stop-row" title="${esc(s.stop_name)}">
@@ -535,6 +536,11 @@ export function stationPanel(d, { onPickRoute, onPickStation }) {
   const others = (d.group_members ?? []).filter((m) => m.station_id !== d.station.station_id);
   const pane = showPane('point', `
     ${kv([
+    ...(editable && onEditStation ? [['edit',
+      '<button class="mini-btn" data-act="rename" title="rename station">✎</button> ' +
+      '<button class="mini-btn" data-act="move" title="move station position">移動</button> ' +
+      '<button class="mini-btn" data-act="log" title="edit history / undo">↩ 歷史</button>',
+    ]] : []),
     ['axis', d.bearing ? `${Math.round(d.bearing.bearing_deg)}°` : '—'],
     ['spread', d.bearing ? `${Math.round(d.bearing.max_spread_deg)}°` : '—'],
     ['members', d.bearing?.member_count ?? stops.length],
@@ -552,6 +558,10 @@ export function stationPanel(d, { onPickRoute, onPickStation }) {
     otherStationChips(d.group_members, d.station.station_id, onPickStation)
   );
   pane.querySelector('.station-routes').append(routeChips(uniqRoutes(d.routes), onPickRoute));
+  if (editable && onEditStation) {
+    pane.querySelectorAll('.mini-btn').forEach((el) =>
+      el.addEventListener('click', () => onEditStation(el.dataset.act, d)));
+  }
   return pane;
 }
 

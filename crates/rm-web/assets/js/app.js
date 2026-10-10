@@ -231,7 +231,7 @@ async function openStationPopup(stationId, marker) {
     const el = stationPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
-    stationPanel(d, { onPickRoute, onPickStation: selectStation });
+    stationPanel(d, { onPickRoute, onPickStation: selectStation, onEditStation });
   } catch (e) {
     status(`station load failed: ${e.message}`);
   }
@@ -253,7 +253,7 @@ async function selectStation(stationId) {
     }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([st.lat, st.lon], { animate: true });
-    stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickStation: selectStation });
+    stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickStation: selectStation, onEditStation });
     location.hash = `#station=${stationId}`;
   } catch (e) {
     status(`station load failed: ${e.message}`);
@@ -470,6 +470,92 @@ async function undoStopEdit(stop, editId) {
     await refreshAfterEdit();
     await selectStop(r.new_stop_version_id);
     await openEditLog(stop); // fresh rows — the undo row is now newest
+  } catch (e) {
+    editFail('undo', e);
+  }
+}
+
+/// station-panel edit actions: rename (prompted name + pole level),
+/// move = one-shot place mode, log = station edit history with per-row undo.
+function onEditStation(act, d) {
+  if (!editMode) return;
+  const st = d.station;
+  if (act === 'log') {
+    openStationEditLog(st);
+  } else if (act === 'rename') {
+    const name = prompt(`rename station #${st.station_id}:`, st.station_name);
+    if (!name || name === st.station_name) return;
+    const stops = d.stops ?? [];
+    const matches = stops.filter((s) => s.stop_name === st.station_name).length;
+    const lv = prompt(
+      `level:\n1 station only\n2 matching poles (${matches}/${stops.length} match)\n3 all poles (default)`, '3');
+    if (!lv) return;
+    const level = { 1: 'station', 2: 'matching', 3: 'all' }[lv.trim()];
+    if (!level) return status(`bad level: ${lv}`);
+    const reach = level === 'all' ? ` (${stops.length} poles)`
+      : level === 'matching' ? ` (${matches} poles)` : '';
+    if (!confirm(`${st.station_name} → ${name}\nlevel: ${level}${reach}`)) return status('');
+    const note = prompt('note (required):', '') ?? '';
+    if (!note) return status('');
+    api.renameStation(st.station_version_id, { new_name: name, level, note })
+      .then(async () => {
+        status('renamed');
+        await refreshAfterEdit();
+        return selectStation(st.station_id);
+      })
+      .catch((e) => editFail('rename', e));
+  } else if (act === 'move') {
+    status('click the new station position');
+    armPlace([st.lat, st.lon], (e) => {
+      if (!editMode) return;
+      const dist = Math.round(L.latLng([st.lat, st.lon]).distanceTo(e.latlng));
+      if (!confirm(`move station #${st.station_id} ${dist} m?\nstops stay put\n(${st.lat.toFixed(5)},${st.lon.toFixed(5)}) → (${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)})`)) return status('');
+      const note = prompt('note (required):', '') ?? '';
+      if (!note) return status('');
+      api.moveStation(st.station_version_id, { lat: e.latlng.lat, lon: e.latlng.lng, note })
+        .then(async () => {
+          status('moved');
+          await refreshAfterEdit();
+          return selectStation(st.station_id);
+        })
+        .catch((err) => editFail('move', err));
+    });
+  }
+}
+
+/// Edit-history panel for a station (↩ 歷史 mini-btn): station edit rows
+/// newest first; station_id keys the log — station_version_id churns on
+/// every edit, the station id never does.
+async function openStationEditLog(st) {
+  busy(true);
+  try {
+    const v = await api.editLog('station', st.station_id);
+    paneOpen('context', `stationeditlog:${st.station_id}`, () => openStationEditLog(st));
+    editLogPanel(v.rows ?? [], {
+      canUndo: editMode,
+      onUndo: (editId) => undoStationEdit(st, editId),
+    });
+  } catch (e) {
+    status(`edit log load failed: ${e.message}`);
+  } finally {
+    busy(false);
+  }
+}
+
+/// Undo one logged station edit: confirm → note → POST undo (the dispatched
+/// undo route restores the station row) → reload what's on screen, then
+/// re-fetch the log. A 409 lands in the status bar via editFail.
+async function undoStationEdit(st, editId) {
+  if (!editMode) return;
+  if (!confirm(`undo edit #${editId} on station #${st.station_id}?`)) return;
+  const note = prompt('note (required):', '') ?? '';
+  if (!note) return;
+  try {
+    const r = await api.undoEdit(editId, note);
+    status('undone');
+    await refreshAfterEdit();
+    await selectStation(st.station_id);
+    await openStationEditLog(st); // fresh rows — the undo row is now newest
   } catch (e) {
     editFail('undo', e);
   }
