@@ -45,6 +45,17 @@ let lastRouteDraw = null; // { p, s, onStopClick } — for bearing-toggle redraw
 let lastRaw = null; // { routeId, dir, v } — for piece-edit entry
 let editMode = false;
 let pendingPlace = null; // armed move-place map handler — replaced/cancelled, never stacked
+let pieceBtn = null; // 修線 + 線史 — created in boot() when edit is enabled
+let pieceLogBtn = null;
+
+/// Shared visibility gate for the piece-edit entries: edit mode + raw layer
+/// + a raw payload on screen. Also tears an armed session down with edit-off.
+function syncPieceBtn() {
+  const show = editMode && document.getElementById('layer-raw').checked && lastRaw ? '' : 'none';
+  if (pieceBtn) pieceBtn.style.display = show;
+  if (pieceLogBtn) pieceLogBtn.style.display = show;
+  if (!editMode) stopPieceEdit();
+}
 
 function onPieceSaved(out, err) {
   if (err) { status(`piece save failed: ${err.message}`); return; }
@@ -221,6 +232,7 @@ async function loadRaw(routeId, dir) {
         startPieceEdit(routeId, dir, selectedRoute.xno, v, piece, onPieceSaved);
       },
     });
+    syncPieceBtn(); // entries may have been waiting for this payload
   } catch (e) {
     status(`raw load failed: ${e.message}`);
   }
@@ -585,6 +597,46 @@ async function undoStationEdit(st, editId) {
   }
 }
 
+/// Edit-history panel for the selected route's manual pieces (線史):
+/// polyline edit rows key on route_id (entity='polyline', entity_id=route).
+/// ↩ deletes the piece (undo of its create) or restores the prior geometry.
+async function openPieceEditLog(routeId) {
+  busy(true);
+  try {
+    const v = await api.editLog('polyline', routeId);
+    paneOpen('context', `pieceeditlog:${routeId}`, () => openPieceEditLog(routeId));
+    editLogPanel(v.rows ?? [], {
+      canUndo: editMode,
+      onUndo: (editId) => undoPieceEdit(routeId, editId),
+    });
+  } catch (e) {
+    status(`piece edit log load failed: ${e.message}`);
+  } finally {
+    busy(false);
+  }
+}
+
+/// Undo one logged piece edit. The polyline branch of /api/edit/undo
+/// replies {edit_id, restored: {piece_id, deleted}} — deleted means the
+/// piece's create was reverted (it is gone), otherwise the prior encoded
+/// geometry is back. Manual pieces only touch the raw layer, so the refresh
+/// is a raw re-fetch, then the log for the fresh rows.
+async function undoPieceEdit(routeId, editId) {
+  if (!editMode) return;
+  if (!confirm(`undo edit #${editId} on route #${routeId} pieces?`)) return;
+  const note = prompt('note (required):', '') ?? '';
+  if (!note) return;
+  try {
+    const r = await api.undoEdit(editId, note);
+    const pid = r.restored?.piece_id;
+    status(r.restored?.deleted ? `piece #${pid} deleted` : `piece #${pid} restored`);
+    if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
+    await openPieceEditLog(routeId); // fresh rows — the undo row is now newest
+  } catch (e) {
+    editFail('undo', e);
+  }
+}
+
 async function openOutliers() {
   busy(true);
   try {
@@ -731,8 +783,9 @@ async function boot() {
     if (s.edit_enabled) {
       const btn = document.getElementById('edit-toggle');
       btn.hidden = false;
-      // 修線 entry: visible only with edit mode + raw layer + a raw payload up.
-      const pieceBtn = document.createElement('button');
+      // 修線 entry + 線史 (manual-piece edit log): visible only with edit
+      // mode + raw layer + a raw payload up (syncPieceBtn).
+      pieceBtn = document.createElement('button');
       pieceBtn.id = 'piece-edit-btn';
       pieceBtn.textContent = '修線';
       pieceBtn.style.cssText = 'display:none;margin-left:6px;';
@@ -741,10 +794,16 @@ async function boot() {
         startPieceEdit(lastRaw.routeId, lastRaw.dir, selectedRoute.xno, lastRaw.v, null, onPieceSaved);
       });
       btn.parentElement.appendChild(pieceBtn);
-      const syncPieceBtn = () => {
-        pieceBtn.style.display = editMode && document.getElementById('layer-raw').checked && lastRaw ? '' : 'none';
-        if (!editMode) stopPieceEdit();
-      };
+      pieceLogBtn = document.createElement('button');
+      pieceLogBtn.id = 'piece-log-btn';
+      pieceLogBtn.textContent = '線史';
+      pieceLogBtn.title = 'manual piece edit history';
+      pieceLogBtn.style.cssText = 'display:none;margin-left:6px;';
+      pieceLogBtn.addEventListener('click', () => {
+        if (!lastRaw) return;
+        openPieceEditLog(lastRaw.routeId);
+      });
+      btn.parentElement.appendChild(pieceLogBtn);
       document.getElementById('layer-raw').addEventListener('change', syncPieceBtn);
       btn.addEventListener('click', () => {
         if (editMode) disableEditMode();
