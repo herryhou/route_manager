@@ -127,7 +127,8 @@ export function flashStop(lat, lon) {
 }
 
 /// Raw staging compare: dashed blue src_route_point + square raw stops.
-export function drawRaw(raw) {
+/// Manual pieces draw orange; clicking one hands it to onEditPiece.
+export function drawRaw(raw, { onEditPiece } = {}) {
   layers.raw.clearLayers();
   if (raw?.path?.geometry) {
     L.geoJSON(raw.path, {
@@ -146,6 +147,14 @@ export function drawRaw(raw) {
     )
       .bindTooltip(`${s.source_order_no}. ${s.station_name} (node ${s.node_id})`, { direction: 'top' })
       .addTo(layers.raw);
+  }
+  for (const p of raw?.manual_pieces ?? []) {
+    const line = L.polyline(p.points, {
+      color: '#f59e0b', weight: 4, opacity: 0.95,
+    })
+      .bindTooltip(`manual piece #${p.piece_id}`, { direction: 'top' })
+      .addTo(layers.raw);
+    if (onEditPiece) line.on('click', () => onEditPiece(p));
   }
 }
 

@@ -52,3 +52,5 @@ export const undoEdit = (id, note) => editFetch(`/api/edit/undo/${id}`, { note }
 export const editLog = (entity, id) => fetchJson(`/api/edit/log?entity=${entity}&entity_id=${id}`);
 export const renameStation = (svi, body) => editFetch(`/api/edit/station/${svi}`, body);
 export const moveStation = (svi, body) => editFetch(`/api/edit/station/${svi}/move`, body);
+export const editPolylinePiece = (xno, dir, body) =>
+  editFetch(`/api/edit/polyline/${encodeURIComponent(xno)}/${dir}/piece`, body);

@@ -2,6 +2,7 @@
 import * as api from './api.js';
 import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, editLogPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
+import { startPieceEdit, stopPieceEdit, pieceEditActive } from './pieceEdit.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -14,6 +15,10 @@ L.tileLayer(window.RM_TILES, {
 }).addTo(map);
 
 initLayers(map);
+
+// pieceEdit.js reaches the map/session status through these globals.
+window.__rmMap = map;
+window.__rmStatus = status;
 
 export function status(msg) {
   document.getElementById('status-msg').textContent = msg ?? '';
@@ -35,10 +40,17 @@ function setChip(id, text) {
 
 let allRoutes = [];
 let selectedKey = null;
-let selectedRoute = null; // { route_id, dir }
+let selectedRoute = null; // { route_id, dir, xno }
 let lastRouteDraw = null; // { p, s, onStopClick } — for bearing-toggle redraw
+let lastRaw = null; // { routeId, dir, v } — for piece-edit entry
 let editMode = false;
 let pendingPlace = null; // armed move-place map handler — replaced/cancelled, never stacked
+
+function onPieceSaved(out, err) {
+  if (err) { status(`piece save failed: ${err.message}`); return; }
+  status(out.created ? `piece #${out.piece_id} created` : `piece #${out.piece_id} updated`);
+  if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
+}
 
 function refreshList(q) {
   renderRouteList(filterRoutes(allRoutes, q), { selectedKey, onSelect: (r) => selectRoute(r) });
@@ -161,6 +173,7 @@ async function selectRoute(r, dir = 0) {
       api.routeStops(route_id, dir),
     ]);
     if (selectedRoute?.route_id !== route_id || selectedRoute.dir !== dir) return; // stale
+    selectedRoute.xno = d.xno; // piece-edit POSTs key on it; only detail carries it
     const onStopClick = (stop, marker) => openStopPopup(stop.stop_version_id, marker);
     // Path click: point pane + red highlight of that piece / way run (pane
     // change hook clears it). The reopen closure replays it from the captured
@@ -201,7 +214,13 @@ async function loadRaw(routeId, dir) {
   try {
     const v = await api.routeRaw(routeId, dir);
     if (selectedRoute?.route_id !== routeId || selectedRoute.dir !== dir) return; // stale
-    drawRaw(v);
+    lastRaw = { routeId, dir, v };
+    drawRaw(v, {
+      onEditPiece: (piece) => {
+        if (!editMode || pieceEditActive()) return;
+        startPieceEdit(routeId, dir, selectedRoute.xno, v, piece, onPieceSaved);
+      },
+    });
   } catch (e) {
     status(`raw load failed: ${e.message}`);
   }
@@ -330,6 +349,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || !pendingPlace) return;
   pendingPlace.cancel?.();
   status('');
+});
+
+// Esc tears down an armed piece-edit session (independent of panes/popups).
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') stopPieceEdit();
 });
 
 /// Arm a one-shot map-click place action (move/regroup): crosshair cursor
@@ -707,7 +731,26 @@ async function boot() {
     if (s.edit_enabled) {
       const btn = document.getElementById('edit-toggle');
       btn.hidden = false;
-      btn.addEventListener('click', () => (editMode ? disableEditMode() : enableEditMode()));
+      // 修線 entry: visible only with edit mode + raw layer + a raw payload up.
+      const pieceBtn = document.createElement('button');
+      pieceBtn.id = 'piece-edit-btn';
+      pieceBtn.textContent = '修線';
+      pieceBtn.style.cssText = 'display:none;margin-left:6px;';
+      pieceBtn.addEventListener('click', () => {
+        if (!lastRaw || pieceEditActive()) return;
+        startPieceEdit(lastRaw.routeId, lastRaw.dir, selectedRoute.xno, lastRaw.v, null, onPieceSaved);
+      });
+      btn.parentElement.appendChild(pieceBtn);
+      const syncPieceBtn = () => {
+        pieceBtn.style.display = editMode && document.getElementById('layer-raw').checked && lastRaw ? '' : 'none';
+        if (!editMode) stopPieceEdit();
+      };
+      document.getElementById('layer-raw').addEventListener('change', syncPieceBtn);
+      btn.addEventListener('click', () => {
+        if (editMode) disableEditMode();
+        else enableEditMode();
+        syncPieceBtn();
+      });
     }
     if (s.batch) {
       status(`batch ${s.batch.batch_id} · captured ${s.batch.captured_at} · ${s.batch.status}`);

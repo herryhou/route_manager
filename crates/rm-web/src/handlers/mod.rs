@@ -20,6 +20,7 @@ pub fn router() -> Router<AppState> {
         .route("/js/api.js", get(assets::serve))
         .route("/js/layers.js", get(assets::serve))
         .route("/js/panels.js", get(assets::serve))
+        .route("/js/pieceEdit.js", get(assets::serve))
         .route("/js/colors.js", get(assets::serve))
         .route("/vendor/leaflet.js", get(assets::serve))
         .route("/vendor/leaflet.css", get(assets::serve))
