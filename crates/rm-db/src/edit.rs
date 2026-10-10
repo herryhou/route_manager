@@ -426,6 +426,18 @@ pub fn apply_stop_undo(
     })
 }
 
+/// Which entity an edit_log row belongs to (`"stop"`, `"station"`); `None`
+/// for unknown ids. The undo route's dispatcher peek.
+pub fn edit_entity(conn: &Connection, edit_id: i64) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT entity FROM edit_log WHERE edit_id = ?1",
+        [edit_id],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
 pub fn entity_history(conn: &Connection, entity: &str, entity_id: i64) -> Result<Vec<EditLogRow>> {
     let mut stmt = conn.prepare(
         "SELECT edit_id, ts, editor, action, changes, note, undo_of
@@ -2145,5 +2157,16 @@ mod tests {
         // zero partial after both
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM edit_log WHERE action = 'undo'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn edit_entity_returns_entity_or_none() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let out = apply_stop_edit(&conn, &StopEditOp {
+            stop_id: 1, stop_version_id: old, stop_name: Some("N".into()), ..Default::default()
+        }, "h", "n").unwrap();
+        assert_eq!(edit_entity(&conn, out.edit_id).unwrap().as_deref(), Some("stop"));
+        assert!(edit_entity(&conn, 999).unwrap().is_none());
     }
 }

@@ -629,3 +629,70 @@ async fn move_station_validates_body_and_stale() {
     let res = move_st(&state, 999, r#"{"lat": 24.0, "lon": 120.0, "note": "x"}"#).await;
     assert_eq!(res.status(), StatusCode::CONFLICT);
 }
+
+async fn undo_edit(state: &rm_web::state::AppState, edit_id: i64) -> axum::response::Response {
+    rm_web::router_with(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/api/edit/undo/{edit_id}"))
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"note": "rev"}"#.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn undo_route_dispatches_station_rename_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    {
+        let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
+        station_fixture(&conn);
+    }
+    let res = rename_st(&state, 1, r#"{"new_name": "N", "level": "all", "note": "r"}"#).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let edit_id = body_json(res).await["edit_id"].as_i64().unwrap();
+
+    let res = undo_edit(&state, edit_id).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["restored_station_version_id"].as_i64(), Some(1), "{v}");
+    // readback: station 1 current again named S, pole 10 current named Old
+    let conn = rm_db::open_readonly(&dir.path().join("t.db")).unwrap();
+    let (name, cur): (String, i64) = conn
+        .query_row(
+            "SELECT station_name, station_version_id FROM station_version WHERE valid_to IS NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((name.as_str(), cur), ("S", 1));
+    let pole: String = conn
+        .query_row(
+            "SELECT stop_name FROM stop_version WHERE valid_to IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(pole, "Old");
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM edit_log WHERE action = 'undo'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+}
+
+#[tokio::test]
+async fn undo_unknown_edit_still_conflicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    let res = undo_edit(&state, 999).await;
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+}

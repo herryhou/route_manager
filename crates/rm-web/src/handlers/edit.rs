@@ -193,23 +193,44 @@ pub async fn log(
     Ok(Json(json!({ "rows": rows })))
 }
 
-/// POST /api/edit/undo/{edit_id} — revert a stop edit by restoring the
-/// version that preceded it.
+/// POST /api/edit/undo/{edit_id} — revert an edit by restoring the version
+/// that preceded it. Stop rows restore the stop version; station rows
+/// (rename/move) restore the station version. Unknown ids route down the
+/// stop path and surface as its 409 NotUndoable, as before.
 pub async fn undo(
     Path(edit_id): Path<i64>,
     State(state): State<AppState>,
     Editor(editor): Editor,
     ApiJson(b): ApiJson<UndoBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let is_station = run_db(state.clone(), move |conn| {
+        rm_db::edit_entity(conn, edit_id)
+    })
+    .await?
+    .as_deref()
+        == Some("station");
     let out = run_db_write(state, move |conn| {
-        rm_edit::undo_stop(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
+        if is_station {
+            rm_edit::undo_station(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
+                .map(|o| (o.edit_id, o.restored_station_version_id))
+        } else {
+            rm_edit::undo_stop(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
+                .map(|o| (o.edit_id, o.new_stop_version_id))
+        }
     })
     .await
     .map_err(edit_conflict)?;
-    Ok(Json(json!({
-        "edit_id": out.edit_id,
-        "new_stop_version_id": out.new_stop_version_id,
-    })))
+    if is_station {
+        Ok(Json(json!({
+            "edit_id": out.0,
+            "restored_station_version_id": out.1,
+        })))
+    } else {
+        Ok(Json(json!({
+            "edit_id": out.0,
+            "new_stop_version_id": out.1,
+        })))
+    }
 }
 
 #[derive(Deserialize)]
