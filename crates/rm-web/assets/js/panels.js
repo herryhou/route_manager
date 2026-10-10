@@ -504,7 +504,8 @@ export function stopPanel(d, { onPickRoute, onPickStation, onEditStop }) {
     <table class="kv">
       <tr><td>stop</td><td>${esc(d.stop.stop_name)} (${d.stop.stop_code})
         ${editable ? '<button class="mini-btn" data-act="rename" title="rename stop">✎</button>' : ''}
-        ${editable ? '<button class="mini-btn" data-act="move" title="move stop position">移動位置</button>' : ''}</td></tr>
+        ${editable ? '<button class="mini-btn" data-act="move" title="move stop position">移動位置</button>' : ''}
+        ${editable ? '<button class="mini-btn" data-act="regroup" title="regroup stop to another station">換站</button>' : ''}</td></tr>
       ${d.stale && (d.stale.projections?.length || d.stale.bearings)
         ? `<tr><td>stale</td><td><span class="pp-hot">⚠ ${d.stale.projections?.length ?? 0} route projections · bearings ${d.stale.bearings ? 'stale' : 'ok'}</span></td></tr>`
         : ''}
@@ -528,7 +529,7 @@ export function stopPanel(d, { onPickRoute, onPickStation, onEditStop }) {
   );
   if (editable && onEditStop) {
     pane.querySelectorAll('.mini-btn').forEach((el) =>
-      el.addEventListener('click', () => onEditStop(el.dataset.act, d.stop)));
+      el.addEventListener('click', () => onEditStop(el.dataset.act, d.stop, d.station.station_id)));
   }
   pane.querySelector('.group-chips').append(
     otherStationChips(d.group_members, d.station.station_id, onPickStation)

@@ -337,8 +337,8 @@ function editFail(what, e) {
   status(`${what} failed: ${e.message}`);
 }
 
-/// stop-panel edit actions: rename now, move = one-shot place mode.
-function onEditStop(act, stop) {
+/// stop-panel edit actions: rename now, move/regroup = one-shot place mode.
+function onEditStop(act, stop, stationId) {
   if (!editMode) return;
   if (act === 'rename') {
     const name = prompt(`rename stop #${stop.stop_code}:`, stop.stop_name);
@@ -352,6 +352,33 @@ function onEditStop(act, stop) {
         return selectStop(r.new_stop_version_id);
       })
       .catch((e) => editFail('rename', e));
+  } else if (act === 'regroup') {
+    status('click the target station');
+    const handler = (e) => {
+      map.off('click', handler); // self-deregister: one-shot again
+      if (pendingPlace === handler) pendingPlace = null;
+      if (!editMode) return;
+      api.stationNearest(e.latlng.lat, e.latlng.lng, 100)
+        .then((hit) => {
+          if (hit.station_id === stationId) return status(`already at ${hit.station_name}`);
+          if (!confirm(`regroup stop #${stop.stop_code}\n${stop.stop_name} → ${hit.station_name} (${Math.round(hit.distance_m)} m)`)) return status('');
+          const note = prompt('note (required):', '') ?? '';
+          if (!note) return status('');
+          return api.regroupStop(stop.stop_version_id, { new_station_id: hit.station_id, note })
+            .then(async (r) => {
+              status('regrouped');
+              await refreshAfterEdit();
+              return selectStop(r.new_stop_version_id);
+            });
+        })
+        .catch((err) => {
+          if (/HTTP 404/.test(err.message)) status('no station within 100 m');
+          else editFail('regroup', err);
+        });
+    };
+    if (pendingPlace) map.off('click', pendingPlace);
+    pendingPlace = handler;
+    map.on('click', handler);
   } else if (act === 'move') {
     status('click the map to place the stop');
     const handler = (e) => {

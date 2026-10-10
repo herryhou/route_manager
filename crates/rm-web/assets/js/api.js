@@ -24,6 +24,8 @@ export const stopsBbox = (bbox, kind) =>
   fetchJson(`/api/stops?bbox=${bbox}&kind=${kind}`);
 export const stopsSearch = (q) => fetchJson(`/api/stops?q=${encodeURIComponent(q)}`);
 export const stationsSearch = (q) => fetchJson(`/api/stations?q=${encodeURIComponent(q)}`);
+export const stationNearest = (lat, lon, maxM) =>
+  fetchJson(`/api/stations/nearest?lat=${lat}&lon=${lon}&max_m=${maxM}`);
 export const outliers = (minSnap = 50) => fetchJson(`/api/qa/outliers?min_snap=${minSnap}`);
 export const matchDevs = (minDev = 50) => fetchJson(`/api/qa/matchdev?min_dev=${minDev}`);
 
@@ -45,5 +47,6 @@ async function editFetch(path, body) {
 }
 
 export const editStop = (svi, body) => editFetch(`/api/edit/stop/${svi}`, body);
+export const regroupStop = (svi, body) => editFetch(`/api/edit/stop/${svi}/regroup`, body);
 export const undoEdit = (id, note) => editFetch(`/api/edit/undo/${id}`, { note });
 export const editLog = (entity, id) => fetchJson(`/api/edit/log?entity=${entity}&entity_id=${id}`);
