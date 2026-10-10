@@ -116,7 +116,9 @@ untouched.
 
 ## Testing
 
-- `rm-web/tests/api.rs` (Rust only — no JS test infra exists):
+- `rm-web/tests/edit.rs` (Rust only — no JS test infra exists; the
+  hand-rolled edit fixture lives here, so endpoint tests belong beside
+  it, not in `api.rs` whose pipeline fixture is heavier than needed):
   - station payload exposes `station_version_id`.
   - rename: happy path mints a new station version + a
     `kind: 'station_rename'` log row; each level maps (pole names in
