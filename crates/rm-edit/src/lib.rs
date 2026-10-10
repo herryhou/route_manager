@@ -2,10 +2,12 @@
 //! persistence lives in rm-db; this crate orchestrates and decides.
 
 mod rename;
+mod station_move;
 mod stop;
 mod undo;
 
 pub use rename::*;
+pub use station_move::*;
 pub use stop::*;
 pub use undo::*;
 
