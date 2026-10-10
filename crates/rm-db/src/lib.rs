@@ -26,6 +26,8 @@ pub use edit::{
     StationMoveOp, apply_station_move, StationMoveApplied,
     StationRenameUndoOp, PoleUndoOp, StationMoveUndoOp, StationUndoOp, StationUndone,
     apply_station_undo,
+    PieceRow, PolylineSnapshot, load_polyline_snapshot,
+    PieceEditOp, PieceApplied, apply_piece_edit,
 };
 pub use migrate::migrate;
 
