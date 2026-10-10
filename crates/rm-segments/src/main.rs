@@ -14,6 +14,9 @@ struct Args {
     /// Snap distance beyond which a stop is flagged OUTLIER (metres)
     #[arg(long, default_value_t = 50.0)]
     outlier_m: f64,
+    /// Refresh only routes marked stale, then clear their marks
+    #[arg(long)]
+    stale: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -26,6 +29,16 @@ fn main() -> anyhow::Result<()> {
         Some(b) => b,
         None => rm_db::latest_batch(&conn)?.expect("no import batch; run rm-ingest first"),
     };
+    if args.stale {
+        match rm_segments::run_stale(&conn, batch, args.outlier_m)? {
+            Some(out) => println!(
+                "stale: {} directions, {} projections, {} marks cleared, {} kept",
+                out.summary.directions, out.summary.projections, out.cleared, out.kept
+            ),
+            None => println!("nothing stale"),
+        }
+        return Ok(());
+    }
     let s = rm_segments::run(&conn, batch, args.outlier_m)?;
     println!(
         "batch {}: {} directions, {} projections ({} no_path, {} endpoint, {} outliers, {} clamped), {} draft rows",

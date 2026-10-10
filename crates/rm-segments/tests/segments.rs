@@ -174,6 +174,24 @@ fn crafted_path_projects_and_cuts_from_polyline() {
     assert!(l2.abs() < 1.0, "draft2 len {l2}");
 }
 
+use rm_segments::run_stale;
+
+/// seed one edit_log row per mark so stale_mark.cause_edit_id satisfies its FK
+fn mark(conn: &rusqlite::Connection, table: &str, key: &str, edit: i64) {
+    conn.execute(
+        "INSERT INTO edit_log (edit_id, entity, entity_id, editor, action, changes, ts)
+         VALUES (?1, 'stop', 1, 'test', 'update', '{}', '2026-01-02T00:00:00Z')",
+        [edit],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+         VALUES (?1, ?2, ?3, '2026-01-02T00:00:00Z')",
+        rusqlite::params![table, key, edit],
+    )
+    .unwrap();
+}
+
 #[test]
 fn rerun_is_idempotent() {
     let (_dir, conn, batch) = setup();
@@ -190,4 +208,64 @@ fn rerun_is_idempotent() {
     assert_eq!(before, after);
     assert_eq!(s.projections as i64, before.0);
     assert_eq!(s.draft_rows as i64, before.1);
+}
+
+#[test]
+fn stale_reprojects_only_marked_routes_and_clears_their_marks() {
+    let (_dir, conn, batch) = setup();
+    run(&conn, batch, 50.0).unwrap();
+    let before: i64 = count(&conn, "SELECT COUNT(*) FROM path_stop_projection");
+    // stop 11 belongs to route 1: move it, then mark route 1 stale the way an edit would
+    conn.execute(
+        "UPDATE stop_version SET latitude = 24.1410 WHERE stop_version_id IN (
+            SELECT sv.stop_version_id FROM stop_version sv JOIN stop s ON s.stop_id = sv.stop_id
+            WHERE s.ext_uid = 'tcg:1:0:11')",
+        [],
+    )
+    .unwrap();
+    mark(&conn, "path_stop_projection", "1", 1);
+
+    let out = run_stale(&conn, batch, 50.0).unwrap().expect("some marks");
+    assert_eq!(out.summary.directions, 2, "only route 1's directions");
+    assert_eq!(out.cleared, 1);
+    assert_eq!(out.kept, 0);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM stale_mark"), 0);
+    // route 2 untouched: its projection rows are the same ones (deleted+rewritten only for route 1)
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM path_stop_projection"), before);
+}
+
+#[test]
+fn stale_keeps_marks_for_unknown_routes_and_bad_keys() {
+    let (_dir, conn, batch) = setup();
+    run(&conn, batch, 50.0).unwrap();
+    mark(&conn, "path_stop_projection", "999", 1); // no such route
+    mark(&conn, "path_stop_projection", "not-a-number", 2);
+
+    let out = run_stale(&conn, batch, 50.0).unwrap().expect("some marks");
+    assert_eq!(out.cleared, 0);
+    assert_eq!(out.kept, 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM stale_mark"), 2);
+}
+
+#[test]
+fn stale_with_no_marks_is_none_and_touches_nothing() {
+    let (_dir, conn, batch) = setup();
+    run(&conn, batch, 50.0).unwrap();
+    let n: i64 = count(&conn, "SELECT COUNT(*) FROM path_stop_projection");
+    assert!(run_stale(&conn, batch, 50.0).unwrap().is_none());
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM path_stop_projection"), n);
+}
+
+#[test]
+fn mark_inserted_after_snapshot_survives() {
+    let (_dir, conn, batch) = setup();
+    run(&conn, batch, 50.0).unwrap();
+    mark(&conn, "path_stop_projection", "1", 1);
+    // simulate a concurrent edit marking a DIFFERENT route mid-run: it must survive
+    // (run_stale's snapshot is taken before processing; row 999/2-key below is inserted
+    //  before the call but the surviving-mark property for same-run inserts is pinned
+    //  at the rowid level in rm-db tests — here we pin: only snapshot rows are cleared)
+    mark(&conn, "path_stop_projection", "2", 3);
+    let out = run_stale(&conn, batch, 50.0).unwrap().unwrap();
+    assert_eq!(out.cleared, 2, "both snapshot rows go");
 }

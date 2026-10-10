@@ -28,6 +28,12 @@ pub struct Summary {
     pub draft_rows: usize,
 }
 
+pub struct StaleOutcome {
+    pub summary: Summary, // counts over processed routes only
+    pub cleared: usize,   // snapshot rowids deleted
+    pub kept: usize,      // marks left (unknown route / unparseable key)
+}
+
 struct StopRow {
     rsv_id: i64,
     direction: i64,
@@ -39,12 +45,72 @@ struct StopRow {
 /// Project every stop of every published route in `batch` and cut geometry
 /// drafts. Idempotent: per-route rows are replaced within one transaction.
 pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> {
+    run_inner(conn, batch_id, outlier_m, None, &[])
+}
+
+/// Refresh exactly the routes marked stale in `path_stop_projection`.
+/// Snapshot rowids first; a mark inserted after the snapshot (concurrent
+/// edit) survives. Unknown route ids / unparseable keys: warn, keep.
+pub fn run_stale(
+    conn: &Connection,
+    batch_id: i64,
+    outlier_m: f64,
+) -> Result<Option<StaleOutcome>> {
+    let snapshot: Vec<(i64, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT rowid, key FROM stale_mark WHERE table_name = 'path_stop_projection'",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    if snapshot.is_empty() {
+        return Ok(None);
+    }
+    let mut only = std::collections::HashSet::new();
+    let mut clear = Vec::new();
+    let mut kept = 0usize;
+    for (rowid, key) in snapshot {
+        match key.parse::<i64>() {
+            Ok(rid) => {
+                let published = conn
+                    .query_row(
+                        "SELECT current_route_version_id FROM route WHERE route_id = ?1",
+                        [rid],
+                        |r| r.get::<_, Option<i64>>(0),
+                    )
+                    .map(|v| v.is_some())
+                    .unwrap_or(false);
+                if published {
+                    only.insert(rid);
+                    clear.push(rowid);
+                } else {
+                    tracing::warn!(route = rid, "stale route not published; keeping mark");
+                    kept += 1;
+                }
+            }
+            Err(_) => {
+                tracing::warn!(key = %key, "unparseable path_stop_projection key; keeping mark");
+                kept += 1;
+            }
+        }
+    }
+    let summary = run_inner(conn, batch_id, outlier_m, Some(&only), &clear)?;
+    Ok(Some(StaleOutcome { summary, cleared: clear.len(), kept }))
+}
+
+fn run_inner(
+    conn: &Connection,
+    batch_id: i64,
+    outlier_m: f64,
+    only: Option<&std::collections::HashSet<i64>>,
+    clear: &[i64],
+) -> Result<Summary> {
     let mut summary = Summary {
         batch_id,
         ..Default::default()
     };
 
-    let routes: Vec<(i64, i64, String)> = {
+    let mut routes: Vec<(i64, i64, String)> = {
         let mut stmt = conn.prepare(
             "SELECT route_id, current_route_version_id, substr(ext_uid, 5)
              FROM route WHERE current_route_version_id IS NOT NULL
@@ -53,6 +119,7 @@ pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> 
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<Result<_, _>>()?
     };
+    routes.retain(|(rid, _, _)| only.map(|s| s.contains(rid)).unwrap_or(true));
 
     let tx = conn.unchecked_transaction()?;
     for (_route_id, route_version_id, xno) in &routes {
@@ -246,6 +313,12 @@ pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> 
                 )?;
                 summary.draft_rows += 1;
             }
+        }
+    }
+    if !clear.is_empty() {
+        let mut del = tx.prepare("DELETE FROM stale_mark WHERE rowid = ?1")?;
+        for rid in clear {
+            del.execute([rid])?;
         }
     }
     tx.commit()?;
