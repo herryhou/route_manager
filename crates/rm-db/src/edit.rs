@@ -38,10 +38,11 @@ pub struct EditLogRow {
 
 /// The edited/restored version's `stop_bearing` rows were deleted (every
 /// edit/undo does), so the whole table's derived data is stale until
-/// the bearing refresh re-runs. Idempotent via INSERT OR IGNORE.
+/// the bearing refresh re-runs. Re-marks replace: fresh rowid, freshest
+/// `cause_edit_id` wins.
 fn mark_bearings_stale(tx: &Connection, edit_id: i64, now: &str) -> Result<()> {
     tx.execute(
-        "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+        "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
          VALUES ('stop_bearing', '*', ?1, ?2)",
         params![edit_id, now],
     )?;
@@ -52,8 +53,8 @@ fn mark_bearings_stale(tx: &Connection, edit_id: i64, now: &str) -> Result<()> {
 /// `path_stop_projection` row per route serving `stop_version_id` (whose
 /// `route_stop_version` rows must already point at it) plus the whole
 /// `station_bearing` table (`stop_bearing` is marked unconditionally —
-/// see `mark_bearings_stale`). Idempotent via INSERT OR IGNORE
-/// on the `(table_name, key)` primary key.
+/// see `mark_bearings_stale`). Re-marks replace on the `(table_name, key)`
+/// primary key: fresh rowid, freshest `cause_edit_id` wins.
 fn mark_position_stale(
     tx: &Connection,
     stop_version_id: i64,
@@ -76,13 +77,13 @@ fn mark_position_stale(
     }
     for rid in &stale_routes {
         tx.execute(
-            "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+            "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
              VALUES ('path_stop_projection', ?1, ?2, ?3)",
             params![rid.to_string(), edit_id, now],
         )?;
     }
     tx.execute(
-        "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+        "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
          VALUES ('station_bearing', '*', ?1, ?2)",
         params![edit_id, now],
     )?;
@@ -297,7 +298,7 @@ pub fn apply_stop_regroup(
     let edit_id = tx.last_insert_rowid();
 
     tx.execute(
-        "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+        "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
          VALUES ('station_bearing', '*', ?1, ?2)",
         params![edit_id, now],
     )?;
@@ -412,7 +413,7 @@ pub fn apply_stop_undo(
         stale_routes = mark_position_stale(&tx, op.old_svi, undo_edit_id, &now)?;
     } else if regrouped {
         tx.execute(
-            "INSERT OR IGNORE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+            "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
              VALUES ('station_bearing', '*', ?1, ?2)",
             params![undo_edit_id, now],
         )?;
@@ -1198,6 +1199,33 @@ mod tests {
         assert_eq!(rows[0].action, "undo");
         assert_eq!(rows[1].action, "update");
         assert_eq!(rows[0].undo_of, Some(a.edit_id));
+    }
+
+    #[test]
+    fn re_mark_replaces_row_fresh_rowid_and_cause() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let e1 = StopEditOp { stop_id: 1, stop_version_id: old, lat: Some(24.001), ..Default::default() };
+        let out1 = apply_stop_edit(&conn, &e1, "h", "first").unwrap();
+
+        let row = |conn: &rusqlite::Connection| -> (i64, i64, String) {
+            conn.query_row(
+                "SELECT rowid, cause_edit_id, key FROM stale_mark WHERE table_name = 'stop_bearing'",
+                [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            ).unwrap()
+        };
+        let (rid1, cause1, _) = row(&conn);
+        assert_eq!(cause1, out1.edit_id);
+
+        // the second position edit re-marks the same key through production code:
+        // new cause must win, rowid must change
+        let cur = out1.new_version_id;
+        let e2 = StopEditOp { stop_id: 1, stop_version_id: cur, lat: Some(24.002), ..Default::default() };
+        let out2 = apply_stop_edit(&conn, &e2, "h", "second").unwrap();
+        let (rid2, cause2, key2) = row(&conn);
+        assert_eq!(key2, "*");
+        assert_eq!(cause2, out2.edit_id, "freshest cause wins");
+        assert_ne!(rid2, rid1, "OR REPLACE mints a fresh rowid (snapshot soundness)");
     }
 
     #[test]
