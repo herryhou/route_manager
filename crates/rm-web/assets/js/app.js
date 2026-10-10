@@ -316,6 +316,7 @@ function disableEditMode() {
   editMode = false;
   if (pendingPlace) {
     map.off('click', pendingPlace);
+    pendingPlace.cancel?.();
     pendingPlace = null;
   }
   setEditable(false);
@@ -379,14 +380,24 @@ function onEditStop(act, stop, stationId) {
           else editFail('regroup', err);
         });
     };
-    if (pendingPlace) map.off('click', pendingPlace);
+    if (pendingPlace) {
+      map.off('click', pendingPlace);
+      pendingPlace.cancel?.();
+    }
     pendingPlace = handler;
     map.on('click', handler);
   } else if (act === 'move') {
     status('click the map to place the stop');
+    // armed-state affordances: crosshair cursor + elastic dashed guide
+    // from the old location, both torn down on place/cancel/replace
+    const mapEl = map.getContainer();
+    const guide = L.polyline([[stop.lat, stop.lon], [stop.lat, stop.lon]], {
+      color: '#f59e0b', weight: 2, dashArray: '6 6', interactive: false,
+    }).addTo(map);
+    mapEl.style.cursor = 'crosshair';
+    const follow = (e) => guide.setLatLngs([[stop.lat, stop.lon], e.latlng]);
     const handler = (e) => {
-      map.off('click', handler); // self-deregister: one-shot again
-      if (pendingPlace === handler) pendingPlace = null;
+      handler.cancel();
       if (!editMode) return;
       const dist = Math.round(L.latLng([stop.lat, stop.lon]).distanceTo(e.latlng));
       if (!confirm(`move stop #${stop.stop_code} ${dist} m?\n(${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}) → (${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)})`)) return status('');
@@ -400,9 +411,20 @@ function onEditStop(act, stop, stationId) {
         })
         .catch((err) => editFail('move', err));
     };
-    if (pendingPlace) map.off('click', pendingPlace);
+    handler.cancel = () => {
+      map.off('click', handler); // self-deregister: one-shot again
+      map.off('mousemove', follow);
+      guide.remove();
+      mapEl.style.cursor = '';
+      if (pendingPlace === handler) pendingPlace = null;
+    };
+    if (pendingPlace) {
+      map.off('click', pendingPlace);
+      pendingPlace.cancel?.();
+    }
     pendingPlace = handler;
     map.on('click', handler);
+    map.on('mousemove', follow);
   }
 }
 

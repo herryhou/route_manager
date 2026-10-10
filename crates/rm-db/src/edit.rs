@@ -115,11 +115,11 @@ pub struct StopEditOp {
     pub lon: Option<f64>,
 }
 
-/// Whole-tx stop edit (move and/or rename). Position present ⇒ the pole's
-/// `stop_bearing` row is DELETED (value = f(position) — invalid now) and
-/// the derived data is marked stale. Name-only ⇒ the bearing row is
-/// carried over and NOTHING goes stale. One edit_log row,
-/// `changes = {field: {old, new}}`.
+/// Whole-tx stop edit (move and/or rename). The pole's `stop_bearing` row
+/// is always carried over with its value and `computed_at` (a move keeps
+/// the last bearing visible; stale marks tell the refresh to recompute).
+/// Position present ⇒ derived data is marked stale; name-only ⇒ NOTHING
+/// goes stale. One edit_log row, `changes = {field: {old, new}}`.
 pub fn apply_stop_edit(
     conn: &Connection,
     op: &StopEditOp,
@@ -175,14 +175,7 @@ pub fn apply_stop_edit(
     )?;
 
     let moves = op.lat.is_some() || op.lon.is_some();
-    if moves {
-        tx.execute(
-            "DELETE FROM stop_bearing WHERE stop_version_id = ?1",
-            [op.stop_version_id],
-        )?;
-    } else {
-        carry_bearing(&tx, op.stop_version_id, new_id)?;
-    }
+    carry_bearing(&tx, op.stop_version_id, new_id)?;
 
     let mut changes = serde_json::Map::new();
     if let Some(v) = &op.stop_name {
@@ -325,13 +318,11 @@ pub struct StopEditUndoOp {
 }
 
 /// Whole-tx stop-edit undo: reopen the predecessor, close the minted row,
-/// repoint rsv back, MINT NOTHING. Bearing handling derives from the
-/// undone edit's recorded `changes`: a position edit deleted the
-/// predecessor's bearing (and a refresh may have recomputed one at the
-/// churned svi — deleted here); otherwise the carried row moves back with
-/// its `computed_at`. Stale marks re-derive from the same fields.
-/// All guards run before any write; every version UPDATE checks
-/// rows-affected == 1.
+/// repoint rsv back, MINT NOTHING. The bearing row at the churned svi (the
+/// carried original, or one a refresh recomputed) moves back to the
+/// predecessor with its `computed_at`; stale marks re-derive from the
+/// undone edit's recorded `changes`. All guards run before any write;
+/// every version UPDATE checks rows-affected == 1.
 pub fn apply_stop_undo(
     conn: &Connection,
     op: &StopEditUndoOp,
@@ -397,13 +388,7 @@ pub fn apply_stop_undo(
         params![op.old_svi, op.cur_svi],
     )?;
 
-    if !position_changed {
-        carry_bearing(&tx, op.cur_svi, op.old_svi)?;
-    }
-    tx.execute(
-        "DELETE FROM stop_bearing WHERE stop_version_id = ?1",
-        [op.cur_svi],
-    )?;
+    carry_bearing(&tx, op.cur_svi, op.old_svi)?;
 
     tx.execute(
         "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, undo_of, version_before, version_after)
@@ -1499,9 +1484,12 @@ mod tests {
     }
 
     #[test]
-    fn apply_stop_edit_moves_position_deletes_bearing_marks_three() {
+    fn apply_stop_edit_moves_position_carries_bearing_marks_three() {
         let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
+        let old = fixture(&conn); // fixture has no bearing row — seed one
+        conn.execute(
+            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+             VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')", []).unwrap();
         let op = StopEditOp {
             stop_id: 1,
             stop_version_id: old,
@@ -1521,7 +1509,11 @@ mod tests {
             "SELECT stop_version_id FROM route_stop_version WHERE route_stop_version_id = 1",
             [], |r| r.get(0)).unwrap();
         assert_eq!(sv, out.new_version_id);
-        // bearing deleted at the old svi
+        // bearing carried to the new svi (value kept, recompute refreshes it later)
+        let (deg, computed): (f64, String) = conn.query_row(
+            "SELECT bearing_deg, computed_at FROM stop_bearing WHERE stop_version_id = ?1",
+            [out.new_version_id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((deg, computed.as_str()), (123.5, "2026-01-02T00:00:00Z"));
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = ?1", [old], |r| r.get(0)).unwrap();
         assert_eq!(n, 0);
@@ -1711,24 +1703,31 @@ mod tests {
     }
 
     #[test]
-    fn apply_stop_undo_after_move_remarks_and_leaves_no_bearing() {
+    fn apply_stop_undo_after_move_remarks_and_carries_bearing_back() {
         let conn = open_in_memory().unwrap();
-        let old = fixture(&conn);
+        let old = fixture(&conn); // fixture has no bearing row — seed one
+        conn.execute(
+            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
+             VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')", []).unwrap();
         let out = apply_stop_edit(&conn, &StopEditOp {
             stop_id: 1, stop_version_id: old, lat: Some(24.001), ..Default::default()
         }, "h", "move").unwrap();
         // simulate a refresh having consumed the marks AND recomputed a
-        // bearing at the churned svi
+        // bearing at the churned svi (overwrites the carried row)
         conn.execute("DELETE FROM stale_mark", []).unwrap();
         conn.execute(
-            "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
-             VALUES (?1, 9.0, 'OSM', '2026-01-03T00:00:00Z')", [out.new_version_id]).unwrap();
+            "UPDATE stop_bearing SET bearing_deg = 9.0, computed_at = '2026-01-03T00:00:00Z'
+             WHERE stop_version_id = ?1", [out.new_version_id]).unwrap();
 
         let u = apply_stop_undo(&conn, &stop_edit_undo_op(out.edit_id, 1, old, out.new_version_id), "h", "rev").unwrap();
-        // refreshed row at the closed version deleted; predecessor has none
+        // refreshed row moved back to the reopened predecessor
+        let (deg, at): (f64, String) = conn.query_row(
+            "SELECT bearing_deg, computed_at FROM stop_bearing WHERE stop_version_id = ?1",
+            [old], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((deg, at.as_str()), (9.0, "2026-01-03T00:00:00Z"));
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM stop_bearing", [], |r| r.get(0)).unwrap();
-        assert_eq!(n, 0);
+        assert_eq!(n, 1);
         // marks re-derived from changes fields: stop_bearing + projection(route 1) + station_bearing
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 3);
