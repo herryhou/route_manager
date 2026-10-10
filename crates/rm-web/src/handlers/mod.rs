@@ -36,6 +36,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/stops", get(stops::viewport))
         .route("/api/stops/{id}", get(stops::detail))
         .route("/api/stations", get(stops::station_search))
+        .route("/api/stations/nearest", get(stops::station_nearest))
         .route("/api/stations/{id}", get(stops::station_detail))
         .route("/api/qa/outliers", get(qa::outliers))
         .route("/api/qa/matchdev", get(qa::matchdev))

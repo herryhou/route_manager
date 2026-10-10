@@ -48,6 +48,39 @@ pub async fn station_detail(
     }
 }
 
+pub async fn station_nearest(
+    State(state): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<axum::response::Response, crate::error::ApiError> {
+    // /api/stations/nearest?lat=&lon=&max_m= — map-click target pick.
+    let f64p = |k: &str| params.get(k).and_then(|v| v.parse::<f64>().ok());
+    let (Some(lat), Some(lon)) = (f64p("lat"), f64p("lon")) else {
+        return Err(crate::error::ApiError::bad_request("lat and lon required"));
+    };
+    if !(-90.0..=90.0).contains(&lat) {
+        return Err(crate::error::ApiError::bad_request("lat out of range"));
+    }
+    if !(-180.0..=180.0).contains(&lon) {
+        return Err(crate::error::ApiError::bad_request("lon out of range"));
+    }
+    let Some(max_m) = f64p("max_m") else {
+        return Err(crate::error::ApiError::bad_request("max_m required"));
+    };
+    if !(0.0..=500.0).contains(&max_m) {
+        return Err(crate::error::ApiError::bad_request("max_m must be 0..500"));
+    }
+    let v = run_db(state, move |conn| {
+        crate::queries::stops::station_nearest(conn, lat, lon, max_m)
+    })
+    .await?;
+    match v {
+        Some(v) => Ok(Json(v).into_response()),
+        None => Err(crate::error::ApiError::not_found(&format!(
+            "no station within {max_m} m"
+        ))),
+    }
+}
+
 pub async fn viewport(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,

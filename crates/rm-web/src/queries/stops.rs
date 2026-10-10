@@ -417,3 +417,58 @@ pub fn station_search(conn: &Connection, q: &str) -> Result<Value> {
         .collect::<Result<_, _>>()?;
     Ok(json!({ "stations": stations }))
 }
+
+/// `GET /api/stations/nearest?lat=&lon=&max_m=` — nearest current station to
+/// a point, for the regroup map-click pick. A degree bbox prefilter (lon side
+/// widened by 1/cos(lat)) keeps the scan index-friendly; the bundled SQLite
+/// has no math functions, so the haversine runs in Rust over the (small)
+/// candidate set and the radius cut is applied on the computed distance.
+pub fn station_nearest(conn: &Connection, lat: f64, lon: f64, max_m: f64) -> Result<Option<Value>> {
+    let lat_delta = max_m / 111_320.0;
+    let lon_delta = lat_delta / f64::max(lat.to_radians().cos().abs(), 0.01);
+    let mut stmt = conn.prepare(
+        "SELECT st.station_id, stv.station_name, stv.latitude, stv.longitude
+         FROM station st
+         JOIN station_version stv
+           ON stv.station_id = st.station_id AND stv.valid_to IS NULL
+         WHERE stv.latitude BETWEEN ?1 - ?3 AND ?1 + ?3
+           AND stv.longitude BETWEEN ?2 - ?4 AND ?2 + ?4",
+    )?;
+    let mut best: Option<Value> = None;
+    let mut best_d = f64::INFINITY;
+    let rows = stmt.query_map(
+        rusqlite::params![lat, lon, lat_delta, lon_delta],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, f64>(2)?,
+                r.get::<_, f64>(3)?,
+            ))
+        },
+    )?;
+    for row in rows {
+        let (station_id, station_name, slat, slon) = row?;
+        let d = haversine_m(lat, lon, slat, slon);
+        if d <= max_m && d < best_d {
+            best_d = d;
+            best = Some(json!({
+                "station_id": station_id,
+                "station_name": station_name,
+                "latitude": slat,
+                "longitude": slon,
+                "distance_m": d,
+            }));
+        }
+    }
+    Ok(best)
+}
+
+/// Great-circle distance in metres (earth radius 6371 km).
+fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let (p1, p2) = (lat1.to_radians(), lat2.to_radians());
+    let dp = p2 - p1;
+    let dl = (lon2 - lon1).to_radians();
+    let a = (dp / 2.0).sin().powi(2) + p1.cos() * p2.cos() * (dl / 2.0).sin().powi(2);
+    2.0 * 6_371_000.0 * a.sqrt().asin()
+}
