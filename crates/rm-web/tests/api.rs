@@ -185,6 +185,11 @@ async fn route_path_stops_and_drilldown() {
     let sv_id = stops[0]["stop_version_id"].as_i64().unwrap();
     let d = get_json(&app, &format!("/api/stops/{sv_id}")).await;
     assert_eq!(d["stop"]["stop_name"], serde_json::json!("干城站"));
+    assert!(
+        d["stop"]["stop_id"].is_i64(),
+        "stop_id exposed for edit-log queries: {}",
+        d["stop"]
+    );
     assert!(d["station"]["station_id"].is_i64());
     assert_eq!(
         d["group"]["station_group_name"],

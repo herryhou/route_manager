@@ -63,7 +63,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
                 st.station_id, stv.station_name, stv.latitude, stv.longitude,
                 sg.station_group_id, sgv.station_group_name, sgv.source,
                 sb.bearing_deg, sb.source,
-                stb.bearing_deg, stb.max_spread_deg, stb.member_count
+                stb.bearing_deg, stb.max_spread_deg, stb.member_count, sv.stop_id
          FROM stop_version sv
          JOIN station st ON st.station_id = sv.station_id
          JOIN station_version stv
@@ -94,6 +94,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
                 r.get::<_, Option<f64>>(14)?,
                 r.get::<_, Option<f64>>(15)?,
                 r.get::<_, Option<i64>>(16)?,
+                r.get::<_, i64>(17)?,
             ))
         },
     ) {
@@ -102,7 +103,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
         Err(e) => return Err(e.into()),
     };
 
-    let (_, _, _, _, _, station_id, _, _, _, group_id, _, _, _, _, _, _, _) = &found;
+    let (_, _, _, _, _, station_id, _, _, _, group_id, _, _, _, _, _, _, _, _) = &found;
 
     let members = group_members(conn, *group_id)?;
 
@@ -154,6 +155,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
             "stop_name": found.2,
             "lat": found.3,
             "lon": found.4,
+            "stop_id": found.17,
         },
         "station": {
             "station_id": found.5,
