@@ -257,15 +257,14 @@ fn stale_with_no_marks_is_none_and_touches_nothing() {
 }
 
 #[test]
-fn mark_inserted_after_snapshot_survives() {
+fn stale_clears_exactly_the_snapshot_rowids() {
     let (_dir, conn, batch) = setup();
     run(&conn, batch, 50.0).unwrap();
     mark(&conn, "path_stop_projection", "1", 1);
-    // simulate a concurrent edit marking a DIFFERENT route mid-run: it must survive
-    // (run_stale's snapshot is taken before processing; row 999/2-key below is inserted
-    //  before the call but the surviving-mark property for same-run inserts is pinned
-    //  at the rowid level in rm-db tests — here we pin: only snapshot rows are cleared)
     mark(&conn, "path_stop_projection", "2", 3);
     let out = run_stale(&conn, batch, 50.0).unwrap().unwrap();
     assert_eq!(out.cleared, 2, "both snapshot rows go");
+    // only rows existing at snapshot time are deleted; concurrent-edit
+    // survival is pinned by the rm-db fresh-rowid test plus the
+    // cause_edit_id guard on the final delete
 }

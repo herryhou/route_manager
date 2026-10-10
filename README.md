@@ -43,6 +43,8 @@ cargo run -r -p rm-osm-prepare \ # PBF -> osm_* tables
 cargo run -r -p rm-osm-match     # way runs + match stats
 cargo run -r -p rm-registry      # stop_bearing / station_bearing +
                                   #   dual-carriageway station split
+
+# Post-edit refresh (after web edits — see docs/web-edit-mode.md)
 cargo run -r -p rm-segments -- --stale  # reproject routes marked stale by web edits
 cargo run -r -p rm-registry -- --stale  # rebuild bearings + split for marked-stale, clear marks
 

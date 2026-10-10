@@ -49,18 +49,22 @@ pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> 
 }
 
 /// Refresh exactly the routes marked stale in `path_stop_projection`.
-/// Snapshot rowids first; a mark inserted after the snapshot (concurrent
-/// edit) survives. Unknown route ids / unparseable keys: warn, keep.
+/// Snapshot (rowid, cause_edit_id) pairs first; the clear matches both, so
+/// a mark re-inserted onto a reused rowid mid-run (concurrent edit) carries
+/// a different cause and survives, and a mark inserted after the snapshot
+/// survives because its rowid was never seen. Unknown route ids /
+/// unparseable keys: warn, keep.
 pub fn run_stale(
     conn: &Connection,
     batch_id: i64,
     outlier_m: f64,
 ) -> Result<Option<StaleOutcome>> {
-    let snapshot: Vec<(i64, String)> = {
+    let snapshot: Vec<(i64, i64, String)> = {
         let mut stmt = conn.prepare(
-            "SELECT rowid, key FROM stale_mark WHERE table_name = 'path_stop_projection'",
+            "SELECT rowid, cause_edit_id, key FROM stale_mark
+             WHERE table_name = 'path_stop_projection'",
         )?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<Result<_, _>>()?
     };
     if snapshot.is_empty() {
@@ -69,7 +73,7 @@ pub fn run_stale(
     let mut only = std::collections::HashSet::new();
     let mut clear = Vec::new();
     let mut kept = 0usize;
-    for (rowid, key) in snapshot {
+    for (rowid, cause, key) in snapshot {
         match key.parse::<i64>() {
             Ok(rid) => {
                 let published = conn
@@ -82,7 +86,7 @@ pub fn run_stale(
                     .unwrap_or(false);
                 if published {
                     only.insert(rid);
-                    clear.push(rowid);
+                    clear.push((rowid, cause));
                 } else {
                     tracing::warn!(route = rid, "stale route not published; keeping mark");
                     kept += 1;
@@ -103,7 +107,7 @@ fn run_inner(
     batch_id: i64,
     outlier_m: f64,
     only: Option<&std::collections::HashSet<i64>>,
-    clear: &[i64],
+    clear: &[(i64, i64)],
 ) -> Result<Summary> {
     let mut summary = Summary {
         batch_id,
@@ -316,9 +320,10 @@ fn run_inner(
         }
     }
     if !clear.is_empty() {
-        let mut del = tx.prepare("DELETE FROM stale_mark WHERE rowid = ?1")?;
-        for rid in clear {
-            del.execute([rid])?;
+        let mut del =
+            tx.prepare("DELETE FROM stale_mark WHERE rowid = ?1 AND cause_edit_id = ?2")?;
+        for (rowid, cause) in clear {
+            del.execute([rowid, cause])?;
         }
     }
     tx.commit()?;

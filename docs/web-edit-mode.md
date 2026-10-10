@@ -1,7 +1,7 @@
 # rm-web edit mode — design spec
 
 Date: 2026-10-08
-Status: approved design, pre-implementation
+Status: shipped
 
 ## Context
 
@@ -124,8 +124,11 @@ Dependency map — what each edit invalidates:
 | station name | nothing |
 
 The edit primitive writes `stale_mark` rows in the same tx. Read queries LEFT
-JOIN `stale_mark` to render an amber badge on affected panels. Refresh steps
-recompute, then delete the marks they satisfied, in the same tx.
+JOIN `stale_mark` to render an amber badge on affected panels. rm-segments
+recomputes and clears its marks in one transaction; rm-registry's rebuild
+steps own their transactions and clearing is a separate final one. Either
+way the clear lands last: a crash leaves the mark, so the badge stays amber,
+never green over stale data.
 
 Refresh is two CLI commands — the web server never spawns pipeline
 binaries. Both read `stale_mark` themselves; neither takes ids:
