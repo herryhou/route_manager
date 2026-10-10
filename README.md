@@ -43,6 +43,8 @@ cargo run -r -p rm-osm-prepare \ # PBF -> osm_* tables
 cargo run -r -p rm-osm-match     # way runs + match stats
 cargo run -r -p rm-registry      # stop_bearing / station_bearing +
                                   #   dual-carriageway station split
+cargo run -r -p rm-segments -- --stale  # reproject routes marked stale by web edits
+cargo run -r -p rm-registry -- --stale  # rebuild bearings + split for marked-stale, clear marks
 
 # 3. verify + QA exports (exits non-zero on any failed check)
 cargo run -r -p rm-verify -- --preset taichung   # | taipei | tainan

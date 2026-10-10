@@ -127,16 +127,23 @@ The edit primitive writes `stale_mark` rows in the same tx. Read queries LEFT
 JOIN `stale_mark` to render an amber badge on affected panels. Refresh steps
 recompute, then delete the marks they satisfied, in the same tx.
 
-Refresh stays a CLI runbook — the web server never spawns pipeline binaries:
+Refresh is two CLI commands — the web server never spawns pipeline
+binaries. Both read `stale_mark` themselves; neither takes ids:
 
-1. **Bearings** (`stop_bearing`, `station_bearing`): rm-registry recompute is
-   whole-table DELETE+rebuild, seconds at city scale. Re-run after any
-   position/regroup edit.
-2. **Projections** (`path_stop_projection`): rm-osm-match gains a
-   `--routes <ids>` filter; run it for the stale-marked routes (~1s per
-   direction with all cores).
-3. **Station splits** (rm-registry `split` pass): whole-city re-run is the
-   manual step after station regroups.
+1. `cargo run -r -p rm-segments -- --stale` — reprojects exactly the
+   routes a stop position/regroup edit marked (`path_stop_projection`
+   marks), clears them in the same transaction. Prints `nothing stale`
+   when there are no marks.
+2. `cargo run -r -p rm-registry -- --stale` — when any bearing mark
+   exists (`stop_bearing`/`station_bearing`): whole-table bearing
+   rebuild, station split re-run, then clears the marks. Split is
+   idempotent; its re-run after regroup edits is the manual step the
+   marks trigger.
+
+Order matters: bearings are derived FROM `path_stop_projection`
+(`rm-registry/src/bearing.rs` reads projections), so segments before
+registry. rm-osm-match is NOT part of edit refresh — stop edits never
+change road-graph matches; re-match only after upstream re-imports.
 
 ## Server write path & auth
 
@@ -185,8 +192,8 @@ Refresh stays a CLI runbook — the web server never spawns pipeline binaries:
    written, CLOSED-batch guard, history endpoint.
 2. **Station curation**: regroup stop → station, station rename, history +
    undo UI.
-3. **Refresh runbook**: `--routes` filter in rm-osm-match, bearing re-run
-   steps, mark clearing, stale badges verified accurate.
+3. **Refresh runbook** (shipped): refresh `--stale` wiring (rm-segments +
+   rm-registry), mark clearing, stale badges verified accurate.
 4. **Authoring**: new stops/stations, route-stop links.
 
 ## Testing

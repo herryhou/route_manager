@@ -269,6 +269,39 @@ async fn stop_detail_reports_staleness_after_position_edit() {
 }
 
 #[tokio::test]
+async fn badge_clears_when_marks_deleted() {
+    // same setup as stop_detail_reports_staleness_after_position_edit:
+    // edit a stop, detail shows amber
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    let res = rm_web::router_with(state.clone()).oneshot(
+        Request::builder().method("POST").uri("/api/edit/stop/10")
+            .header("authorization", "Bearer sekrit")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"lat": 24.001, "note": "move"}"#)).unwrap(),
+    ).await.unwrap();
+    let new_id = body_json(res).await["new_stop_version_id"].as_i64().unwrap();
+    let res = rm_web::router_with(state.clone()).oneshot(
+        Request::builder().uri(format!("/api/stops/{new_id}")).body(Body::empty()).unwrap(),
+    ).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["stale"]["projections"], serde_json::json!([1]));
+    assert_eq!(v["stale"]["bearings"], true);
+
+    // simulate the refresh runbook having cleared the marks:
+    let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
+    conn.execute("DELETE FROM stale_mark", []).unwrap();
+    drop(conn);
+    let res = rm_web::router_with(state).oneshot(
+        Request::builder().uri(format!("/api/stops/{new_id}")).body(Body::empty()).unwrap(),
+    ).await.unwrap();
+    let v = body_json(res).await;
+    assert_eq!(v["stale"]["projections"], serde_json::json!([]));
+    assert_eq!(v["stale"]["bearings"], false);
+}
+
+#[tokio::test]
 async fn second_edit_of_same_version_conflicts() {
     let dir = tempfile::tempdir().unwrap();
     let state = edit_state(&dir);
