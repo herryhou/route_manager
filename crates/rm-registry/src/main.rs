@@ -34,9 +34,10 @@ fn main() -> anyhow::Result<()> {
     if args.stale {
         match rm_registry::run_stale(&conn, batch)? {
             Some(r) => println!(
-                "stale: {}+{} bearings ({} skipped); split: {} split, {} created, {} moved; marks cleared",
+                "stale: {}+{} bearings, {} stations ({} skipped); split: {} split, {} created, {} moved; marks cleared",
                 r.bearings.stops_osm,
                 r.bearings.stops_polyline,
+                r.bearings.stations,
                 r.bearings.stops_skipped,
                 r.split.stations_split,
                 r.split.stations_created,
