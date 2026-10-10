@@ -57,18 +57,25 @@ fn setup() -> rusqlite::Connection {
     conn
 }
 
+/// One way run over way 100 (cumulative 0..1000). Travel direction is
+/// entry -> exit; the way's nodes run south -> north, so (2, 4) bears ~0°
+/// and the swap (4, 2) ~180°.
+fn insert_run(conn: &rusqlite::Connection, sv: i64, entry: i64, exit: i64) {
+    conn.execute(
+        "INSERT INTO seg_match_way
+            (subroute_version_id, direction, ordinal, osm_way_id,
+             entry_node_id, exit_node_id, cum_start_m, cum_end_m)
+         VALUES (?1, 0, 1, 100, ?2, ?3, 0.0, 1000.0)",
+        rusqlite::params![sv, entry, exit],
+    )
+    .unwrap();
+}
+
 /// Way run entries for both subroute versions, northbound, so both stops
 /// re-bear via OSM.
 fn insert_northbound_runs(conn: &rusqlite::Connection) {
     for sv in [11, 12] {
-        conn.execute(
-            "INSERT INTO seg_match_way
-                (subroute_version_id, direction, ordinal, osm_way_id,
-                 entry_node_id, exit_node_id, cum_start_m, cum_end_m)
-             VALUES (?1, 0, 1, 100, 2, 4, 0.0, 1000.0)",
-            [sv],
-        )
-        .unwrap();
+        insert_run(conn, sv, 2, 4);
     }
 }
 
@@ -135,6 +142,85 @@ fn rebuild_failure_leaves_marks_present() {
             .unwrap(),
         1,
         "snapshot delete never ran; badge stays amber over unrefreshed data"
+    );
+}
+
+#[test]
+fn station_bearing_mark_alone_triggers_rebuild_split_and_rebear() {
+    let conn = setup();
+    // split copies the parent's current station_version into its children
+    conn.execute_batch(&format!(
+        "INSERT INTO station_group (station_group_id, created_at) VALUES (1, '{T0}');
+         INSERT INTO station_group_version
+            (station_group_id, station_group_name, valid_from, created_at)
+            VALUES (1, 'X', '{T0}', '{T0}');
+         INSERT INTO station_version
+            (station_id, station_group_id, station_name, latitude, longitude,
+             valid_from, created_at)
+            VALUES (1, 1, 'X', 24.1400, 120.6850, '{T0}', '{T0}');
+         INSERT INTO id_sequence (table_name, next_value)
+            VALUES ('station', 2), ('station_version', 2);"
+    ))
+    .unwrap();
+    // opposite travel directions over one pole: stop 1 ~0°, stop 2 ~180°
+    insert_run(&conn, 11, 2, 4);
+    insert_run(&conn, 12, 4, 2);
+    // stale_mark.cause_edit_id FKs edit_log: seed the log row first
+    conn.execute(
+        "INSERT INTO edit_log (entity, entity_id, editor, action, changes, ts)
+         VALUES ('stop', 1, 'test', 'edit', '{}', '2026-01-02T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    // station_bearing mark alone (no stop_bearing mark) still refreshes
+    conn.execute(
+        "INSERT INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+         VALUES ('station_bearing', '*', 1, '2026-01-02T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+
+    let run = run_stale(&conn, 1)
+        .unwrap()
+        .expect("station_bearing mark present -> refresh ran");
+    assert!(
+        run.bearings.stops_osm >= 2,
+        "both stops re-bearied via OSM, got {:?}",
+        run.bearings
+    );
+
+    // opposite headings split the pole: stop 2 moves to a child station
+    assert_eq!(run.split.stops_moved, 1, "{:?}", run.split);
+    let child: i64 = conn
+        .query_row(
+            "SELECT station_id FROM stop_version WHERE stop_version_id = 2",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_ne!(child, 1, "southbound stop moved to its own station");
+
+    // stops_moved > 0 gate: stations() re-ran over the post-split
+    // membership — the child's row can only come from the re-bear after
+    // the split (bearing::run's own station pass predates it)
+    let rows: i64 = conn
+        .query_row("SELECT COUNT(*) FROM station_bearing", [], |r| r.get(0))
+        .unwrap();
+    assert!(rows >= 1, "station re-bear wrote {rows} rows");
+    let child_members: i64 = conn
+        .query_row(
+            "SELECT member_count FROM station_bearing WHERE station_id = ?1",
+            [child],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(child_members, 1, "post-split re-bear missing (gate broken)");
+
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        0,
+        "snapshot rows cleared"
     );
 }
 
