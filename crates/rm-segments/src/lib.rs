@@ -83,6 +83,7 @@ pub fn run_stale(
                         |r| r.get::<_, Option<i64>>(0),
                     )
                     .optional()?
+                    .flatten()
                     .is_some();
                 if published {
                     only.insert(rid);

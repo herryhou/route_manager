@@ -248,6 +248,24 @@ fn stale_keeps_marks_for_unknown_routes_and_bad_keys() {
 }
 
 #[test]
+fn stale_keeps_marks_for_unpublished_routes() {
+    let (_dir, conn, batch) = setup();
+    run(&conn, batch, 50.0).unwrap();
+    // unpublished is a normal lifecycle state: NULL until rm-publish sets it
+    conn.execute(
+        "UPDATE route SET current_route_version_id = NULL WHERE route_id = 2",
+        [],
+    )
+    .unwrap();
+    mark(&conn, "path_stop_projection", "2", 1);
+
+    let out = run_stale(&conn, batch, 50.0).unwrap().expect("some marks");
+    assert_eq!(out.cleared, 0);
+    assert_eq!(out.kept, 1, "NULL current_route_version_id is not published");
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM stale_mark"), 1);
+}
+
+#[test]
 fn stale_with_no_marks_is_none_and_touches_nothing() {
     let (_dir, conn, batch) = setup();
     run(&conn, batch, 50.0).unwrap();
