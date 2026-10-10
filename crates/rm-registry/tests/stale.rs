@@ -91,8 +91,13 @@ fn stale_rebuilds_and_clears_marks() {
     )
     .unwrap();
 
-    let did = run_stale(&conn, 1).unwrap();
-    assert!(did, "bearing mark present -> refresh ran");
+    let run = run_stale(&conn, 1).unwrap().expect("bearing mark present -> refresh ran");
+    assert!(
+        run.bearings.stops_osm >= 2,
+        "both stops re-bearied via OSM, got {:?}",
+        run.bearings
+    );
+    assert_eq!(run.split.stops_moved, 0, "one heading cluster -> no split");
     assert_eq!(
         conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get::<_, i64>(0))
             .unwrap(),
@@ -108,7 +113,7 @@ fn stale_rebuilds_and_clears_marks() {
 #[test]
 fn stale_with_no_marks_is_false_and_touches_nothing() {
     let conn = setup();
-    assert!(!run_stale(&conn, 1).unwrap());
+    assert!(run_stale(&conn, 1).unwrap().is_none());
     assert_eq!(
         conn.query_row("SELECT COUNT(*) FROM stop_bearing", [], |r| r.get::<_, i64>(0))
             .unwrap(),

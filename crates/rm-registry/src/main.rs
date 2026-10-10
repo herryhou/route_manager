@@ -32,10 +32,17 @@ fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("no import batch; pass --batch"))?,
     };
     if args.stale {
-        if rm_registry::run_stale(&conn, batch)? {
-            println!("stale: bearings rebuilt, split re-run, marks cleared");
-        } else {
-            println!("nothing stale");
+        match rm_registry::run_stale(&conn, batch)? {
+            Some(r) => println!(
+                "stale: {}+{} bearings ({} skipped); split: {} split, {} created, {} moved; marks cleared",
+                r.bearings.stops_osm,
+                r.bearings.stops_polyline,
+                r.bearings.stops_skipped,
+                r.split.stations_split,
+                r.split.stations_created,
+                r.split.stops_moved
+            ),
+            None => println!("nothing stale"),
         }
         return Ok(());
     }

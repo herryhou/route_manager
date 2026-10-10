@@ -9,7 +9,17 @@ pub mod split;
 /// re-inserted onto a reused rowid mid-rebuild (concurrent edit) carries
 /// a different cause, so it survives the clear; marks inserted after
 /// startup survive because their rowids were never snapshotted.
-pub fn run_stale(conn: &rusqlite::Connection, batch_id: i64) -> anyhow::Result<bool> {
+/// What one `--stale` refresh did; `None` means nothing was stale and the
+/// DB was left untouched.
+pub struct StaleRun {
+    pub bearings: bearing::Summary,
+    pub split: split::Summary,
+}
+
+pub fn run_stale(
+    conn: &rusqlite::Connection,
+    batch_id: i64,
+) -> anyhow::Result<Option<StaleRun>> {
     let snapshot: Vec<(i64, i64)> = {
         let mut stmt = conn.prepare(
             "SELECT rowid, cause_edit_id FROM stale_mark
@@ -19,10 +29,10 @@ pub fn run_stale(conn: &rusqlite::Connection, batch_id: i64) -> anyhow::Result<b
         rows.collect::<Result<Vec<_>, _>>()?
     };
     if snapshot.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
 
-    let _b = bearing::run(conn, batch_id)?;
+    let b = bearing::run(conn, batch_id)?;
     let sp = split::run(conn)?;
     if sp.stops_moved > 0 {
         bearing::stations(conn)?;
@@ -37,5 +47,5 @@ pub fn run_stale(conn: &rusqlite::Connection, batch_id: i64) -> anyhow::Result<b
         }
     }
     tx.commit()?;
-    Ok(true)
+    Ok(Some(StaleRun { bearings: b, split: sp }))
 }
