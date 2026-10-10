@@ -449,13 +449,16 @@ pub fn entity_history(conn: &Connection, entity: &str, entity_id: i64) -> Result
     Ok(out)
 }
 
-/// Read-side snapshot for the station-rename use case (rm-edit::rename_station):
-/// the current station version plus its poles' current stop versions.
+/// Read-side snapshot for station-level edits (rm-edit::rename_station /
+/// rm-edit::move_station): the current station version plus its poles'
+/// current stop versions.
 #[derive(Debug)]
 pub struct StationSnapshot {
     pub station_id: i64,
     pub station_version_id: i64,
     pub station_name: String,
+    pub latitude: f64,
+    pub longitude: f64,
     pub poles: Vec<PoleSnapshot>,
 }
 
@@ -472,19 +475,19 @@ pub fn load_station_snapshot(
     conn: &Connection,
     station_version_id: i64,
 ) -> Result<Option<StationSnapshot>> {
-    let row: (i64, String) = match conn
+    let row: (i64, String, f64, f64) = match conn
         .query_row(
-            "SELECT station_id, station_name FROM station_version
+            "SELECT station_id, station_name, latitude, longitude FROM station_version
              WHERE station_version_id = ?1 AND valid_to IS NULL",
             [station_version_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional()?
     {
         Some(v) => v,
         None => return Ok(None),
     };
-    let (station_id, station_name) = row;
+    let (station_id, station_name, latitude, longitude) = row;
     let mut stmt = conn.prepare(
         "SELECT stop_id, stop_version_id, stop_name FROM stop_version
          WHERE station_id = ?1 AND valid_to IS NULL
@@ -503,6 +506,8 @@ pub fn load_station_snapshot(
         station_id,
         station_version_id,
         station_name,
+        latitude,
+        longitude,
         poles,
     }))
 }
@@ -1020,6 +1025,7 @@ mod tests {
         assert_eq!(snap.station_id, 1);
         assert_eq!(snap.station_version_id, 1);
         assert_eq!(snap.station_name, "S");
+        assert_eq!((snap.latitude, snap.longitude), (24.0, 120.0));
         assert_eq!(snap.poles.len(), 1);
         assert_eq!((snap.poles[0].stop_id, snap.poles[0].stop_version_id, snap.poles[0].stop_name.as_str()), (1, 10, "Old"));
     }

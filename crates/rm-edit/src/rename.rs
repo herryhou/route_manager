@@ -183,6 +183,8 @@ mod tests {
             station_id: 7,
             station_version_id: 70,
             station_name: "S".into(),
+            latitude: 24.0,
+            longitude: 120.0,
             poles: vec![
                 PoleSnapshot { stop_id: 1, stop_version_id: 10, stop_name: "S".into() },
                 PoleSnapshot { stop_id: 2, stop_version_id: 11, stop_name: "S 往".into() },
