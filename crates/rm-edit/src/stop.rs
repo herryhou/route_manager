@@ -5,6 +5,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 
 use crate::EditError;
+use crate::map_db_err;
 
 #[derive(Debug, Default, Clone)]
 pub struct StopEdit {
@@ -54,17 +55,6 @@ pub struct StopOutcome {
     pub edit_id: i64,
     pub new_stop_version_id: i64,
     pub stale_routes: Vec<i64>,
-}
-
-/// rm-db's internal errors surface 1:1 as this crate's public EditError.
-fn map_db_err(e: anyhow::Error) -> anyhow::Error {
-    match e.downcast_ref::<rm_db::EditError>() {
-        Some(rm_db::EditError::NotCurrent(id)) => EditError::NotCurrent(*id).into(),
-        Some(rm_db::EditError::StationNotCurrent(id)) => EditError::StationNotCurrent(*id).into(),
-        Some(rm_db::EditError::UnknownStation(id)) => EditError::UnknownStation(*id).into(),
-        Some(rm_db::EditError::NotUndoable(id)) => EditError::NotUndoable(*id).into(),
-        _ => e,
-    }
 }
 
 /// Application service: load → plan (pure) → apply (one tx).

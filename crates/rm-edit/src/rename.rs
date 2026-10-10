@@ -153,15 +153,8 @@ pub fn rename_station(
             })
             .collect(),
     };
-    let applied = apply_station_rename(conn, &op, editor, note).map_err(|e| {
-        // rm-db re-validates inside its tx; surface its typed stale-version
-        // error as this crate's public EditError
-        match e.downcast_ref::<rm_db::EditError>() {
-            Some(rm_db::EditError::StationNotCurrent(id)) => EditError::StationNotCurrent(*id).into(),
-            Some(rm_db::EditError::NotCurrent(id)) => EditError::StationNotCurrent(*id).into(),
-            _ => e,
-        }
-    })?;
+    let applied =
+        apply_station_rename(conn, &op, editor, note).map_err(crate::map_station_db_err)?;
     Ok(RenameOutcome {
         edit_id: applied.edit_id,
         new_station_version_id: applied.new_station_version_id,
