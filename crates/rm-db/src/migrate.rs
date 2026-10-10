@@ -37,6 +37,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0011_drop_segment",
         include_str!("../migrations/0011_drop_segment.sql"),
     ),
+    (
+        "0012_polyline_piece",
+        include_str!("../migrations/0012_polyline_piece.sql"),
+    ),
 ];
 
 /// Apply pending migrations in order. Safe to call repeatedly.
@@ -93,7 +97,34 @@ mod tests {
                 "0008_pair_only",
                 "0009_corridor_split",
                 "0010_edit",
-                "0011_drop_segment"
+                "0011_drop_segment",
+                "0012_polyline_piece"
+            ]
+        );
+    }
+
+    #[test]
+    fn polyline_piece_exists_after_migrate() {
+        let conn = open_in_memory().unwrap();
+        let cols: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('polyline_piece') ORDER BY cid")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            cols,
+            vec![
+                "piece_id",
+                "xno",
+                "direction",
+                "encoded",
+                "anchor_start_lat",
+                "anchor_start_lon",
+                "anchor_end_lat",
+                "anchor_end_lon",
+                "updated_at"
             ]
         );
     }
