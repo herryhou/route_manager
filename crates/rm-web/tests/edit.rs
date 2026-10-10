@@ -418,3 +418,12 @@ async fn regroup_stale_svi_conflicts() {
     let res = regroup(&state, r#"{"new_station_id": 2, "note": "again"}"#).await;
     assert_eq!(res.status(), StatusCode::CONFLICT);
 }
+
+#[tokio::test]
+async fn station_detail_exposes_station_version_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    let app = rm_web::router_with(state);
+    let v = get_json(&app, "/api/stations/1").await;
+    assert_eq!(v["station"]["station_version_id"].as_i64(), Some(1), "{v}");
+}

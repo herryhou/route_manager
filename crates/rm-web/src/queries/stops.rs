@@ -199,7 +199,8 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
     let found = match conn.query_row(
         "SELECT st.station_id, stv.station_name, stv.latitude, stv.longitude,
                 sg.station_group_id, sgv.station_group_name, sgv.source,
-                stb.bearing_deg, stb.max_spread_deg, stb.member_count
+                stb.bearing_deg, stb.max_spread_deg, stb.member_count,
+                stv.station_version_id
          FROM station st
          JOIN station_version stv
            ON stv.station_id = st.station_id AND stv.valid_to IS NULL
@@ -221,6 +222,7 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
                 r.get::<_, Option<f64>>(7)?,
                 r.get::<_, Option<f64>>(8)?,
                 r.get::<_, Option<i64>>(9)?,
+                r.get::<_, i64>(10)?,
             ))
         },
     ) {
@@ -267,6 +269,7 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
             "station_name": found.1,
             "lat": found.2,
             "lon": found.3,
+            "station_version_id": found.10,
         },
         "group": {
             "station_group_id": found.4,
