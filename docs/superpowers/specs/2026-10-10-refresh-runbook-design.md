@@ -52,10 +52,12 @@ clearing", but two of its premises are wrong:
 - Intersect with the routes present in the latest batch (existing
   route_version iteration). A marked route absent from the batch is left
   marked with a warning (cannot reproject what has no polylines).
-- Per marked route_version, one tx (same as today's per-route wipe):
-  DELETE projections for that route_version, reproject, then
-  `DELETE FROM stale_mark WHERE rowid IN (<snapshot rowids for this
-  route>)`.
+- Per marked route_version: DELETE projections for that route_version,
+  reproject — all inside the run's existing single whole-run
+  `unchecked_transaction` (`run()` already works this way), with the
+  snapshot rowid delete appended at the end of that same tx. (Plan-time
+  correction: the per-route-tx wording above was wrong about current
+  code; no tx refactor.)
 - No marks → print `nothing stale`, exit 0. Behavior without the flag is
   byte-identical to today.
 
@@ -74,9 +76,11 @@ clearing", but two of its premises are wrong:
 ## Mark-clearing contract
 
 `--stale` = snapshot rowids → recompute → delete exactly those rowids.
-rm-segments deletes in the same per-route tx as its reproject; rm-registry
-deletes in one final tx after the rebuild. Crash ordering is safe in both
-shapes: a crash before the delete leaves marks present over fresh data
+Both CLIs already do their whole run in one `unchecked_transaction`, so
+the delete rides the same tx as the recompute it satisfies (rm-registry's
+split/stations steps keep their own txs; the mark delete is a final
+statement in the main rebuild tx). Crash ordering is safe: a crash before
+the delete leaves marks present over fresh data
 (badge amber until the next refresh — never green over stale data). No
 clock comparisons; correct under any interleaving with web edits (web
 writes stay behind the app mutex; CLIs take the DB directly — the rowid
