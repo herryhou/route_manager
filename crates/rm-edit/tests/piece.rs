@@ -245,6 +245,12 @@ fn plan_rejects_undo_rows_foreign_kinds_and_broken_payloads() {
     c["encoded"] = serde_json::json!({ "old": "x", "new": "y" });
     let err = plan_piece_undo(&polyline_row("update", c)).unwrap_err();
     assert!(matches!(err, EditError::NotUndoable(7)), "{err}");
+    // short anchor array: corrupt → refuse, not panic
+    let mut c = create_changes();
+    c["encoded"] = serde_json::json!({ "old": "x", "new": "y" });
+    c["anchors"] = serde_json::json!({ "old": [[38.5]], "new": [[38.5, -120.2], [40.7, -120.95]] });
+    let err = plan_piece_undo(&polyline_row("update", c)).unwrap_err();
+    assert!(matches!(err, EditError::NotUndoable(7)), "{err}");
 }
 
 #[test]

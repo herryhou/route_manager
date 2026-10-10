@@ -231,8 +231,8 @@ fn anchor_pair(v: Option<&serde_json::Value>) -> Option<([f64; 2], [f64; 2])> {
     let a = v.get(0)?.as_array()?;
     let b = v.get(1)?.as_array()?;
     Some((
-        [a[0].as_f64()?, a[1].as_f64()?],
-        [b[0].as_f64()?, b[1].as_f64()?],
+        [a.get(0)?.as_f64()?, a.get(1)?.as_f64()?],
+        [b.get(0)?.as_f64()?, b.get(1)?.as_f64()?],
     ))
 }
 
