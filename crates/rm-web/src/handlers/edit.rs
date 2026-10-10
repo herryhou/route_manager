@@ -211,3 +211,44 @@ pub async fn undo(
         "new_stop_version_id": out.new_stop_version_id,
     })))
 }
+
+#[derive(Deserialize)]
+pub struct StationRenameBody {
+    new_name: String,
+    level: String,
+    note: Option<String>,
+}
+
+/// POST /api/edit/station/{station_version_id} — rename the station, with
+/// an editor-chosen level for how far the rename reaches into pole names.
+pub async fn rename_station(
+    Path(station_version_id): Path<i64>,
+    State(state): State<AppState>,
+    Editor(editor): Editor,
+    ApiJson(b): ApiJson<StationRenameBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let level = match b.level.as_str() {
+        "station" => rm_edit::RenameLevel::StationOnly,
+        "matching" => rm_edit::RenameLevel::MatchingPoles,
+        "all" => rm_edit::RenameLevel::AllPoles,
+        other => return Err(ApiError::bad_request(&format!("unknown level {other:?}"))),
+    };
+    let out = run_db_write(state, move |conn| {
+        rm_edit::rename_station(
+            conn,
+            rm_edit::StationRename {
+                station_version_id,
+                new_name: b.new_name,
+                level,
+            },
+            &editor,
+            b.note.as_deref().unwrap_or(""),
+        )
+    })
+    .await
+    .map_err(edit_conflict)?;
+    Ok(Json(json!({
+        "edit_id": out.edit_id,
+        "new_station_version_id": out.new_station_version_id,
+    })))
+}

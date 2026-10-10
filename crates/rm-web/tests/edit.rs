@@ -427,3 +427,128 @@ async fn station_detail_exposes_station_version_id() {
     let v = get_json(&app, "/api/stations/1").await;
     assert_eq!(v["station"]["station_version_id"].as_i64(), Some(1), "{v}");
 }
+
+/// The station_version id_sequence seed station edits mint from
+/// (edit_state's fixture only seeds the stop_version sequence).
+fn station_fixture(conn: &Connection) {
+    conn.execute(
+        "INSERT INTO id_sequence (table_name, next_value) VALUES ('station_version', 2)",
+        [],
+    )
+    .unwrap();
+}
+
+async fn rename_st(state: &rm_web::state::AppState, svi: i64, body: &str) -> axum::response::Response {
+    rm_web::router_with(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/api/edit/station/{svi}"))
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn rename_all_poles_mints_station_and_pole_versions() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    {
+        let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
+        station_fixture(&conn);
+    }
+    let res = rename_st(&state, 1, r#"{"new_name": "N", "level": "all", "note": "r"}"#).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["new_station_version_id"].as_i64(), Some(2), "{v}");
+    let conn = rm_db::open_readonly(&dir.path().join("t.db")).unwrap();
+    // station: new manual version is current, named N
+    let (name, src): (String, String) = conn
+        .query_row(
+            "SELECT station_name, source FROM station_version WHERE valid_to IS NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((name.as_str(), src.as_str()), ("N", "manual"));
+    // pole followed the rename (minted version 11 is now current)
+    let pole: String = conn
+        .query_row(
+            "SELECT stop_name FROM stop_version WHERE stop_id = 1 AND valid_to IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(pole, "N");
+    // log row carries the rename kind + level
+    let (kind, level): (String, String) = conn
+        .query_row(
+            "SELECT json_extract(changes, '$.kind'), json_extract(changes, '$.level') FROM edit_log",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((kind.as_str(), level.as_str()), ("station_rename", "AllPoles"));
+}
+
+#[tokio::test]
+async fn rename_level_maps_to_pole_outcomes() {
+    for (level, want_pole) in [("station", "Old"), ("matching", "Old"), ("all", "N")] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = edit_state(&dir);
+        {
+            let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
+            station_fixture(&conn);
+        }
+        let res = rename_st(
+            &state,
+            1,
+            &format!(r#"{{"new_name": "N", "level": "{level}", "note": "x"}}"#),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK, "level {level}");
+        drop(res);
+        let conn = rm_db::open_readonly(&dir.path().join("t.db")).unwrap();
+        let pole: String = conn
+            .query_row(
+                "SELECT stop_name FROM stop_version WHERE stop_id = 1 AND valid_to IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pole, want_pole, "level {level}");
+    }
+}
+
+#[tokio::test]
+async fn rename_rejects_bad_level_empty_and_noop() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    for (body, want) in [
+        (r#"{"new_name": "N", "level": "poles", "note": "x"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"new_name": "  ", "level": "all", "note": "x"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"new_name": "S", "level": "all", "note": "x"}"#, StatusCode::BAD_REQUEST),
+        (r#"{"level": "all"}"#, StatusCode::BAD_REQUEST),
+    ] {
+        let res = rename_st(&state, 1, body).await;
+        assert_eq!(res.status(), want, "body {body}");
+    }
+    // nothing was written
+    let conn = rm_db::open_readonly(&dir.path().join("t.db")).unwrap();
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM edit_log", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
+#[tokio::test]
+async fn rename_stale_svi_conflicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = edit_state(&dir);
+    let res = rename_st(&state, 999, r#"{"new_name": "N", "level": "all", "note": "x"}"#).await;
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+}
