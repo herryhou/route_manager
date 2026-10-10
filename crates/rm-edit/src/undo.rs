@@ -3,9 +3,7 @@
 //! log; rm-db re-validates currency inside its apply tx.
 
 use anyhow::Result;
-use rm_db::{
-    apply_station_undo, load_station_edit, PoleUndoOp, StationEdit, StationRenameUndoOp,
-};
+use rm_db::StationEdit;
 use rusqlite::Connection;
 
 use crate::EditError;
@@ -108,38 +106,35 @@ pub struct UndoOutcome {
     pub restored_station_version_id: i64,
 }
 
-/// Application service: load the logged rename → plan (pure) → apply the
-/// inverse in one tx. Zero SQL here.
-pub fn undo_station_rename(
-    conn: &Connection,
-    edit_id: i64,
-    editor: &str,
-    note: &str,
-) -> Result<UndoOutcome> {
-    let edit = load_station_edit(conn, edit_id)?
-        .ok_or(EditError::NotUndoable(edit_id))?;
-    let plan = match plan_station_undo(&edit)? {
-        StationUndoOp::Rename(p) => p,
-        StationUndoOp::Move(_) => return Err(EditError::NotUndoable(edit_id).into()),
+/// Application service: load the logged station edit → plan (pure) → apply
+/// the inverse in one tx. Zero SQL here. Handles both station kinds
+/// (rename, move) via the kind-dispatched plan.
+pub fn undo_station(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result<UndoOutcome> {
+    let edit = rm_db::load_station_edit(conn, edit_id)?.ok_or(EditError::NotUndoable(edit_id))?;
+    let db_op = match plan_station_undo(&edit)? {
+        StationUndoOp::Rename(p) => rm_db::StationUndoOp::Rename(rm_db::StationRenameUndoOp {
+            edit_id: p.edit_id,
+            station_id: p.station_id,
+            old_station_version_id: p.old_station_version_id,
+            new_station_version_id: p.new_station_version_id,
+            poles: p
+                .poles
+                .iter()
+                .map(|pole| rm_db::PoleUndoOp {
+                    stop_id: pole.stop_id,
+                    old_svi: pole.old_svi,
+                    new_svi: pole.new_svi,
+                })
+                .collect(),
+        }),
+        StationUndoOp::Move(p) => rm_db::StationUndoOp::Move(rm_db::StationMoveUndoOp {
+            edit_id: p.edit_id,
+            station_id: p.station_id,
+            old_station_version_id: p.old_station_version_id,
+            new_station_version_id: p.new_station_version_id,
+        }),
     };
-    let op = StationRenameUndoOp {
-        edit_id: plan.edit_id,
-        station_id: plan.station_id,
-        old_station_version_id: plan.old_station_version_id,
-        new_station_version_id: plan.new_station_version_id,
-        poles: plan
-            .poles
-            .iter()
-            .map(|p| PoleUndoOp { stop_id: p.stop_id, old_svi: p.old_svi, new_svi: p.new_svi })
-            .collect(),
-    };
-    let undone = apply_station_undo(
-        conn,
-        &rm_db::StationUndoOp::Rename(op),
-        editor,
-        note,
-    )
-    .map_err(crate::map_db_err)?;
+    let undone = rm_db::apply_station_undo(conn, &db_op, editor, note).map_err(crate::map_db_err)?;
     Ok(UndoOutcome {
         edit_id: undone.edit_id,
         restored_station_version_id: undone.restored_station_version_id,

@@ -1,7 +1,9 @@
-//! Integration: undo_station_rename end-to-end on an in-memory DB.
+//! Integration: undo_station end-to-end on an in-memory DB.
 
 use rm_db::open_in_memory;
-use rm_edit::{rename_station, undo_station_rename, EditError, RenameLevel, StationRename};
+use rm_edit::{
+    move_station, rename_station, undo_station, EditError, RenameLevel, StationMove, StationRename,
+};
 use rusqlite::Connection;
 
 /// Same shape as rm-db's edit tests fixture: station 'S' (sv 20) + poles
@@ -55,7 +57,7 @@ fn undo_station_rename_restores_names() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
     let renamed = rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "cjk").unwrap();
-    let out = undo_station_rename(&conn, renamed.edit_id, "herry", "revert").unwrap();
+    let out = undo_station(&conn, renamed.edit_id, "herry", "revert").unwrap();
     assert_eq!(out.restored_station_version_id, 20);
     let name: String = conn.query_row(
         "SELECT station_name FROM station_version WHERE valid_to IS NULL", [], |r| r.get(0)).unwrap();
@@ -76,8 +78,8 @@ fn undo_station_rename_refuses_undo_of_undo() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
     let renamed = rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "").unwrap();
-    let u = undo_station_rename(&conn, renamed.edit_id, "herry", "").unwrap();
-    let err = undo_station_rename(&conn, u.edit_id, "herry", "").unwrap_err();
+    let u = undo_station(&conn, renamed.edit_id, "herry", "").unwrap();
+    let err = undo_station(&conn, u.edit_id, "herry", "").unwrap_err();
     assert!(err.to_string().contains("cannot be undone"), "{err}");
     let _ = EditError::NotUndoable(0); // variant exists and is public
 }
@@ -86,7 +88,7 @@ fn undo_station_rename_refuses_undo_of_undo() {
 fn undo_station_rename_unknown_edit_id() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
-    let err = undo_station_rename(&conn, 999, "herry", "").unwrap_err();
+    let err = undo_station(&conn, 999, "herry", "").unwrap_err();
     assert!(err.to_string().contains("cannot be undone"), "{err}");
 }
 
@@ -97,7 +99,7 @@ fn undo_station_rename_refuses_when_pole_edited_after_rename() {
     let renamed = rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "").unwrap();
     rm_edit::edit_stop(&conn, renamed.poles[0].new_svi,
         rm_edit::StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
-    let err = undo_station_rename(&conn, renamed.edit_id, "herry", "").unwrap_err();
+    let err = undo_station(&conn, renamed.edit_id, "herry", "").unwrap_err();
     assert!(err.to_string().contains("cannot be undone"), "{err}");
 }
 
@@ -109,6 +111,97 @@ fn undo_station_rename_refuses_stop_edit_row() {
     let out = rm_edit::edit_stop(&conn, 10, rm_edit::StopEdit {
         stop_name: Some("N".into()), ..Default::default()
     }, "h", "n").unwrap();
-    let err = undo_station_rename(&conn, out.edit_id, "herry", "").unwrap_err();
+    let err = undo_station(&conn, out.edit_id, "herry", "").unwrap_err();
+    assert!(err.to_string().contains("cannot be undone"), "{err}");
+}
+
+#[test]
+fn undo_station_moves_back() {
+    let conn = open_in_memory().unwrap();
+    fixture(&conn);
+    let m = move_station(
+        &conn,
+        StationMove { station_version_id: 20, latitude: 24.5, longitude: 120.5 },
+        "herry",
+        "fix",
+    )
+    .unwrap();
+    let u = undo_station(&conn, m.edit_id, "herry", "revert").unwrap();
+    assert_eq!(u.restored_station_version_id, 20);
+    // predecessor current again with original coords
+    let (lat, lon): (f64, f64) = conn
+        .query_row(
+            "SELECT latitude, longitude FROM station_version WHERE valid_to IS NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((lat, lon), (24.0, 120.0));
+    // undo mints nothing
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 2);
+}
+
+#[test]
+fn undo_station_refuses_move_after_move() {
+    let conn = open_in_memory().unwrap();
+    fixture(&conn);
+    let first = move_station(
+        &conn,
+        StationMove { station_version_id: 20, latitude: 24.5, longitude: 120.5 },
+        "herry",
+        "a",
+    )
+    .unwrap();
+    move_station(
+        &conn,
+        StationMove { station_version_id: first.new_station_version_id, latitude: 24.6, longitude: 120.6 },
+        "herry",
+        "b",
+    )
+    .unwrap();
+    let err = undo_station(&conn, first.edit_id, "herry", "revert").unwrap_err();
+    assert!(err.to_string().contains("not the current version"), "{err}");
+    // no undo row written
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log WHERE action = 'undo'", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn undo_station_refuses_undo_of_undo() {
+    let conn = open_in_memory().unwrap();
+    fixture(&conn);
+    let m = move_station(
+        &conn,
+        StationMove { station_version_id: 20, latitude: 24.5, longitude: 120.5 },
+        "herry",
+        "fix",
+    )
+    .unwrap();
+    let u = undo_station(&conn, m.edit_id, "herry", "revert").unwrap();
+    let err = undo_station(&conn, u.edit_id, "herry", "again").unwrap_err();
+    assert!(err.to_string().contains("cannot be undone"), "{err}");
+}
+
+#[test]
+fn undo_station_refuses_stop_edit_row() {
+    // (if tests/undo.rs lacks this e2e variant — scenario-2 folded it in at
+    // the db level; pin it at the service level here too)
+    let conn = open_in_memory().unwrap();
+    fixture(&conn);
+    // a stop edit row: entity='stop', kind-less changes
+    let applied = rm_db::apply_stop_edit(
+        &conn,
+        &rm_db::StopEditOp {
+            stop_id: 1,
+            stop_version_id: 10,
+            stop_name: Some("shadow".into()),
+            ..Default::default()
+        },
+        "h",
+        "n",
+    )
+    .unwrap();
+    let err = undo_station(&conn, applied.edit_id, "herry", "revert").unwrap_err();
     assert!(err.to_string().contains("cannot be undone"), "{err}");
 }
