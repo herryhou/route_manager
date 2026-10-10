@@ -566,11 +566,11 @@ pub fn station_is_current(conn: &Connection, station_id: i64) -> Result<bool> {
     Ok(n > 0)
 }
 
-/// Read-side DTO for the logged station rename (consumed by
-/// rm-edit::plan_rename_undo). edit_log is append-only, so a plan parsed
-/// from this row is immutable; apply re-validates currency in its tx.
+/// Read-side DTO for the logged station edit (rename or move — consumed
+/// by rm-edit::plan_station_undo). edit_log is append-only, so a plan
+/// parsed from this row is immutable; apply re-validates currency in its tx.
 #[derive(Debug)]
-pub struct StationRenameEdit {
+pub struct StationEdit {
     pub edit_id: i64,
     pub station_id: i64,
     pub action: String,
@@ -582,10 +582,10 @@ pub struct StationRenameEdit {
 /// Load one edit_log row (any entity — the plan's kind guard is the
 /// discriminator) with `changes` parsed as JSON. `None` when `edit_id`
 /// does not exist.
-pub fn load_station_rename_edit(
+pub fn load_station_edit(
     conn: &Connection,
     edit_id: i64,
-) -> Result<Option<StationRenameEdit>> {
+) -> Result<Option<StationEdit>> {
     let row: (i64, String, Option<i64>, Option<i64>, String) = match conn
         .query_row(
             "SELECT entity_id, action, version_before, version_after, changes
@@ -599,7 +599,7 @@ pub fn load_station_rename_edit(
         None => return Ok(None),
     };
     let (station_id, action, vb, va, changes) = row;
-    Ok(Some(StationRenameEdit {
+    Ok(Some(StationEdit {
         edit_id,
         station_id,
         action,
@@ -1169,11 +1169,11 @@ mod tests {
     }
 
     #[test]
-    fn load_station_rename_edit_returns_parsed_row() {
+    fn load_station_edit_returns_parsed_row() {
         let conn = open_in_memory().unwrap();
         rename_fixture(&conn);
         let out = apply_station_rename(&conn, &all_poles_op(), "herry", "n").unwrap();
-        let e = load_station_rename_edit(&conn, out.edit_id).unwrap().expect("row exists");
+        let e = load_station_edit(&conn, out.edit_id).unwrap().expect("row exists");
         assert_eq!(e.edit_id, out.edit_id);
         assert_eq!(e.station_id, 1);
         assert_eq!(e.action, "update");
@@ -1184,9 +1184,9 @@ mod tests {
     }
 
     #[test]
-    fn load_station_rename_edit_none_for_missing_id() {
+    fn load_station_edit_none_for_missing_id() {
         let conn = open_in_memory().unwrap();
-        assert!(load_station_rename_edit(&conn, 999).unwrap().is_none());
+        assert!(load_station_edit(&conn, 999).unwrap().is_none());
     }
 
     /// Station-rename fixture: station 'S' (sv 20) + poles sv 10 'S' (with

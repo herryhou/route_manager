@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use rm_db::{
-    apply_station_rename_undo, load_station_rename_edit, PoleUndoOp, StationRenameEdit,
+    apply_station_rename_undo, load_station_edit, PoleUndoOp, StationEdit,
     StationRenameUndoOp,
 };
 use rusqlite::Connection;
@@ -29,7 +29,7 @@ pub struct PoleUndo {
 
 /// Pure: reject undo-rows and non-rename kinds, copy the logged
 /// stop-version pairs into the inverse op.
-pub fn plan_rename_undo(edit: &StationRenameEdit) -> Result<RenameUndoOp, EditError> {
+pub fn plan_rename_undo(edit: &StationEdit) -> Result<RenameUndoOp, EditError> {
     if edit.action == "undo" {
         return Err(EditError::NotUndoable(edit.edit_id));
     }
@@ -79,7 +79,7 @@ pub fn undo_station_rename(
     editor: &str,
     note: &str,
 ) -> Result<UndoOutcome> {
-    let edit = load_station_rename_edit(conn, edit_id)?
+    let edit = load_station_edit(conn, edit_id)?
         .ok_or(EditError::NotUndoable(edit_id))?;
     let plan = plan_rename_undo(&edit)?;
     let op = StationRenameUndoOp {
@@ -103,11 +103,11 @@ pub fn undo_station_rename(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rm_db::StationRenameEdit;
+    use rm_db::StationEdit;
     use serde_json::json;
 
-    fn edit(action: &str, changes: serde_json::Value) -> StationRenameEdit {
-        StationRenameEdit {
+    fn edit(action: &str, changes: serde_json::Value) -> StationEdit {
+        StationEdit {
             edit_id: 7,
             station_id: 1,
             action: action.into(),
@@ -177,7 +177,7 @@ mod tests {
         c.as_object_mut().unwrap().remove("stops");
         assert!(matches!(plan_rename_undo(&edit("update", c)), Err(EditError::NotUndoable(7))));
         let e = edit("update", rename_changes());
-        let e = StationRenameEdit { new_station_version_id: None, ..e };
+        let e = StationEdit { new_station_version_id: None, ..e };
         assert!(matches!(plan_rename_undo(&e), Err(EditError::NotUndoable(7))));
     }
 }

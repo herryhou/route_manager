@@ -22,7 +22,7 @@ pub use edit::{
     StationSnapshot, PoleSnapshot, load_station_snapshot, StopSnapshot, load_stop_snapshot,
     station_is_current,
     StationRenameOp, PoleOp, StationRenameApplied, PoleApplied, apply_station_rename,
-    StationRenameEdit, load_station_rename_edit,
+    StationEdit, load_station_edit,
     StationMoveOp, apply_station_move, StationMoveApplied,
     StationRenameUndoOp, PoleUndoOp, StationRenameUndone, apply_station_rename_undo,
 };
