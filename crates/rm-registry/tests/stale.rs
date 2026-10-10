@@ -111,6 +111,34 @@ fn stale_rebuilds_and_clears_marks() {
 }
 
 #[test]
+fn rebuild_failure_leaves_marks_present() {
+    let conn = setup();
+    // stale_mark.cause_edit_id FKs edit_log: seed the log row first
+    conn.execute(
+        "INSERT INTO edit_log (entity, entity_id, editor, action, changes, ts)
+         VALUES ('stop', 1, 'test', 'edit', '{}', '2026-01-02T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+         VALUES ('stop_bearing', '*', 1, '2026-01-02T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    // break the rebuild: bearing::run's first statement now errors
+    conn.execute("DROP TABLE stop_bearing", []).unwrap();
+
+    assert!(run_stale(&conn, 1).is_err(), "rebuild failure propagates");
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1,
+        "snapshot delete never ran; badge stays amber over unrefreshed data"
+    );
+}
+
+#[test]
 fn stale_with_no_marks_is_false_and_touches_nothing() {
     let conn = setup();
     assert!(run_stale(&conn, 1).unwrap().is_none());
