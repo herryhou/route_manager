@@ -481,6 +481,22 @@ body {
   white-space: nowrap;
 }
 
+/* Edit-log rows (↩ 歷史 panel): display only, not clickable. */
+.log-row {
+  cursor: default;
+}
+
+.log-meta {
+  color: var(--muted);
+  font-size: 11px;
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 #title {
   font-size: 1.1rem;
 }

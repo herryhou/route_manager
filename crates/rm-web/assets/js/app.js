@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, editLogPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
@@ -337,10 +337,13 @@ function editFail(what, e) {
   status(`${what} failed: ${e.message}`);
 }
 
-/// stop-panel edit actions: rename now, move/regroup = one-shot place mode.
+/// stop-panel edit actions: rename now, move/regroup = one-shot place mode,
+/// log = edit-history panel with per-row undo.
 function onEditStop(act, stop, stationId) {
   if (!editMode) return;
-  if (act === 'rename') {
+  if (act === 'log') {
+    openEditLog(stop);
+  } else if (act === 'rename') {
     const name = prompt(`rename stop #${stop.stop_code}:`, stop.stop_name);
     if (!name || name === stop.stop_name) return;
     const note = prompt('note (required):', '') ?? '';
@@ -400,6 +403,44 @@ function onEditStop(act, stop, stationId) {
     if (pendingPlace) map.off('click', pendingPlace);
     pendingPlace = handler;
     map.on('click', handler);
+  }
+}
+
+/// Edit-history panel for a stop (↩ 歷史 mini-btn): audit rows newest
+/// first; undoable rows carry an ↩ in edit mode. stop.stop_id keys the
+/// log — the version id churns on every edit, the stop id never does.
+async function openEditLog(stop) {
+  busy(true);
+  try {
+    const v = await api.editLog('stop', stop.stop_id);
+    paneOpen('context', `editlog:${stop.stop_id}`, () => openEditLog(stop));
+    editLogPanel(v.rows ?? [], {
+      canUndo: editMode,
+      onUndo: (editId) => undoStopEdit(stop, editId),
+    });
+  } catch (e) {
+    status(`edit log load failed: ${e.message}`);
+  } finally {
+    busy(false);
+  }
+}
+
+/// Undo one logged stop edit: confirm → note → POST undo → reload what's
+/// on screen at the restored version, then re-fetch the log. A 409
+/// NotUndoable (row superseded by a newer edit / already an undo) lands
+/// in the status bar via editFail.
+async function undoStopEdit(stop, editId) {
+  if (!confirm(`undo edit #${editId} on stop #${stop.stop_code}?`)) return;
+  const note = prompt('note (required):', '') ?? '';
+  if (!note) return;
+  try {
+    const r = await api.undoEdit(editId, note);
+    status('undone');
+    await refreshAfterEdit();
+    await selectStop(r.new_stop_version_id);
+    await openEditLog(stop); // fresh rows — the undo row is now newest
+  } catch (e) {
+    editFail('undo', e);
   }
 }
 

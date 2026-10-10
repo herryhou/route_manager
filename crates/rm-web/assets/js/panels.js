@@ -337,6 +337,61 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
   });
 }
 
+/// Humanize a stop edit's `changes` JSON (`{field: {old, new}}`; undo rows
+/// carry `'{}'` + undo_of instead) into a short summary; unparseable text
+/// passes through.
+function changeText(changes) {
+  let c;
+  try { c = JSON.parse(changes); } catch { return changes; }
+  if (!c || typeof c !== 'object') return '';
+  const f = (x) => (typeof x === 'number' ? x.toFixed(5) : x);
+  const parts = [];
+  if (c.kind === 'station_rename') parts.push(`站名 ${c.old_name}→${c.new_name}`);
+  if (c.stop_name) parts.push(`名 ${c.stop_name.old}→${c.stop_name.new}`);
+  if (c.latitude != null || c.longitude != null) {
+    parts.push(`移動 (${f(c.latitude?.old)},${f(c.longitude?.old)})→(${f(c.latitude?.new)},${f(c.longitude?.new)})`);
+  }
+  if (c.station_id) parts.push(`站 #${c.station_id.old}→#${c.station_id.new}`);
+  return parts.join(' · ');
+}
+
+const ACTION_BADGE = { update: 'warn', move_station: 'warn', undo: 'good' };
+
+/// Edit-log panel (context pane): one stop's audit trail, newest first.
+/// Each row: action badge, humanized changes, time · editor · note meta.
+/// Undoable rows (action !== 'undo') carry an ↩ button when canUndo — the
+/// server stays the authority (a superseded row still 409s NotUndoable).
+export function editLogPanel(rows, { onUndo, canUndo }) {
+  // rows already undone by a newer entry lose their ↩ hint — the server
+  // would 409 those anyway; the hint just saves the dead-end click.
+  const undone = new Set((rows ?? []).map((r) => r.undo_of).filter((x) => x != null));
+  const items = (rows ?? [])
+    .map((r) => {
+      const undoBtn = canUndo && r.action !== 'undo' && !undone.has(r.edit_id)
+        ? `<button class="mini-btn log-undo" data-eid="${r.edit_id}" title="undo this edit">↩</button>`
+        : '';
+      const undoOf = r.undo_of != null ? ` · ↩ #${r.undo_of}` : '';
+      const meta = `${r.ts} · ${esc(r.editor)}${r.note ? ` · ${esc(r.note)}` : ''}${undoOf}`;
+      return `<div class="stop-row log-row">
+        <span class="badge ${ACTION_BADGE[r.action] ?? 'nodata'}">${r.action}</span>
+        <span class="stop-name" title="${esc(r.changes)}">${esc(changeText(r.changes)) || '—'}</span>
+        <span class="log-meta" title="${meta}">${esc(meta)}</span>
+        ${undoBtn}
+      </div>`;
+    })
+    .join('');
+  const pane = showPane('context', `
+    <p class="muted">edit history, newest first — ↩ restores the previous version</p>
+    ${items || '<p class="muted">no edits</p>'}
+  `, `Edit log (${(rows ?? []).length})`);
+  pane.querySelectorAll('.log-undo').forEach((el) =>
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onUndo(Number(el.dataset.eid));
+    })
+  );
+}
+
 /// Path-deviation list panel (topbar path dev chip): directions whose
 /// matched OSM path strays from the src polyline — open the route and
 /// compare the ways layer against the raw polyline layer.
@@ -505,7 +560,8 @@ export function stopPanel(d, { onPickRoute, onPickStation, onEditStop }) {
       <tr><td>stop</td><td>${esc(d.stop.stop_name)} (${d.stop.stop_code})
         ${editable ? '<button class="mini-btn" data-act="rename" title="rename stop">✎</button>' : ''}
         ${editable ? '<button class="mini-btn" data-act="move" title="move stop position">移動位置</button>' : ''}
-        ${editable ? '<button class="mini-btn" data-act="regroup" title="regroup stop to another station">換站</button>' : ''}</td></tr>
+        ${editable ? '<button class="mini-btn" data-act="regroup" title="regroup stop to another station">換站</button>' : ''}
+        ${editable ? '<button class="mini-btn" data-act="log" title="edit history / undo">↩ 歷史</button>' : ''}</td></tr>
       ${d.stale && (d.stale.projections?.length || d.stale.bearings)
         ? `<tr><td>stale</td><td><span class="pp-hot">⚠ ${d.stale.projections?.length ?? 0} route projections · bearings ${d.stale.bearings ? 'stale' : 'ok'}</span></td></tr>`
         : ''}
