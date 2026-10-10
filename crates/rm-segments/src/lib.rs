@@ -14,7 +14,7 @@ pub mod geometry;
 use anyhow::Result;
 use geometry::Projection;
 use rm_core::LatLng;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Summary {
@@ -82,8 +82,8 @@ pub fn run_stale(
                         [rid],
                         |r| r.get::<_, Option<i64>>(0),
                     )
-                    .map(|v| v.is_some())
-                    .unwrap_or(false);
+                    .optional()?
+                    .is_some();
                 if published {
                     only.insert(rid);
                     clear.push((rowid, cause));
