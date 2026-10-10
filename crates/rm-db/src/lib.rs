@@ -24,7 +24,8 @@ pub use edit::{
     StationRenameOp, PoleOp, StationRenameApplied, PoleApplied, apply_station_rename,
     StationEdit, load_station_edit,
     StationMoveOp, apply_station_move, StationMoveApplied,
-    StationRenameUndoOp, PoleUndoOp, StationRenameUndone, apply_station_rename_undo,
+    StationRenameUndoOp, PoleUndoOp, StationMoveUndoOp, StationUndoOp, StationUndone,
+    apply_station_undo,
 };
 pub use migrate::migrate;
 

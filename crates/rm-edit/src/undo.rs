@@ -4,8 +4,7 @@
 
 use anyhow::Result;
 use rm_db::{
-    apply_station_rename_undo, load_station_edit, PoleUndoOp, StationEdit,
-    StationRenameUndoOp,
+    apply_station_undo, load_station_edit, PoleUndoOp, StationEdit, StationRenameUndoOp,
 };
 use rusqlite::Connection;
 
@@ -134,7 +133,13 @@ pub fn undo_station_rename(
             .map(|p| PoleUndoOp { stop_id: p.stop_id, old_svi: p.old_svi, new_svi: p.new_svi })
             .collect(),
     };
-    let undone = apply_station_rename_undo(conn, &op, editor, note).map_err(crate::map_db_err)?;
+    let undone = apply_station_undo(
+        conn,
+        &rm_db::StationUndoOp::Rename(op),
+        editor,
+        note,
+    )
+    .map_err(crate::map_db_err)?;
     Ok(UndoOutcome {
         edit_id: undone.edit_id,
         restored_station_version_id: undone.restored_station_version_id,

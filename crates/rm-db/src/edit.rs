@@ -936,29 +936,59 @@ pub struct PoleUndoOp {
     pub new_svi: i64,
 }
 
+/// Write-side op for the station-move undo: restore is reopen-the-old /
+/// close-the-minted — the old row already holds the original coords.
 #[derive(Debug)]
-pub struct StationRenameUndone {
+pub struct StationMoveUndoOp {
+    pub edit_id: i64,
+    pub station_id: i64,
+    pub old_station_version_id: i64,
+    pub new_station_version_id: i64,
+}
+
+#[derive(Debug)]
+pub enum StationUndoOp {
+    Rename(StationRenameUndoOp),
+    Move(StationMoveUndoOp),
+}
+
+#[derive(Debug)]
+pub struct StationUndone {
     pub edit_id: i64,
     pub restored_station_version_id: i64,
 }
 
-/// Undo a station rename in ONE transaction — the exact inverse of
-/// `apply_station_rename`: close/reopen the station version, per pole
-/// close/reopen the stop versions, repoint route_stop_version, move the
-/// stop_bearing row back (PK invariant). One edit_log undo row, ZERO
-/// stale marks (nothing derived changed). Mints nothing.
+/// Undo a station edit in ONE transaction — the exact inverse of the
+/// applied edit, dispatched on the op's kind. Rename branch: close/reopen
+/// the station version, per pole close/reopen the stop versions, repoint
+/// route_stop_version, move the stop_bearing row back (PK invariant).
+/// Move branch: close the minted version, reopen the predecessor — touches
+/// no poles, no bearings, no rsv (a station move wrote none of them).
+/// One edit_log undo row, ZERO stale marks. Mints nothing.
 ///
-/// Guards (inside the tx, before any write): the rename's station version
-/// must still be current and manual (`StationNotCurrent` otherwise); every
-/// minted pole version must still be current and manual (`NotUndoable`
-/// otherwise — a post-rename edit on any pole makes the rename
-/// non-undoable). Every reopen/close UPDATE checks rows-affected == 1.
-pub fn apply_station_rename_undo(
+/// Guards (inside the tx, before any write): the edit's station version
+/// must still be current and manual (`StationNotCurrent` otherwise); the
+/// rename branch additionally requires every minted pole version still
+/// current and manual (`NotUndoable` otherwise). Every reopen/close UPDATE
+/// checks rows-affected == 1.
+pub fn apply_station_undo(
+    conn: &Connection,
+    op: &StationUndoOp,
+    editor: &str,
+    note: &str,
+) -> Result<StationUndone> {
+    match op {
+        StationUndoOp::Rename(o) => apply_rename_undo(conn, o, editor, note),
+        StationUndoOp::Move(o) => apply_move_undo(conn, o, editor, note),
+    }
+}
+
+fn apply_rename_undo(
     conn: &Connection,
     op: &StationRenameUndoOp,
     editor: &str,
     note: &str,
-) -> Result<StationRenameUndone> {
+) -> Result<StationUndone> {
     let tx = conn.unchecked_transaction()?;
     let now = crate::now_rfc3339();
 
@@ -1050,7 +1080,65 @@ pub fn apply_station_rename_undo(
     )?;
     let undo_edit_id = tx.last_insert_rowid();
     tx.commit()?;
-    Ok(StationRenameUndone {
+    Ok(StationUndone {
+        edit_id: undo_edit_id,
+        restored_station_version_id: op.old_station_version_id,
+    })
+}
+
+fn apply_move_undo(
+    conn: &Connection,
+    op: &StationMoveUndoOp,
+    editor: &str,
+    note: &str,
+) -> Result<StationUndone> {
+    let tx = conn.unchecked_transaction()?;
+    let now = crate::now_rfc3339();
+
+    // guards BEFORE any write: the minted version must still be current and
+    // manual (a second move/rename on top makes this undo stale)
+    let n: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM station_version
+         WHERE station_version_id = ?1 AND valid_to IS NULL AND source = 'manual'",
+        [op.new_station_version_id],
+        |r| r.get(0),
+    )?;
+    if n == 0 {
+        return Err(EditError::StationNotCurrent(op.new_station_version_id).into());
+    }
+
+    let n = tx.execute(
+        "UPDATE station_version SET valid_to = ?1
+         WHERE station_version_id = ?2 AND valid_to IS NULL",
+        params![now, op.new_station_version_id],
+    )?;
+    if n != 1 {
+        return Err(EditError::NotUndoable(op.edit_id).into());
+    }
+    let n = tx.execute(
+        "UPDATE station_version SET valid_to = NULL WHERE station_version_id = ?1",
+        params![op.old_station_version_id],
+    )?;
+    if n != 1 {
+        return Err(EditError::NotUndoable(op.edit_id).into());
+    }
+
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, undo_of, version_before, version_after)
+         VALUES (?1, ?2, 'station', ?3, 'undo', '{}', ?4, ?5, ?6, ?7)",
+        params![
+            now,
+            editor,
+            op.station_id,
+            if note.is_empty() { None } else { Some(note) },
+            op.edit_id,
+            op.new_station_version_id,
+            op.old_station_version_id
+        ],
+    )?;
+    let undo_edit_id = tx.last_insert_rowid();
+    tx.commit()?;
+    Ok(StationUndone {
         edit_id: undo_edit_id,
         restored_station_version_id: op.old_station_version_id,
     })
@@ -1433,7 +1521,7 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let applied = seed_renamed(&conn);
         // PK invariant: the row MOVES back new_svi → old_svi, values intact
-        apply_station_rename_undo(&conn, &undo_op(&applied), "herry", "revert").unwrap();
+        apply_station_undo(&conn, &StationUndoOp::Rename(undo_op(&applied)), "herry", "revert").unwrap();
         let (deg, src, at): (f64, String, String) = conn.query_row(
             "SELECT bearing_deg, source, computed_at FROM stop_bearing WHERE stop_version_id = 10", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
         assert_eq!((deg, src.as_str(), at.as_str()), (123.5, "OSM", "2026-01-02T00:00:00Z"));
@@ -1446,7 +1534,7 @@ mod tests {
     fn undo_restores_station_and_poles() {
         let conn = open_in_memory().unwrap();
         let applied = seed_renamed(&conn);
-        let out = apply_station_rename_undo(&conn, &undo_op(&applied), "herry", "revert").unwrap();
+        let out = apply_station_undo(&conn, &StationUndoOp::Rename(undo_op(&applied)), "herry", "revert").unwrap();
         assert_eq!(out.restored_station_version_id, 20);
         // station: old row current with old name, minted row closed
         let (name, to): (String, Option<String>) = conn.query_row(
@@ -1474,7 +1562,7 @@ mod tests {
     fn undo_writes_edit_log_row_and_zero_stale_marks() {
         let conn = open_in_memory().unwrap();
         let applied = seed_renamed(&conn);
-        let out = apply_station_rename_undo(&conn, &undo_op(&applied), "herry", "revert!").unwrap();
+        let out = apply_station_undo(&conn, &StationUndoOp::Rename(undo_op(&applied)), "herry", "revert!").unwrap();
         let (entity, eid, action, changes, note, undo_of, vb, va): (String, i64, String, String, Option<String>, Option<i64>, Option<i64>, Option<i64>) = conn.query_row(
             "SELECT entity, entity_id, action, changes, note, undo_of, version_before, version_after FROM edit_log WHERE edit_id = ?1",
             [out.edit_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?))).unwrap();
@@ -1493,7 +1581,7 @@ mod tests {
         rename_fixture(&conn);
         let applied = apply_station_rename(&conn, &station_only_op(), "herry", "n").unwrap();
         assert!(applied.poles.is_empty());
-        apply_station_rename_undo(&conn, &undo_op(&applied), "herry", "revert").unwrap();
+        apply_station_undo(&conn, &StationUndoOp::Rename(undo_op(&applied)), "herry", "revert").unwrap();
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM stop_version WHERE valid_to IS NULL", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 2, "both original poles untouched and current");
@@ -1523,7 +1611,7 @@ mod tests {
             ..all_poles_op()
         };
         apply_station_rename(&conn, &second_op, "herry", "second").unwrap();
-        let err = apply_station_rename_undo(&conn, &undo_op(&first), "herry", "revert").unwrap_err();
+        let err = apply_station_undo(&conn, &StationUndoOp::Rename(undo_op(&first)), "herry", "revert").unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");
         // zero partial state: still exactly two manual station versions,
         // two station edit_log rows (two renames, no undo row)
@@ -1544,7 +1632,7 @@ mod tests {
             stop_id: applied.poles[0].stop_id, stop_version_id: applied.poles[0].new_svi,
             stop_name: Some("shadowed".into()), ..Default::default()
         }, "h", "n").unwrap();
-        let err = apply_station_rename_undo(&conn, &undo_op(&applied), "herry", "revert").unwrap_err();
+        let err = apply_station_undo(&conn, &StationUndoOp::Rename(undo_op(&applied)), "herry", "revert").unwrap_err();
         assert!(err.to_string().contains("cannot be undone"), "{err}");
         // zero partial state: minted station version still current, no undo row
         let n: i64 = conn.query_row(
@@ -1566,7 +1654,7 @@ mod tests {
             stop_id: applied.poles[1].stop_id, stop_version_id: applied.poles[1].new_svi,
             stop_name: Some("shadowed".into()), ..Default::default()
         }, "h", "n").unwrap();
-        let err = apply_station_rename_undo(&conn, &undo_op(&applied), "herry", "revert").unwrap_err();
+        let err = apply_station_undo(&conn, &StationUndoOp::Rename(undo_op(&applied)), "herry", "revert").unwrap_err();
         assert!(err.to_string().contains("cannot be undone"), "{err}");
         // pole 1's inversion rolled back: minted version current again,
         // original closed, bearing still on the minted svi, rsv untouched
@@ -1959,5 +2047,75 @@ mod tests {
         let logs: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log", [], |r| r.get(0)).unwrap();
         assert_eq!((versions, current, logs), (2, 1, 1));
         let _ = first;
+    }
+
+    fn move_undo_op(edit_id: i64, old: i64, new: i64) -> StationUndoOp {
+        StationUndoOp::Move(StationMoveUndoOp {
+            edit_id,
+            station_id: 1,
+            old_station_version_id: old,
+            new_station_version_id: new,
+        })
+    }
+
+    #[test]
+    fn apply_station_undo_move_restores_predecessor() {
+        let conn = open_in_memory().unwrap();
+        let old = rename_fixture(&conn);
+        let m = apply_station_move(&conn, &move_op(old), "herry", "move").unwrap();
+        let u = apply_station_undo(&conn, &move_undo_op(m.edit_id, old, m.new_station_version_id), "h", "rev").unwrap();
+        assert_eq!(u.restored_station_version_id, old);
+        // predecessor reopened with its ORIGINAL coords (reopen, not rewrite)
+        let (to, lat, lon): (Option<String>, f64, f64) = conn.query_row(
+            "SELECT valid_to, latitude, longitude FROM station_version WHERE station_version_id = ?1",
+            [old], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((to.is_none(), lat, lon), (true, 24.0, 120.0));
+        // minted row closed; undo mints nothing
+        let (to, _): (Option<String>, Option<String>) = conn.query_row(
+            "SELECT valid_to, source FROM station_version WHERE station_version_id = ?1",
+            [m.new_station_version_id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert!(to.is_some());
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM station_version WHERE valid_to IS NULL", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        // no collateral
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM stop_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM stop_bearing", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        // undo log row: action='undo', changes='{}', undo_of set, versions swapped
+        let (act, changes, undo_of, vb, va): (String, String, i64, i64, i64) = conn.query_row(
+            "SELECT action, changes, undo_of, version_before, version_after FROM edit_log
+             WHERE edit_id = ?1",
+            [u.edit_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap();
+        assert_eq!((act.as_str(), changes.as_str(), undo_of, vb, va),
+            ("undo", "{}", m.edit_id, m.new_station_version_id, old));
+    }
+
+    #[test]
+    fn apply_station_undo_move_refuses_after_second_move() {
+        let conn = open_in_memory().unwrap();
+        let old = rename_fixture(&conn);
+        let first = apply_station_move(&conn, &move_op(old), "herry", "a").unwrap();
+        let _second = apply_station_move(&conn, &move_op(first.new_station_version_id), "herry", "b").unwrap();
+        let err = apply_station_undo(&conn, &move_undo_op(first.edit_id, old, first.new_station_version_id), "h", "rev").unwrap_err();
+        assert!(err.to_string().contains("station version"), "{err}");
+        // zero partial: three versions, two move rows, no undo row
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM edit_log WHERE action = 'undo'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn apply_station_undo_move_bogus_ids_zero_partial() {
+        let conn = open_in_memory().unwrap();
+        let old = rename_fixture(&conn);
+        let m = apply_station_move(&conn, &move_op(old), "herry", "move").unwrap();
+        // unknown predecessor: the reopen UPDATE hits 0 rows
+        let err = apply_station_undo(&conn, &move_undo_op(m.edit_id, 999, m.new_station_version_id), "h", "rev").unwrap_err();
+        assert!(err.to_string().contains("cannot be undone"), "{err}");
+        // unknown minted version: the currency COUNT guard rejects
+        let err = apply_station_undo(&conn, &move_undo_op(m.edit_id, old, 999), "h", "rev").unwrap_err();
+        assert!(err.to_string().contains("station version"), "{err}");
+        // zero partial after both
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM edit_log WHERE action = 'undo'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
 }
