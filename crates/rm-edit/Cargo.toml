@@ -5,6 +5,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+rm-core.workspace = true
 rm-db.workspace = true
 rusqlite.workspace = true
 anyhow.workspace = true

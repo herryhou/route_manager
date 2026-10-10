@@ -997,6 +997,7 @@ name = "rm-edit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "rm-core",
  "rm-db",
  "rusqlite",
  "serde_json",
