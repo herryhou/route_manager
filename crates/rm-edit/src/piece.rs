@@ -214,3 +214,119 @@ pub fn edit_polyline_piece(
         created: applied.created,
     })
 }
+
+#[derive(Debug)]
+pub struct PieceUndoPlan {
+    pub edit_id: i64,
+    pub route_id: i64,
+    pub xno: String,
+    pub direction: i64,
+    pub piece_id: i64,
+    pub undone_ts: String,
+    pub restored: Option<rm_db::PieceRestoreState>,
+}
+
+fn anchor_pair(v: Option<&serde_json::Value>) -> Option<([f64; 2], [f64; 2])> {
+    let v = v?;
+    let a = v.get(0)?.as_array()?;
+    let b = v.get(1)?.as_array()?;
+    Some((
+        [a[0].as_f64()?, a[1].as_f64()?],
+        [b[0].as_f64()?, b[1].as_f64()?],
+    ))
+}
+
+/// Pure guard + inversion from the logged payload: only a non-undo
+/// polyline row with `kind = 'polyline_piece'` and a parseable piece_id is
+/// invertible. The `old` branches decide restore-vs-delete: both `old`s
+/// present → restore that state; both absent (a create row) → delete.
+/// Half-payload rows are corrupt → NotUndoable.
+pub fn plan_piece_undo(edit: &rm_db::PolylineEditRow) -> Result<PieceUndoPlan, EditError> {
+    if edit.action == "undo" || edit.changes.get("kind").and_then(|k| k.as_str()) != Some("polyline_piece")
+    {
+        return Err(EditError::NotUndoable(edit.edit_id));
+    }
+    let piece_id = edit
+        .changes
+        .get("piece_id")
+        .and_then(|v| v.as_i64())
+        .ok_or(EditError::NotUndoable(edit.edit_id))?;
+    let xno = edit
+        .changes
+        .get("xno")
+        .and_then(|v| v.as_str())
+        .ok_or(EditError::NotUndoable(edit.edit_id))?
+        .to_string();
+    let direction = edit
+        .changes
+        .get("direction")
+        .and_then(|v| v.as_i64())
+        .ok_or(EditError::NotUndoable(edit.edit_id))?;
+
+    let old_encoded = edit
+        .changes
+        .get("encoded")
+        .and_then(|e| e.get("old"))
+        .and_then(|v| v.as_str());
+    let old_anchors = anchor_pair(edit.changes.get("anchors").and_then(|a| a.get("old")));
+    let restored = match (old_encoded, old_anchors) {
+        (Some(encoded), Some((s, e))) => Some(rm_db::PieceRestoreState {
+            encoded: encoded.to_string(),
+            anchor_start_lat: s[0],
+            anchor_start_lon: s[1],
+            anchor_end_lat: e[0],
+            anchor_end_lon: e[1],
+        }),
+        (None, None) => None,
+        _ => return Err(EditError::NotUndoable(edit.edit_id)),
+    };
+
+    Ok(PieceUndoPlan {
+        edit_id: edit.edit_id,
+        route_id: edit.entity_id,
+        xno,
+        direction,
+        piece_id,
+        undone_ts: edit.ts.clone(),
+        restored,
+    })
+}
+
+#[derive(Debug)]
+pub struct PieceUndoOutcome {
+    pub edit_id: i64,
+    pub piece_id: i64,
+    pub deleted: bool,
+}
+
+/// Application service: load → plan (pure) → apply (one tx). Forward-write
+/// undo — no version chain; the apply's ts currency guard is the authority.
+pub fn undo_polyline_piece(
+    conn: &Connection,
+    edit_id: i64,
+    editor: &str,
+    note: &str,
+) -> Result<PieceUndoOutcome> {
+    let row = rm_db::load_polyline_edit(conn, edit_id)?.ok_or(EditError::NotUndoable(edit_id))?;
+    let plan = plan_piece_undo(&row)?;
+    let undone = rm_db::apply_piece_undo(
+        conn,
+        &rm_db::PieceUndoOp {
+            edit_id: plan.edit_id,
+            route_id: plan.route_id,
+            xno: plan.xno,
+            direction: plan.direction,
+            piece_id: plan.piece_id,
+            undone_ts: plan.undone_ts,
+            restored: plan.restored,
+        },
+        editor,
+        note,
+    )
+    .map_err(map_db_err)?;
+    Ok(PieceUndoOutcome {
+        edit_id: undone.edit_id,
+        piece_id: undone.piece_id,
+        deleted: undone.deleted,
+    })
+}

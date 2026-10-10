@@ -180,3 +180,136 @@ fn piece_create_ok_without_src_polyline() {
     let out = edit_polyline_piece(&conn, c, "herry", "draw").unwrap();
     assert!(out.created);
 }
+
+use rm_edit::{plan_piece_undo, undo_polyline_piece};
+
+fn polyline_row(action: &str, changes: serde_json::Value) -> rm_db::PolylineEditRow {
+    rm_db::PolylineEditRow {
+        edit_id: 7,
+        entity_id: 1,
+        action: action.into(),
+        ts: "2026-01-02T00:00:00Z".into(),
+        changes,
+    }
+}
+
+fn create_changes() -> serde_json::Value {
+    serde_json::json!({
+        "kind": "polyline_piece", "xno": "1", "direction": 1, "piece_id": 3,
+        "encoded": { "new": "_p~iF~ps|U_ulLnnqC" },
+        "anchors": { "new": [[38.5, -120.2], [40.7, -120.95]] }
+    })
+}
+
+#[test]
+fn plan_parses_create_into_delete() {
+    let plan = plan_piece_undo(&polyline_row("create", create_changes())).unwrap();
+    assert_eq!((plan.piece_id, plan.restored.is_none()), (3, true));
+    assert_eq!((plan.xno.as_str(), plan.direction, plan.route_id), ("1", 1, 1));
+}
+
+#[test]
+fn plan_parses_update_into_restore() {
+    let mut c = create_changes();
+    c["action_hint"] = serde_json::json!("ignored");
+    c["encoded"] = serde_json::json!({
+        "old": "_ulLnnqC_p~iF~ps|U", "new": "_p~iF~ps|U_ulLnnqC"
+    });
+    c["anchors"] = serde_json::json!({
+        "old": [[37.5, -121.2], [39.7, -121.95]],
+        "new": [[38.5, -120.2], [40.7, -120.95]]
+    });
+    let plan = plan_piece_undo(&polyline_row("update", c)).unwrap();
+    let r = plan.restored.expect("restore state");
+    assert_eq!(r.encoded, "_ulLnnqC_p~iF~ps|U");
+    assert_eq!((r.anchor_start_lat, r.anchor_end_lon), (37.5, -121.95));
+}
+
+#[test]
+fn plan_rejects_undo_rows_foreign_kinds_and_broken_payloads() {
+    // undo-of-undo
+    let err = plan_piece_undo(&polyline_row("undo", create_changes())).unwrap_err();
+    assert!(matches!(err, EditError::NotUndoable(7)), "{err}");
+    // foreign kind
+    let mut c = create_changes();
+    c["kind"] = serde_json::json!("station_move");
+    let err = plan_piece_undo(&polyline_row("update", c)).unwrap_err();
+    assert!(matches!(err, EditError::NotUndoable(7)), "{err}");
+    // missing piece_id
+    let mut c = create_changes();
+    c["piece_id"] = serde_json::Value::Null;
+    let err = plan_piece_undo(&polyline_row("create", c)).unwrap_err();
+    assert!(matches!(err, EditError::NotUndoable(7)), "{err}");
+    // half payload: encoded.old without anchors.old
+    let mut c = create_changes();
+    c["encoded"] = serde_json::json!({ "old": "x", "new": "y" });
+    let err = plan_piece_undo(&polyline_row("update", c)).unwrap_err();
+    assert!(matches!(err, EditError::NotUndoable(7)), "{err}");
+}
+
+#[test]
+fn piece_undo_end_to_end_create_then_undo_deletes() {
+    let conn = open_in_memory().unwrap();
+    fixture(&conn);
+    let first = edit_polyline_piece(&conn, cmd(), "herry", "a").unwrap();
+    let out = undo_polyline_piece(&conn, first.edit_id, "h", "rev").unwrap();
+    assert!(out.deleted);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM polyline_piece", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    // undo of the undo → NotUndoable
+    let err = undo_polyline_piece(&conn, out.edit_id, "h", "again").unwrap_err();
+    assert!(err.to_string().contains("cannot be undone"), "{err}");
+}
+
+#[test]
+fn piece_undo_end_to_end_update_then_undo_restores() {
+    let conn = open_in_memory().unwrap();
+    fixture(&conn);
+    let first = edit_polyline_piece(&conn, cmd(), "herry", "a").unwrap();
+    let mut second = cmd();
+    second.piece_id = Some(first.piece_id);
+    second.expected_updated_at = Some(first.updated_at.clone());
+    second.points = vec![[38.5, -120.2], [39.6, -120.575], [40.7, -120.95]];
+    edit_polyline_piece(&conn, second, "herry", "b").unwrap();
+    // undo the UPDATE (edit 2): newest non-undo polyline row for the route
+    let newest: i64 = conn.query_row(
+        "SELECT edit_id FROM edit_log
+         WHERE entity = 'polyline' AND entity_id = 1 AND action != 'undo'
+         ORDER BY edit_id DESC LIMIT 1",
+        [], |r| r.get(0)).unwrap();
+    let out = undo_polyline_piece(&conn, newest, "h", "rev").unwrap();
+    assert!(!out.deleted);
+    let enc: String = conn
+        .query_row("SELECT encoded FROM polyline_piece WHERE piece_id = ?1", [first.piece_id], |r| r.get(0))
+        .unwrap();
+    assert_eq!(enc, "_p~iF~ps|U_ulLnnqC");
+}
+
+#[test]
+fn piece_undo_superseded_refused() {
+    let conn = open_in_memory().unwrap();
+    fixture(&conn);
+    let first = edit_polyline_piece(&conn, cmd(), "herry", "a").unwrap();
+    let mut second = cmd();
+    second.piece_id = Some(first.piece_id);
+    second.expected_updated_at = Some(first.updated_at.clone());
+    second.points = vec![[38.5, -120.2], [39.6, -120.575], [40.7, -120.95]];
+    edit_polyline_piece(&conn, second, "herry", "b").unwrap();
+    // now_rfc3339 is second-granular, so both edits usually land in the same
+    // wall-clock second and undone_ts == the row's updated_at. Diverge the row
+    // directly to make "the piece moved on" deterministic.
+    conn.execute(
+        "UPDATE polyline_piece SET updated_at = '2030-01-01T00:00:00Z' WHERE piece_id = ?1",
+        [first.piece_id],
+    ).unwrap();
+    // undo of the FIRST edit: piece moved on → 409-shaped refusal
+    let err = undo_polyline_piece(&conn, first.edit_id, "h", "rev").unwrap_err();
+    assert!(err.to_string().contains("edited by someone else"), "{err}");
+}
+
+#[test]
+fn piece_undo_unknown_or_foreign_edit_refused() {
+    let conn = open_in_memory().unwrap();
+    fixture(&conn);
+    let err = undo_polyline_piece(&conn, 999, "h", "").unwrap_err();
+    assert!(err.to_string().contains("cannot be undone"), "{err}");
+}
