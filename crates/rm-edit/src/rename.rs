@@ -66,16 +66,8 @@ pub enum EditError {
     EmptyEdit,
     #[error("edit sets no field to a new value")]
     NoOpEdit,
-    #[error("invalid polyline piece: {0}")]
-    InvalidPiece(String),
     #[error("route {0} does not exist")]
     UnknownRoute(String),
-    #[error("piece {0} was edited by someone else — reload and retry")]
-    PieceNotCurrent(i64),
-    #[error("piece {0} overlaps an existing piece span")]
-    PieceOverlap(i64),
-    #[error("piece {0} exists under a different route/direction")]
-    PieceScope(i64),
     #[error("invalid polyline: {0}")]
     InvalidLine(String),
     #[error("line {0}/{1} was edited by someone else — reload and retry")]

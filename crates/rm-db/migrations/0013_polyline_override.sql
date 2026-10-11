@@ -11,3 +11,7 @@ CREATE TABLE polyline_override (
 );
 -- exactly one current override per direction
 CREATE UNIQUE INDEX polyline_override_dir ON polyline_override (xno, direction);
+
+-- phase-1 piece model retires with this branch: readers/editors all consume
+-- the whole-line override; the piece table and its code do not ship
+DROP TABLE polyline_piece;

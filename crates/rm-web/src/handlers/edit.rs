@@ -71,15 +71,14 @@ pub struct StopEditBody {
 }
 
 /// `rm_edit::EditError` splits into request problems (400: empty/no-op
-/// edit, invalid piece, unknown route/scope) and races / bad targets
+/// edit, invalid line override, unknown route) and races / bad targets
 /// (409: version no longer current, un-undoable edit, unknown regroup
-/// target, piece overlap).
+/// target).
 fn edit_conflict(err: ApiError) -> ApiError {
     if let Some(e) = err.downcast_ref::<rm_edit::EditError>() {
         return match e {
             rm_edit::EditError::EmptyEdit | rm_edit::EditError::NoOpEdit
             | rm_edit::EditError::EmptyNewName | rm_edit::EditError::NoOpRename
-            | rm_edit::EditError::InvalidPiece(_) | rm_edit::EditError::PieceScope(_)
             | rm_edit::EditError::InvalidLine(_)
             | rm_edit::EditError::UnknownRoute(_) => {
                 ApiError::bad_request(&e.to_string())
@@ -88,9 +87,7 @@ fn edit_conflict(err: ApiError) -> ApiError {
             | rm_edit::EditError::StationNotCurrent(_)
             | rm_edit::EditError::NotUndoable(_)
             | rm_edit::EditError::UnknownStation(_)
-            | rm_edit::EditError::PieceNotCurrent(_)
-            | rm_edit::EditError::LineNotCurrent(_, _)
-            | rm_edit::EditError::PieceOverlap(_) => {
+            | rm_edit::EditError::LineNotCurrent(_, _) => {
                 ApiError::conflict(&e.to_string())
             }
         };
@@ -203,7 +200,7 @@ pub async fn log(
 /// POST /api/edit/undo/{edit_id} — revert an edit by restoring the version
 /// that preceded it. Stop rows restore the stop version; station rows
 /// (rename/move) restore the station version; polyline rows restore or
-/// delete the manual piece. Unknown ids route down the stop path and
+/// delete the line override. Unknown ids route down the stop path and
 /// surface as its 409 NotUndoable, as before.
 pub async fn undo(
     Path(edit_id): Path<i64>,

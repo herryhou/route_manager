@@ -109,32 +109,6 @@ mod tests {
     }
 
     #[test]
-    fn polyline_piece_exists_after_migrate() {
-        let conn = open_in_memory().unwrap();
-        let cols: Vec<String> = conn
-            .prepare("SELECT name FROM pragma_table_info('polyline_piece') ORDER BY cid")
-            .unwrap()
-            .query_map([], |r| r.get(0))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert_eq!(
-            cols,
-            vec![
-                "piece_id",
-                "xno",
-                "direction",
-                "encoded",
-                "anchor_start_lat",
-                "anchor_start_lon",
-                "anchor_end_lat",
-                "anchor_end_lon",
-                "updated_at"
-            ]
-        );
-    }
-
-    #[test]
     fn migration_0013_creates_override_table_and_unique_index() {
         let conn = open_in_memory().unwrap();
         let cols: Vec<String> = conn
@@ -157,6 +131,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 1, "unique index on (xno, direction)");
+        let gone: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'polyline_piece'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(gone, 0, "0013 drops the piece table");
     }
 
     #[test]
