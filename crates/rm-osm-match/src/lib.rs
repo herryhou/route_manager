@@ -34,16 +34,15 @@ struct Job {
     encoded: String,
 }
 
-/// Match every published direction of `batch` onto the OSM road graph and
-/// write seg_match_way + seg_match_stat. Idempotent: both tables are
-/// rebuilt from scratch each run. Per-direction failures are non-fatal.
-pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
-    let graph = Arc::new(RoadGraph::from_conn(conn)?);
-
-    let jobs: Vec<Job> = {
+/// Enumerate the published directions of `batch` and resolve each job's
+/// effective polyline (override ?? src — phase 2: the run matches the line
+/// consumers see, not the raw capture). The `src_route_point` JOIN stays in
+/// the query: it decides which directions exist as jobs at all.
+fn collect_jobs(conn: &Connection, batch_id: i64) -> anyhow::Result<Vec<Job>> {
+    let mut jobs: Vec<Job> = {
         let mut stmt = conn.prepare(
             "SELECT rv.route_version_id, sv.subroute_version_id, srp.direction,
-                    substr(r.ext_uid, 5), srp.encoded,
+                    substr(r.ext_uid, 5),
                     (SELECT COUNT(*) FROM route_stop_version o
                       WHERE o.subroute_version_id = sv.subroute_version_id
                         AND o.direction = srp.direction)
@@ -61,12 +60,25 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                 subroute_version_id: r.get(1)?,
                 direction: r.get(2)?,
                 xno: r.get(3)?,
-                stops: r.get(5)?,
-                encoded: r.get(4)?,
+                stops: r.get(4)?,
+                encoded: String::new(),
             })
         })?;
         rows.collect::<Result<_, _>>()?
     };
+    for job in &mut jobs {
+        job.encoded = rm_db::effective_encoded(conn, batch_id, &job.xno, job.direction)?;
+    }
+    Ok(jobs)
+}
+
+/// Match every published direction of `batch` onto the OSM road graph and
+/// write seg_match_way + seg_match_stat. Idempotent: both tables are
+/// rebuilt from scratch each run. Per-direction failures are non-fatal.
+pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
+    let graph = Arc::new(RoadGraph::from_conn(conn)?);
+
+    let jobs = collect_jobs(conn, batch_id)?;
 
     struct Outcome {
         job: Job,

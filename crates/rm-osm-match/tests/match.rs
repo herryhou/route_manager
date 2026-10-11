@@ -188,3 +188,24 @@ fn empty_osm_tables_is_an_error() {
     let err = rm_osm_match::run(&conn, batch).unwrap_err();
     assert!(err.to_string().contains("osm-prepare"), "{err}");
 }
+
+#[test]
+fn full_run_consumes_override_over_src() {
+    let (_dir, conn, batch) = setup();
+    insert_straight_road(&conn);
+    // kill the src polyline; the override is now the only geometry — if the
+    // run still read src, route2/dir0 would land in `unmatched`
+    conn.execute(
+        "UPDATE src_route_point SET encoded = '' WHERE batch_id = ?1 AND xno = '2' AND direction = 0",
+        rusqlite::params![batch],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO polyline_override (xno, direction, encoded, updated_at)
+         VALUES ('2', 0, ?1, '2026-01-01T00:00:00Z')",
+        rusqlite::params![straight_polyline()],
+    )
+    .unwrap();
+    let s = rm_osm_match::run(&conn, batch).unwrap();
+    assert_eq!(s.matched, 1, "override matched where empty src would not: {s:?}");
+}
