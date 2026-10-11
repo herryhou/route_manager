@@ -122,6 +122,7 @@ Dependency map — what each edit invalidates:
 | stop name | nothing |
 | stop → other station | `station_bearing` (both sides), split clusters |
 | station name | nothing |
+| polyline line edit | `seg_match` (key `route_id:direction`), `path_stop_projection`, `stop_bearing`, `station_bearing` (4 marks) |
 
 The edit primitive writes `stale_mark` rows in the same tx. Read queries LEFT
 JOIN `stale_mark` to render an amber badge on affected panels. rm-segments
@@ -130,23 +131,55 @@ steps own their transactions and clearing is a separate final one. Either
 way the clear lands last: a crash leaves the mark, so the badge stays amber,
 never green over stale data.
 
-Refresh is two CLI commands — the web server never spawns pipeline
-binaries. Both read `stale_mark` themselves; neither takes ids:
+Refresh is three CLI commands — the web server never spawns pipeline
+binaries. All three read `stale_mark` themselves; none takes ids:
 
-1. `cargo run -r -p rm-segments -- --stale` — reprojects exactly the
-   routes a stop position/regroup edit marked (`path_stop_projection`
-   marks), clears them in the same transaction. Prints `nothing stale`
-   when there are no marks.
-2. `cargo run -r -p rm-registry -- --stale` — when any bearing mark
+1. `cargo run -r -p rm-osm-match -- --stale` — re-matches exactly the
+   (route_id, direction) pairs a polyline line edit marked (`seg_match`
+   marks, key `route_id:direction`), from the effective polyline
+   (override ?? src), then clears the marks. Prints `nothing stale`
+   when there are none.
+2. `cargo run -r -p rm-segments -- --stale` — reprojects exactly the
+   routes a stop position/regroup/polyline edit marked
+   (`path_stop_projection` marks), clears them in the same
+   transaction. Prints `nothing stale` when there are no marks.
+3. `cargo run -r -p rm-registry -- --stale` — when any bearing mark
    exists (`stop_bearing`/`station_bearing`): whole-table bearing
    rebuild, station split re-run, then clears the marks. Split is
    idempotent; its re-run after regroup edits is the manual step the
    marks trigger.
 
-Order matters: bearings are derived FROM `path_stop_projection`
-(`rm-registry/src/bearing.rs` reads projections), so segments before
-registry. rm-osm-match is NOT part of edit refresh — stop edits never
-change road-graph matches; re-match only after upstream re-imports.
+Order matters: registry bearings read both the matched way runs and
+`path_stop_projection` (`rm-registry/src/bearing.rs`), and projections
+are recomputed from the same effective polyline the match step runs on
+— so match before segments before registry. Stop/station edits never
+touch `seg_match` marks, so for them the match step is a no-op
+(`nothing stale`); it only does work after polyline line edits.
+
+### Verifying an edit end-to-end
+
+Practice on a database copy, not the live one:
+
+```sh
+cp data/taipei.db /tmp/taipei-ui-test.db
+```
+
+After saving an edit in the UI, check the audit trail and marks:
+
+```sh
+sqlite3 /tmp/taipei-ui-test.db \
+  "SELECT entity, entity_id, action FROM edit_log ORDER BY edit_id DESC LIMIT 3;
+   SELECT table_name, key FROM stale_mark;
+   SELECT COUNT(*) FROM polyline_override;"
+```
+
+Expected after an edit + undo + re-edit: edit_log shows
+`create → undo → create` (undo of an undo is a forward edit again),
+and `stale_mark` holds the rows the dependency map predicts — e.g. a
+polyline line edit leaves `seg_match 1:0`, `path_stop_projection`,
+`stop_bearing`, `station_bearing`. Then run the refresh chain above
+and confirm `SELECT COUNT(*) FROM stale_mark` returns 0: every mark
+cleared means every amber badge is green again.
 
 ## Server write path & auth
 

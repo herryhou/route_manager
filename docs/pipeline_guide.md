@@ -57,13 +57,18 @@ when a city's route coverage changes (new routes may leave the old box).
 
 ## Browsing the result: rm-web
 
-`rm-web` is a read-only web viewer over the database the pipeline produces — no pipeline step is changed by using it.
+`rm-web` is a web viewer over the database the pipeline produces — no
+pipeline step is changed by using it. Without `--edit` it is strictly
+read-only and safe to run alongside anything; with
+`--edit --edit-tokens name:token,...` it also mounts the edit endpoints
+(drag-to-fix stop positions, renames, polyline overrides) — see
+`docs/web-edit-mode.md`.
 
 ```sh
 cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
 ```
 
-Then open the address in a browser. Flags: `--db` (default `data/taichung.db`), `--addr` (default `127.0.0.1:8787`), `--tiles URL` (override the basemap tile server; default is OpenStreetMap's, which needs internet — every other layer is offline).
+Then open the address in a browser. Flags: `--db` (default `data/taichung.db`), `--addr` (default `127.0.0.1:8787`), `--tiles URL` (override the basemap tile server; default is OpenStreetMap's, which needs internet — every other layer is offline), `--edit --edit-tokens` (enable edit mode).
 
 What you can do:
 
@@ -74,4 +79,4 @@ What you can do:
 - **Raw compare** — *Raw compare* draws the raw staging polyline and raw stop squares against the canonical view.
 - **Bearings** — dot-and-arrow markers per stop (and a station's axis), on by default.
 
-The detail panel is two stacked panes (context + point), each with its own back/forward history; `Esc` closes popup → point → context, `/` focuses search, the sidebar hides behind a topbar toggle. The server opens the database with SQLite read-only flags and never runs migrations, so it can run while the pipeline writes. Views are shareable via URL hash (`#route=1&dir=0`, `#stop=123`, `#station=45`).
+The detail panel is two stacked panes (context + point), each with its own back/forward history; `Esc` closes popup → point → context, `/` focuses search, the sidebar hides behind a topbar toggle. Without `--edit`, the server opens the database with SQLite read-only flags and never runs migrations, so it can run while the pipeline writes; with `--edit`, write requests open a mutable connection (pragmas + migrations) serialized behind an app-level mutex, and WAL keeps viewers working during writes. Views are shareable via URL hash (`#route=1&dir=0`, `#stop=123`, `#station=45`).
