@@ -1,8 +1,8 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
 import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, editLogPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
-import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
-import { startPieceEdit, stopPieceEdit, pieceEditActive } from './pieceEdit.js';
+import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, setEffectiveOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
+import { startLineEdit, stopLineEdit, lineEditActive } from './lineEdit.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -16,7 +16,7 @@ L.tileLayer(window.RM_TILES, {
 
 initLayers(map);
 
-// pieceEdit.js reaches the map/session status through these globals.
+// lineEdit.js reaches the map/session status through these globals.
 window.__rmMap = map;
 window.__rmStatus = status;
 
@@ -42,25 +42,36 @@ let allRoutes = [];
 let selectedKey = null;
 let selectedRoute = null; // { route_id, dir, xno }
 let lastRouteDraw = null; // { p, s, onStopClick } — for bearing-toggle redraw
-let lastRaw = null; // { routeId, dir, v } — for piece-edit entry
+let lastRaw = null; // { routeId, dir, v } — for line-edit entry
 let editMode = false;
 let pendingPlace = null; // armed move-place map handler — replaced/cancelled, never stacked
-let pieceBtn = null; // 修線 + 線史 — created in boot() when edit is enabled
-let pieceLogBtn = null;
+let lineBtn = null; // 修線 + 線史 — created in boot() when edit is enabled
+let lineLogBtn = null;
 
-/// Shared visibility gate for the piece-edit entries: edit mode + raw layer
+/// Shared visibility gate for the line-edit entries: edit mode + raw layer
 /// + a raw payload on screen. Also tears an armed session down with edit-off.
-function syncPieceBtn() {
+function syncLineBtn() {
   const show = editMode && document.getElementById('layer-raw').checked && lastRaw ? '' : 'none';
-  if (pieceBtn) pieceBtn.style.display = show;
-  if (pieceLogBtn) pieceLogBtn.style.display = show;
-  if (!editMode) stopPieceEdit();
+  if (lineBtn) lineBtn.style.display = show;
+  if (lineLogBtn) lineLogBtn.style.display = show;
+  if (!editMode) stopLineEdit();
 }
 
-function onPieceSaved(out, err) {
-  if (err) { status(`piece save failed: ${err.message}`); return; }
-  status(out.created ? `piece #${out.piece_id} created` : `piece #${out.piece_id} updated`);
+function onLineSaved(out, err) {
+  if (err) { status(`line save failed: ${err.message}`); return; }
+  status(out.created ? 'line override created' : 'line override updated');
   if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
+}
+
+/// Re-draw the raw layer from the cached payload (raw/effective toggle
+/// redraws share this closure).
+function redrawRaw() {
+  drawRaw(lastRaw.v, {
+    onEditLine: () => {
+      if (!editMode || lineEditActive()) return;
+      startLineEdit(lastRaw.routeId, lastRaw.dir, selectedRoute.xno, lastRaw.v, onLineSaved);
+    },
+  });
 }
 
 function refreshList(q) {
@@ -226,13 +237,8 @@ async function loadRaw(routeId, dir) {
     const v = await api.routeRaw(routeId, dir);
     if (selectedRoute?.route_id !== routeId || selectedRoute.dir !== dir) return; // stale
     lastRaw = { routeId, dir, v };
-    drawRaw(v, {
-      onEditPiece: (piece) => {
-        if (!editMode || pieceEditActive()) return;
-        startPieceEdit(routeId, dir, selectedRoute.xno, v, piece, onPieceSaved);
-      },
-    });
-    syncPieceBtn(); // entries may have been waiting for this payload
+    redrawRaw();
+    syncLineBtn(); // entries may have been waiting for this payload
   } catch (e) {
     status(`raw load failed: ${e.message}`);
   }
@@ -365,7 +371,7 @@ document.addEventListener('keydown', (e) => {
 
 // Esc tears down an armed piece-edit session (independent of panes/popups).
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') stopPieceEdit();
+  if (e.key === 'Escape') stopLineEdit();
 });
 
 /// Arm a one-shot map-click place action (move/regroup): crosshair cursor
@@ -597,41 +603,40 @@ async function undoStationEdit(st, editId) {
   }
 }
 
-/// Edit-history panel for the selected route's manual pieces (線史):
+/// Edit-history panel for the selected route's line overrides (線史):
 /// polyline edit rows key on route_id (entity='polyline', entity_id=route).
-/// ↩ deletes the piece (undo of its create) or restores the prior geometry.
-async function openPieceEditLog(routeId) {
+/// ↩ deletes the override (undo of its create) or restores the prior line.
+async function openLineLog(routeId) {
   busy(true);
   try {
     const v = await api.editLog('polyline', routeId);
-    paneOpen('context', `pieceeditlog:${routeId}`, () => openPieceEditLog(routeId));
+    paneOpen('context', `linelog:${routeId}`, () => openLineLog(routeId));
     editLogPanel(v.rows ?? [], {
       canUndo: editMode,
-      onUndo: (editId) => undoPieceEdit(routeId, editId),
+      onUndo: (editId) => undoLineEdit(routeId, editId),
     });
   } catch (e) {
-    status(`piece edit log load failed: ${e.message}`);
+    status(`line edit log load failed: ${e.message}`);
   } finally {
     busy(false);
   }
 }
 
-/// Undo one logged piece edit. The polyline branch of /api/edit/undo
-/// replies {edit_id, restored: {piece_id, deleted}} — deleted means the
-/// piece's create was reverted (it is gone), otherwise the prior encoded
-/// geometry is back. Manual pieces only touch the raw layer, so the refresh
-/// is a raw re-fetch, then the log for the fresh rows.
-async function undoPieceEdit(routeId, editId) {
+/// Undo one logged line edit. The polyline branch of /api/edit/undo replies
+/// {edit_id, restored: {deleted}} — deleted means the override's create was
+/// reverted (the row is gone, back to pure src), otherwise the prior line
+/// is back. Refresh = raw re-fetch (the effective line may have moved),
+/// then the log for the fresh rows.
+async function undoLineEdit(routeId, editId) {
   if (!editMode) return;
-  if (!confirm(`undo edit #${editId} on route #${routeId} pieces?`)) return;
+  if (!confirm(`undo edit #${editId} on route #${routeId} line?`)) return;
   const note = prompt('note (required):', '') ?? '';
   if (!note) return;
   try {
     const r = await api.undoEdit(editId, note);
-    const pid = r.restored?.piece_id;
-    status(r.restored?.deleted ? `piece #${pid} deleted` : `piece #${pid} restored`);
+    status(r.restored?.deleted ? 'line override deleted (back to src)' : 'line override restored');
     if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
-    await openPieceEditLog(routeId); // fresh rows — the undo row is now newest
+    await openLineLog(routeId); // fresh rows — the undo row is now newest
   } catch (e) {
     editFail('undo', e);
   }
@@ -783,32 +788,37 @@ async function boot() {
     if (s.edit_enabled) {
       const btn = document.getElementById('edit-toggle');
       btn.hidden = false;
-      // 修線 entry + 線史 (manual-piece edit log): visible only with edit
-      // mode + raw layer + a raw payload up (syncPieceBtn).
-      pieceBtn = document.createElement('button');
-      pieceBtn.id = 'piece-edit-btn';
-      pieceBtn.textContent = '修線';
-      pieceBtn.style.cssText = 'display:none;margin-left:6px;';
-      pieceBtn.addEventListener('click', () => {
-        if (!lastRaw || pieceEditActive()) return;
-        startPieceEdit(lastRaw.routeId, lastRaw.dir, selectedRoute.xno, lastRaw.v, null, onPieceSaved);
+      // 修線 entry + 線史 (line edit log): visible only with edit mode +
+      // raw layer + a raw payload up (syncLineBtn).
+      lineBtn = document.createElement('button');
+      lineBtn.id = 'line-edit-btn';
+      lineBtn.textContent = '修線';
+      lineBtn.style.cssText = 'display:none;margin-left:6px;';
+      lineBtn.addEventListener('click', () => {
+        if (!lastRaw || lineEditActive()) return;
+        startLineEdit(lastRaw.routeId, lastRaw.dir, selectedRoute.xno, lastRaw.v, onLineSaved);
       });
-      btn.parentElement.appendChild(pieceBtn);
-      pieceLogBtn = document.createElement('button');
-      pieceLogBtn.id = 'piece-log-btn';
-      pieceLogBtn.textContent = '線史';
-      pieceLogBtn.title = 'manual piece edit history';
-      pieceLogBtn.style.cssText = 'display:none;margin-left:6px;';
-      pieceLogBtn.addEventListener('click', () => {
+      btn.parentElement.appendChild(lineBtn);
+      lineLogBtn = document.createElement('button');
+      lineLogBtn.id = 'line-log-btn';
+      lineLogBtn.textContent = '線史';
+      lineLogBtn.title = 'line edit history';
+      lineLogBtn.style.cssText = 'display:none;margin-left:6px;';
+      lineLogBtn.addEventListener('click', () => {
         if (!lastRaw) return;
-        openPieceEditLog(lastRaw.routeId);
+        openLineLog(lastRaw.routeId);
       });
-      btn.parentElement.appendChild(pieceLogBtn);
-      document.getElementById('layer-raw').addEventListener('change', syncPieceBtn);
+      btn.parentElement.appendChild(lineLogBtn);
+      document.getElementById('layer-raw').addEventListener('change', syncLineBtn);
+      const effToggle = document.getElementById('layer-effective');
+      effToggle.addEventListener('change', () => {
+        setEffectiveOn(effToggle.checked);
+        if (lastRaw && document.getElementById('layer-raw').checked) redrawRaw();
+      });
       btn.addEventListener('click', () => {
         if (editMode) disableEditMode();
         else enableEditMode();
-        syncPieceBtn();
+        syncLineBtn();
       });
     }
     if (s.batch) {

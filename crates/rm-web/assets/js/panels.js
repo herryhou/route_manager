@@ -352,7 +352,10 @@ function changeText(changes) {
     parts.push(`移動 (${f(c.latitude?.old)},${f(c.longitude?.old)})→(${f(c.latitude?.new)},${f(c.longitude?.new)})`);
   }
   if (c.station_id) parts.push(`站 #${c.station_id.old}→#${c.station_id.new}`);
-  if (c.kind === 'polyline_piece') {
+  if (c.kind === 'polyline_override') {
+    parts.push(`線 ${c.xno}/${c.direction}${c.encoded?.new == null ? ' 刪' : ' 改'}`);
+  } else if (c.kind === 'polyline_piece') {
+    // legacy phase-1 history rows (append-only) keep rendering
     parts.push(`線 #${c.piece_id} ${c.xno}/${c.direction}${c.encoded?.old != null ? ' 改' : ' 新增'}`);
   }
   return parts.join(' · ');
