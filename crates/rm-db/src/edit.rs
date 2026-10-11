@@ -1110,7 +1110,23 @@ pub fn apply_piece_edit(
     }
 
     let piece_id = match op.piece_id {
-        Some(pid) => pid,
+        Some(pid) => {
+            // Explicit id (recreate-after-undo): pull the allocator past it
+            // in the same tx so a later mint can never land on this row —
+            // the ON CONFLICT upsert would silently clobber it (ids never
+            // reused, DB invariant I02).
+            tx.execute(
+                "INSERT OR IGNORE INTO id_sequence (table_name, next_value)
+                 VALUES ('polyline_piece', 1)",
+                [],
+            )?;
+            tx.execute(
+                "UPDATE id_sequence SET next_value = MAX(next_value, ?1)
+                 WHERE table_name = 'polyline_piece'",
+                params![pid + 1],
+            )?;
+            pid
+        }
         None => crate::mint(&tx, "polyline_piece")?,
     };
     tx.execute(
@@ -2702,6 +2718,29 @@ mod tests {
         ghost.expected_updated_at = Some("2026-01-01T00:00:00Z".into());
         let err = apply_piece_edit(&conn, &ghost, "herry", "x").unwrap_err();
         assert!(err.to_string().contains("edited by someone else"), "{err}");
+    }
+
+    #[test]
+    fn apply_piece_edit_explicit_id_advances_id_sequence() {
+        let conn = open_in_memory().unwrap();
+        let _ = fixture(&conn);
+        src_fixture(&conn);
+        // crafted ahead-of-sequence explicit id on an absent row (the
+        // recreate-after-undo shape): the allocator must be pulled past it
+        let out = apply_piece_edit(&conn, &piece_op(Some(999)), "herry", "re").unwrap();
+        assert!(out.created);
+        assert!(
+            crate::mint(&conn, "polyline_piece").unwrap() > 999,
+            "mint after explicit 999 must exceed it (ids never reused)"
+        );
+        // subsequent creates can never ON-CONFLICT onto the explicit row
+        let next = apply_piece_edit(&conn, &piece_op(None), "herry", "after").unwrap();
+        assert!(next.piece_id > 999);
+        let enc: String = conn.query_row(
+            "SELECT encoded FROM polyline_piece WHERE piece_id = 999", [],
+            |r| r.get(0)).unwrap();
+        assert_eq!(enc, "_ulLnnqC_p~iF~ps|U");
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM polyline_piece", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
     }
 
     #[test]
