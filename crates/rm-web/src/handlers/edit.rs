@@ -80,6 +80,7 @@ fn edit_conflict(err: ApiError) -> ApiError {
             rm_edit::EditError::EmptyEdit | rm_edit::EditError::NoOpEdit
             | rm_edit::EditError::EmptyNewName | rm_edit::EditError::NoOpRename
             | rm_edit::EditError::InvalidPiece(_) | rm_edit::EditError::PieceScope(_)
+            | rm_edit::EditError::InvalidLine(_)
             | rm_edit::EditError::UnknownRoute(_) => {
                 ApiError::bad_request(&e.to_string())
             }
@@ -88,6 +89,7 @@ fn edit_conflict(err: ApiError) -> ApiError {
             | rm_edit::EditError::NotUndoable(_)
             | rm_edit::EditError::UnknownStation(_)
             | rm_edit::EditError::PieceNotCurrent(_)
+            | rm_edit::EditError::LineNotCurrent(_, _)
             | rm_edit::EditError::PieceOverlap(_) => {
                 ApiError::conflict(&e.to_string())
             }
@@ -217,10 +219,8 @@ pub async fn undo(
     let is_station = entity.as_deref() == Some("station");
     let out = run_db_write(state, move |conn| {
         if is_polyline {
-            rm_edit::undo_polyline_piece(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
-                .map(|o| (o.edit_id, json!({
-                    "piece_id": o.piece_id, "deleted": o.deleted
-                })))
+            rm_edit::undo_polyline_line(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
+                .map(|o| (o.edit_id, json!({ "deleted": o.deleted })))
         } else if is_station {
             rm_edit::undo_station(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
                 .map(|o| (o.edit_id, json!(o.restored_station_version_id)))
@@ -333,11 +333,8 @@ pub async fn move_station(
 }
 
 #[derive(Deserialize)]
-pub struct PolylinePieceBody {
+pub struct PolylineBody {
     points: Vec<[f64; 2]>,
-    anchor_start: [f64; 2],
-    anchor_end: [f64; 2],
-    piece_id: Option<i64>,
     expected_updated_at: Option<String>,
     note: Option<String>,
 }
@@ -346,30 +343,25 @@ fn coord_ok(pt: [f64; 2]) -> bool {
     (-90.0..=90.0).contains(&pt[0]) && (-180.0..=180.0).contains(&pt[1])
 }
 
-/// POST /api/edit/polyline/{xno}/{direction}/piece — store a manual polyline
-/// piece. Server encodes via rm-core; the client sends plain coordinates.
-pub async fn edit_polyline_piece(
+/// POST /api/edit/polyline/{xno}/{direction}/line — store a whole-line
+/// override (effective = override ?? src). Server encodes via rm-core; the
+/// client sends plain coordinates.
+pub async fn edit_polyline_line(
     Path((xno, direction)): Path<(String, i64)>,
     State(state): State<AppState>,
     Editor(editor): Editor,
-    ApiJson(b): ApiJson<PolylinePieceBody>,
+    ApiJson(b): ApiJson<PolylineBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    if b.points.iter().any(|p| !coord_ok(*p))
-        || !coord_ok(b.anchor_start)
-        || !coord_ok(b.anchor_end)
-    {
+    if b.points.iter().any(|p| !coord_ok(*p)) {
         return Err(ApiError::bad_request("coordinate out of range"));
     }
     let out = run_db_write(state, move |conn| {
-        rm_edit::edit_polyline_piece(
+        rm_edit::edit_polyline_line(
             conn,
-            rm_edit::PieceEditCmd {
+            rm_edit::LineEditCmd {
                 xno,
                 direction,
-                piece_id: b.piece_id,
                 points: b.points,
-                anchor_start: b.anchor_start,
-                anchor_end: b.anchor_end,
                 expected_updated_at: b.expected_updated_at,
             },
             &editor,
@@ -380,7 +372,6 @@ pub async fn edit_polyline_piece(
     .map_err(edit_conflict)?;
     Ok(Json(json!({
         "edit_id": out.edit_id,
-        "piece_id": out.piece_id,
         "updated_at": out.updated_at,
         "created": out.created,
     })))

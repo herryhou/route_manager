@@ -474,46 +474,38 @@ pub fn raw(conn: &Connection, route_id: i64, dir: i64) -> Result<Option<Value>> 
         })?
         .collect::<Result<_, _>>()?;
 
-    let mut stmt = conn.prepare(
-        "SELECT piece_id, encoded, anchor_start_lat, anchor_start_lon,
-                anchor_end_lat, anchor_end_lon, updated_at
-         FROM polyline_piece WHERE xno = ?1 AND direction = ?2
-         ORDER BY piece_id",
-    )?;
-    let manual_pieces: Vec<Value> = stmt
-        .query_map(rusqlite::params![xno, dir], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, f64>(2)?,
-                r.get::<_, f64>(3)?,
-                r.get::<_, f64>(4)?,
-                r.get::<_, f64>(5)?,
-                r.get::<_, String>(6)?,
-            ))
-        })?
-        .filter_map(|row| {
-            let (piece_id, encoded, aslat, aslon, aelat, aelon, updated_at) = row.ok()?;
-            let pts = polyline::decode(&encoded).ok()?;
-            if pts.len() < 2 {
-                return None;
-            }
-            let points: Vec<Vec<f64>> =
-                pts.iter().map(|p| vec![p.lat, p.lon]).collect();
-            Some(json!({
-                "piece_id": piece_id,
-                "points": points,
-                "anchor_start": [aslat, aslon],
-                "anchor_end": [aelat, aelon],
-                "updated_at": updated_at,
-            }))
-        })
-        .collect();
+    // effective = override ?? src — the line match/segments/registry
+    // consume. `updated_at` is the override's concurrency token (null when
+    // the effective line is plain src).
+    let eff_encoded = rm_db::effective_encoded(conn, batch_id, &xno, dir)?;
+    let source: &str = if conn.query_row(
+        "SELECT COUNT(*) FROM polyline_override WHERE xno = ?1 AND direction = ?2",
+        rusqlite::params![xno, dir],
+        |r| r.get::<_, i64>(0),
+    )? > 0 {
+        "override"
+    } else {
+        "src"
+    };
+    let eff_updated_at: Option<String> = conn
+        .query_row(
+            "SELECT updated_at FROM polyline_override WHERE xno = ?1 AND direction = ?2",
+            rusqlite::params![xno, dir],
+            |r| r.get(0),
+        )
+        .ok();
+    let eff_points: Vec<Vec<f64>> = polyline::decode(&eff_encoded)
+        .map(|pts| pts.iter().map(|p| vec![p.lat, p.lon]).collect())
+        .unwrap_or_default();
 
     Ok(Some(json!({
         "batch_id": batch_id,
         "path": path,
         "stops": stops,
-        "manual_pieces": manual_pieces,
+        "effective": {
+            "points": eff_points,
+            "source": source,
+            "updated_at": eff_updated_at,
+        },
     })))
 }
