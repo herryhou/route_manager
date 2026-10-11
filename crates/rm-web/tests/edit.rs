@@ -806,6 +806,26 @@ async fn piece_post_stale_expectation_409() {
 }
 
 #[tokio::test]
+async fn piece_post_overlapping_span_409() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = rm_web::router_with(edit_state(&dir));
+    let auth = |req: axum::http::request::Builder| req.header("authorization", "Bearer sekrit").header("content-type", "application/json");
+    // A→B succeeds
+    let res = app.clone().oneshot(auth(Request::builder().method("POST").uri("/api/edit/polyline/1/1/piece")).body(Body::from(piece_body().to_string())).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    // strictly inside the A→B span, distinct endpoints on the src line
+    // (quarter/three-quarter points of (38.5,-120.2)→(40.7,-120.95)) → 409
+    let mut inner = piece_body();
+    inner["points"] = serde_json::json!([[39.05, -120.3875], [40.15, -120.7625]]);
+    inner["anchor_start"] = serde_json::json!([39.05, -120.3875]);
+    inner["anchor_end"] = serde_json::json!([40.15, -120.7625]);
+    let res = app.oneshot(auth(Request::builder().method("POST").uri("/api/edit/polyline/1/1/piece")).body(Body::from(inner.to_string())).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let v = body_json(res).await;
+    assert!(v["error"].as_str().unwrap().contains("overlaps"), "{v}");
+}
+
+#[tokio::test]
 async fn piece_undo_via_route_deletes_piece() {
     let dir = tempfile::tempdir().unwrap();
     let app = rm_web::router_with(edit_state(&dir));
