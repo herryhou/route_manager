@@ -1,12 +1,14 @@
 //! rm-edit: manual-edit domain and application services. Zero SQL —
 //! persistence lives in rm-db; this crate orchestrates and decides.
 
+mod line;
 mod piece;
 mod rename;
 mod station_move;
 mod stop;
 mod undo;
 
+pub use line::*;
 pub use piece::*;
 pub use rename::*;
 pub use station_move::*;
@@ -24,6 +26,10 @@ pub(crate) fn map_db_err(e: anyhow::Error) -> anyhow::Error {
         Some(rm_db::EditError::UnknownRoute(x)) => EditError::UnknownRoute(x.clone()).into(),
         Some(rm_db::EditError::PieceNotCurrent(id)) => EditError::PieceNotCurrent(*id).into(),
         Some(rm_db::EditError::PieceScope(id)) => EditError::PieceScope(*id).into(),
+        Some(rm_db::EditError::InvalidLine(m)) => EditError::InvalidLine(m.clone()).into(),
+        Some(rm_db::EditError::LineNotCurrent(x, d)) => {
+            EditError::LineNotCurrent(x.clone(), *d).into()
+        }
         _ => e,
     }
 }

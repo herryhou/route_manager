@@ -76,6 +76,10 @@ pub enum EditError {
     PieceOverlap(i64),
     #[error("piece {0} exists under a different route/direction")]
     PieceScope(i64),
+    #[error("invalid polyline: {0}")]
+    InvalidLine(String),
+    #[error("line {0}/{1} was edited by someone else — reload and retry")]
+    LineNotCurrent(String, i64),
 }
 
 /// Pure planning policy: pick which poles follow the rename. No I/O.

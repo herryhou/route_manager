@@ -30,6 +30,10 @@ pub use edit::{
     PieceEditOp, PieceApplied, apply_piece_edit,
     PolylineEditRow, load_polyline_edit,
     PieceRestoreState, PieceUndoOp, PieceUndone, apply_piece_undo,
+    OverrideRow, LineSnapshot, load_polyline_line,
+    LineEditOp, LineApplied, apply_line_edit,
+    LineUndoOp, LineUndone, apply_line_undo,
+    effective_encoded,
 };
 pub use migrate::migrate;
 
