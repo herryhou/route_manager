@@ -83,8 +83,8 @@ largest deviation from that axis. A station whose members sit more than
 45° off its axis is flagged — warn-only (`report.json` warnings +
 `qa/bearing_report.json`), never failing the run.
 
-To browse the result in a map-centric web UI (read-only, safe alongside the
-pipeline):
+To browse the result in a map-centric web UI (read-only unless `--edit` —
+see `docs/web-edit-mode.md`; without it, safe alongside the pipeline):
 
 ```sh
 cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
