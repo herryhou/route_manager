@@ -5,6 +5,16 @@ Tainan 113 routes) into one versioned SQLite database per city with
 OSM-aligned route geometry and station bearings, implementing
 `docs/Architecture_design_spec.md` and `docs/DB_Schema_Spec.md`.
 
+## 這個專案在做什麼
+公車路線資料處理管線。資料流：
+ - 1. capture（爬蟲抓 JSON）→ ingest 進 SQLite（src_* 表 = 原始事實，不可改）
+ - 2. identity → 發 route/stop/station 穩定 ID
+ - 3. osm-match → 把原始路徑 polyline 對到 OSM 路網（Viterbi 演算法，全台北 812 方向跑一次 11 分鐘），產出 seg_match_way（每段路用哪些 OSM way）
+ - 4. segments → 算每個站牌在路徑上的里程（chainage）
+ - 5. registry → 算站牌方位角（bearing）
+ - 6. publish → 發布版本
+ - 7. rm-web → 網頁 QA 工具，看圖、改資料
+
 ## Layout
 
 ```
