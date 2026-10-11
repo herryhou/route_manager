@@ -319,6 +319,33 @@ fn stale_run_keeps_unknown_and_unmatched_marks() {
 }
 
 #[test]
+fn stale_run_keeps_mark_for_direction_without_staging_row() {
+    let (_dir, conn, batch) = setup();
+    insert_straight_road(&conn);
+    conn.execute(
+        "UPDATE src_route_point SET encoded = ?1 WHERE batch_id = ?2 AND xno = '2' AND direction = 0",
+        rusqlite::params![straight_polyline(), batch],
+    )
+    .unwrap();
+    rm_osm_match::run(&conn, batch).unwrap();
+    // published route, but direction 5 has no staging row in this batch
+    // (re-ingest dropped it): warn + keep — never delete rows not recomputed
+    seg_mark(&conn, route2_rid(&conn), 5, None);
+    let out = rm_osm_match::run_stale(&conn, batch).unwrap().unwrap();
+    assert_eq!((out.cleared, out.kept), (0, 1), "{out:?}");
+    assert_eq!(out.summary.directions, 0);
+    let marks: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(marks, 1, "mark kept for a later ingest to restore");
+    // REVIEW-FOCUS pin: kept mark never deletes matched rows
+    let ways: i64 = conn
+        .query_row("SELECT COUNT(*) FROM seg_match_way", [], |r| r.get(0))
+        .unwrap();
+    assert!(ways >= 1, "route2's runs survived");
+}
+
+#[test]
 fn stale_run_without_marks_is_none() {
     let (_dir, conn, batch) = setup();
     assert!(rm_osm_match::run_stale(&conn, batch).unwrap().is_none());
