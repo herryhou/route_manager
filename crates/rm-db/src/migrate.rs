@@ -41,6 +41,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0012_polyline_piece",
         include_str!("../migrations/0012_polyline_piece.sql"),
     ),
+    (
+        "0013_polyline_override",
+        include_str!("../migrations/0013_polyline_override.sql"),
+    ),
 ];
 
 /// Apply pending migrations in order. Safe to call repeatedly.
@@ -98,7 +102,8 @@ mod tests {
                 "0009_corridor_split",
                 "0010_edit",
                 "0011_drop_segment",
-                "0012_polyline_piece"
+                "0012_polyline_piece",
+                "0013_polyline_override"
             ]
         );
     }
@@ -127,6 +132,31 @@ mod tests {
                 "updated_at"
             ]
         );
+    }
+
+    #[test]
+    fn migration_0013_creates_override_table_and_unique_index() {
+        let conn = open_in_memory().unwrap();
+        let cols: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('polyline_override') ORDER BY cid")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            cols,
+            vec!["xno", "direction", "encoded", "updated_at"]
+        );
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index' AND name = 'polyline_override_dir'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "unique index on (xno, direction)");
     }
 
     #[test]
