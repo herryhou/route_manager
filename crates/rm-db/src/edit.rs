@@ -22,6 +22,10 @@ pub enum EditError {
     PieceNotCurrent(i64),
     #[error("piece {0} exists under a different route/direction")]
     PieceScope(i64),
+    #[error("invalid polyline: {0}")]
+    InvalidLine(String),
+    #[error("line {0}/{1} was edited by someone else — reload and retry")]
+    LineNotCurrent(String, i64),
 }
 
 #[derive(Debug)]
@@ -1363,6 +1367,330 @@ pub fn apply_piece_undo(
     Ok(PieceUndone { edit_id, piece_id: op.piece_id, deleted })
 }
 
+// ---------- whole-line override (phase 2) ----------
+
+/// One current polyline_override row, as stored (unversioned — the row IS
+/// the current state; `updated_at` doubles as the concurrency token).
+#[derive(Debug)]
+pub struct OverrideRow {
+    pub encoded: String,
+    pub updated_at: String,
+}
+
+/// Read-side snapshot for whole-line polyline edits: the route id
+/// (edit_log's entity_id), the latest-batch src polyline (`None` when the
+/// capture has no polyline for this direction), the current override row
+/// (`None` = readers fall through to src), and the route's current version.
+#[derive(Debug)]
+pub struct LineSnapshot {
+    pub route_id: i64,
+    pub src_encoded: Option<String>,
+    pub override_row: Option<OverrideRow>,
+    pub route_version_id: Option<i64>,
+}
+
+/// `xno` is stable route identity (`route.ext_uid = 'tcg:' || xno`).
+/// `None` when no route carries that ext_uid.
+pub fn load_polyline_line(
+    conn: &Connection,
+    xno: &str,
+    direction: i64,
+) -> Result<Option<LineSnapshot>> {
+    let (route_id, route_version_id): (i64, Option<i64>) = match conn.query_row(
+        "SELECT route_id, current_route_version_id FROM route WHERE ext_uid = ?1",
+        [format!("tcg:{xno}")],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ) {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let batch_id: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(batch_id), 0) FROM import_batch",
+        [],
+        |r| r.get(0),
+    )?;
+    let src_encoded: Option<String> = conn
+        .query_row(
+            "SELECT encoded FROM src_route_point
+             WHERE batch_id = ?1 AND xno = ?2 AND direction = ?3",
+            params![batch_id, xno, direction],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let override_row = conn
+        .query_row(
+            "SELECT encoded, updated_at FROM polyline_override
+             WHERE xno = ?1 AND direction = ?2",
+            params![xno, direction],
+            |r| {
+                Ok(OverrideRow {
+                    encoded: r.get(0)?,
+                    updated_at: r.get(1)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(Some(LineSnapshot {
+        route_id,
+        src_encoded,
+        override_row,
+        route_version_id,
+    }))
+}
+
+/// The COALESCE every consumer reads: the manual override when one exists,
+/// else the latest-batch src polyline, else `""` (readers treat `""` as
+/// no_path — same convention as a missing src row). Passes the override
+/// through verbatim; decoding is the consumer's business.
+pub fn effective_encoded(
+    conn: &Connection,
+    batch_id: i64,
+    xno: &str,
+    direction: i64,
+) -> Result<String> {
+    let enc: String = conn.query_row(
+        "SELECT COALESCE(
+            (SELECT encoded FROM polyline_override WHERE xno = ?1 AND direction = ?2),
+            (SELECT encoded FROM src_route_point
+             WHERE batch_id = ?3 AND xno = ?1 AND direction = ?2),
+            '')",
+        params![xno, direction, batch_id],
+        |r| r.get(0),
+    )?;
+    Ok(enc)
+}
+
+/// Write-side op for a whole-line override edit (rm-edit maps a
+/// LineEditPlan into this; rm-db knows nothing about domain geometry).
+#[derive(Debug)]
+pub struct LineEditOp {
+    pub xno: String,
+    pub direction: i64,
+    pub encoded: String,
+    pub expected_updated_at: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct LineApplied {
+    pub edit_id: i64,
+    pub updated_at: String,
+    pub created: bool,
+}
+
+/// Mark every derived dataset that depends on the direction's polyline
+/// stale. Keys use route_id (stable across route versions); the match
+/// stale run resolves the current route_version at recompute time.
+/// Re-marks replace: fresh rowid, freshest `cause_edit_id` wins.
+fn mark_line_stale(
+    tx: &Connection,
+    route_id: i64,
+    direction: i64,
+    edit_id: i64,
+    now: &str,
+) -> Result<()> {
+    for (table, key) in [
+        ("seg_match", format!("{route_id}:{direction}")),
+        ("path_stop_projection", route_id.to_string()),
+        ("stop_bearing", "*".to_string()),
+        ("station_bearing", "*".to_string()),
+    ] {
+        tx.execute(
+            "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![table, key, edit_id, now],
+        )?;
+    }
+    Ok(())
+}
+
+/// Apply a whole-line override edit in ONE transaction. Unversioned: the
+/// row IS current; `updated_at` doubles as the optimistic-concurrency
+/// token and the producing edit's ts. Currency guard runs before ANY
+/// write; the same tx marks all four derived datasets stale.
+pub fn apply_line_edit(
+    conn: &Connection,
+    op: &LineEditOp,
+    editor: &str,
+    note: &str,
+) -> Result<LineApplied> {
+    let tx = conn.unchecked_transaction()?;
+    let now = crate::now_rfc3339();
+
+    let route_id: i64 = match tx.query_row(
+        "SELECT route_id FROM route WHERE ext_uid = ?1",
+        [format!("tcg:{}", op.xno)],
+        |r| r.get(0),
+    ) {
+        Ok(id) => id,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(EditError::UnknownRoute(op.xno.clone()).into())
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    // Currency: guard before any write.
+    let mut created = true;
+    let mut old: Option<String> = None;
+    if let Some(row) = tx
+        .query_row(
+            "SELECT updated_at, encoded FROM polyline_override
+             WHERE xno = ?1 AND direction = ?2",
+            params![op.xno, op.direction],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )
+        .optional()?
+    {
+        created = false;
+        let (updated_at, encoded) = row;
+        if Some(&updated_at) != op.expected_updated_at.as_ref() {
+            return Err(EditError::LineNotCurrent(op.xno.clone(), op.direction).into());
+        }
+        old = Some(encoded);
+    } else if op.expected_updated_at.is_some() {
+        // expectation against a nonexistent override: it moved (undone away)
+        return Err(EditError::LineNotCurrent(op.xno.clone(), op.direction).into());
+    }
+
+    tx.execute(
+        "INSERT INTO polyline_override (xno, direction, encoded, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(xno, direction) DO UPDATE SET encoded = ?3, updated_at = ?4",
+        params![op.xno, op.direction, op.encoded, now],
+    )?;
+
+    // changes carries old+new so undo is a forward write (`old` absent on create).
+    let mut encoded_change = json!({ "new": op.encoded });
+    if let Some(enc) = &old {
+        encoded_change["old"] = json!(enc);
+    }
+    let changes = json!({
+        "kind": "polyline_override",
+        "xno": op.xno,
+        "direction": op.direction,
+        "encoded": encoded_change,
+    })
+    .to_string();
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note)
+         VALUES (?1, ?2, 'polyline', ?3, ?4, ?5, ?6)",
+        params![
+            now,
+            editor,
+            route_id,
+            if created { "create" } else { "update" },
+            changes,
+            if note.is_empty() { None } else { Some(note) }
+        ],
+    )?;
+    let edit_id = tx.last_insert_rowid();
+
+    mark_line_stale(&tx, route_id, op.direction, edit_id, &now)?;
+
+    tx.commit()?;
+    Ok(LineApplied {
+        edit_id,
+        updated_at: now,
+        created,
+    })
+}
+
+/// Write-side op for the line undo: restore-as-forward-write (or delete).
+/// `undone_ts` is the undone edit's ts — the currency token the apply tx
+/// re-validates against the row.
+#[derive(Debug)]
+pub struct LineUndoOp {
+    pub edit_id: i64,
+    pub route_id: i64,
+    pub xno: String,
+    pub direction: i64,
+    pub undone_ts: String,
+    /// Encoded state to restore; `None` = the undone edit was a create →
+    /// delete the override row (back to pure src).
+    pub restored: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct LineUndone {
+    pub edit_id: i64,
+    pub deleted: bool,
+}
+
+/// Undo a whole-line override edit in ONE transaction. Currency guard (the
+/// row's `updated_at` must still equal the undone edit's ts) runs before
+/// any write, so a superseded undo is a clean 409 with zero partial state.
+/// Same stale marks as apply — undoing a line re-derives everything too.
+pub fn apply_line_undo(
+    conn: &Connection,
+    op: &LineUndoOp,
+    editor: &str,
+    note: &str,
+) -> Result<LineUndone> {
+    let tx = conn.unchecked_transaction()?;
+    let now = crate::now_rfc3339();
+
+    let (updated_at, cur_encoded) = match tx
+        .query_row(
+            "SELECT updated_at, encoded FROM polyline_override
+             WHERE xno = ?1 AND direction = ?2",
+            params![op.xno, op.direction],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )
+        .optional()?
+    {
+        Some(v) => v,
+        None => return Err(EditError::LineNotCurrent(op.xno.clone(), op.direction).into()),
+    };
+    if updated_at != op.undone_ts {
+        return Err(EditError::LineNotCurrent(op.xno.clone(), op.direction).into());
+    }
+
+    let (deleted, new_encoded) = match &op.restored {
+        Some(enc) => {
+            tx.execute(
+                "INSERT INTO polyline_override (xno, direction, encoded, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(xno, direction) DO UPDATE SET encoded = ?3, updated_at = ?4",
+                params![op.xno, op.direction, enc, now],
+            )?;
+            (false, json!(enc))
+        }
+        None => {
+            tx.execute(
+                "DELETE FROM polyline_override WHERE xno = ?1 AND direction = ?2",
+                params![op.xno, op.direction],
+            )?;
+            (true, serde_json::Value::Null)
+        }
+    };
+
+    let changes = json!({
+        "kind": "polyline_override",
+        "xno": op.xno,
+        "direction": op.direction,
+        "encoded": { "old": cur_encoded, "new": new_encoded },
+    })
+    .to_string();
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, undo_of)
+         VALUES (?1, ?2, 'polyline', ?3, 'undo', ?4, ?5, ?6)",
+        params![
+            now,
+            editor,
+            op.route_id,
+            changes,
+            if note.is_empty() { None } else { Some(note) },
+            op.edit_id
+        ],
+    )?;
+    let edit_id = tx.last_insert_rowid();
+
+    mark_line_stale(&tx, op.route_id, op.direction, edit_id, &now)?;
+
+    tx.commit()?;
+    Ok(LineUndone { edit_id, deleted })
+}
+
 /// Write-side op for the station-rename undo (rm-edit maps a
 /// RenameUndoOp into this; the rows come from the append-only log).
 #[derive(Debug)]
@@ -1639,6 +1967,224 @@ mod tests {
         conn.execute(
             "INSERT INTO src_route_point (batch_id, xno, direction, encoded)
              VALUES (1, '1', 1, '_p~iF~ps|U_ulLnnqC')", []).unwrap();
+    }
+
+    fn line_op() -> LineEditOp {
+        LineEditOp {
+            xno: "1".into(),
+            direction: 1,
+            encoded: "_ulLnnqC_p~iF~ps|U".into(),
+            expected_updated_at: None,
+        }
+    }
+
+    fn line_undo_op(edit_id: i64, undone_ts: String, restored: Option<String>) -> LineUndoOp {
+        LineUndoOp {
+            edit_id,
+            route_id: 1,
+            xno: "1".into(),
+            direction: 1,
+            undone_ts,
+            restored,
+        }
+    }
+
+    #[test]
+    fn line_edit_creates_updates_and_marks_four_stale() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        src_fixture(&conn);
+        let a = apply_line_edit(&conn, &line_op(), "h", "n1").unwrap();
+        assert!(a.created);
+        let (enc, ts): (String, String) = conn
+            .query_row(
+                "SELECT encoded, updated_at FROM polyline_override WHERE xno = '1' AND direction = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(enc, "_ulLnnqC_p~iF~ps|U");
+        assert_eq!(ts, a.updated_at);
+        // log row: entity polyline, entity_id = route_id 1, action create,
+        // changes carry new only
+        let (ent, eid, act, changes): (String, i64, String, String) = conn
+            .query_row(
+                "SELECT entity, entity_id, action, changes FROM edit_log",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!((ent.as_str(), eid, act.as_str()), ("polyline", 1, "create"));
+        let c: serde_json::Value = serde_json::from_str(&changes).unwrap();
+        assert_eq!(c["kind"], "polyline_override");
+        assert_eq!(c["encoded"]["new"], "_ulLnnqC_p~iF~ps|U");
+        assert!(c["encoded"].get("old").is_none());
+        // four stale marks, seg_match keyed by route_id:direction
+        let mut marks: Vec<(String, String)> = Vec::new();
+        let mut stmt = conn.prepare("SELECT table_name, key FROM stale_mark").unwrap();
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        for r in rows {
+            marks.push(r.unwrap());
+        }
+        assert!(marks.contains(&("seg_match".into(), "1:1".into())), "{marks:?}");
+        assert!(marks.contains(&("path_stop_projection".into(), "1".into())));
+        assert!(marks.contains(&("stop_bearing".into(), "*".into())));
+        assert!(marks.contains(&("station_bearing".into(), "*".into())));
+        // update: currency token from create; upsert, not a second row
+        let mut op = line_op();
+        op.expected_updated_at = Some(a.updated_at.clone());
+        op.encoded = "_p~iF~ps|U_ulLnnqC".into();
+        let b = apply_line_edit(&conn, &op, "h", "n2").unwrap();
+        assert!(!b.created);
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM polyline_override", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        let act: String = conn
+            .query_row("SELECT action FROM edit_log ORDER BY edit_id DESC LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(act, "update");
+    }
+
+    #[test]
+    fn line_edit_stale_expectation_refused() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        src_fixture(&conn);
+        let _ = apply_line_edit(&conn, &line_op(), "h", "n1").unwrap();
+        // now_rfc3339 is second-granular — the row's token equals any edit
+        // made in the same second, so a stale expectation is simulated with
+        // an older token (phase-1 pattern)
+        let mut op = line_op();
+        op.expected_updated_at = Some("2020-01-01T00:00:00Z".into());
+        op.encoded = "different".into();
+        let err = apply_line_edit(&conn, &op, "h", "").unwrap_err();
+        assert!(err.to_string().contains("edited by someone else"), "{err}");
+        // expectation against a NONEXISTENT override also refuses (it was
+        // undone away between load and save) — clean 409, never a panic
+        let conn2 = open_in_memory().unwrap();
+        fixture(&conn2);
+        src_fixture(&conn2);
+        let mut op = line_op();
+        op.expected_updated_at = Some("2020-01-01T00:00:00Z".into());
+        let err = apply_line_edit(&conn2, &op, "h", "").unwrap_err();
+        assert!(err.to_string().contains("edited by someone else"), "{err}");
+    }
+
+    #[test]
+    fn line_undo_of_create_deletes_row_and_marks_stale() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        src_fixture(&conn);
+        let a = apply_line_edit(&conn, &line_op(), "h", "n1").unwrap();
+        let out = apply_line_undo(&conn, &line_undo_op(a.edit_id, a.updated_at, None), "h", "rev").unwrap();
+        assert!(out.deleted);
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM polyline_override", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "back to pure src");
+        let (act, undo_of, changes): (String, i64, String) = conn
+            .query_row(
+                "SELECT action, undo_of, changes FROM edit_log ORDER BY edit_id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(act, "undo");
+        assert_eq!(undo_of, a.edit_id);
+        let c: serde_json::Value = serde_json::from_str(&changes).unwrap();
+        assert_eq!(c["encoded"]["new"], serde_json::Value::Null);
+        // same four marks on undo
+        let marks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(marks, 4);
+    }
+
+    #[test]
+    fn line_undo_restores_prior_encoded() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        src_fixture(&conn);
+        let a = apply_line_edit(&conn, &line_op(), "h", "n1").unwrap();
+        let mut op = line_op();
+        op.expected_updated_at = Some(a.updated_at.clone());
+        let b = apply_line_edit(&conn, &op, "h", "n2").unwrap();
+        let out = apply_line_undo(
+            &conn,
+            &line_undo_op(b.edit_id, b.updated_at, Some("_ulLnnqC_p~iF~ps|U".into())),
+            "h",
+            "rev",
+        )
+        .unwrap();
+        assert!(!out.deleted);
+        let enc: String = conn
+            .query_row(
+                "SELECT encoded FROM polyline_override WHERE xno = '1' AND direction = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(enc, "_ulLnnqC_p~iF~ps|U");
+    }
+
+    #[test]
+    fn line_undo_superseded_refused() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        src_fixture(&conn);
+        let a = apply_line_edit(&conn, &line_op(), "h", "n1").unwrap();
+        // line moved on after edit a (now_rfc3339 is second-granular, so
+        // diverge the row directly to make this deterministic)
+        let mut op = line_op();
+        op.expected_updated_at = Some(a.updated_at.clone());
+        apply_line_edit(&conn, &op, "h", "n2").unwrap();
+        conn.execute(
+            "UPDATE polyline_override SET updated_at = '2099-01-01T00:00:00Z'
+             WHERE xno = '1' AND direction = 1",
+            [],
+        )
+        .unwrap();
+        let err = apply_line_undo(&conn, &line_undo_op(a.edit_id, a.updated_at, None), "h", "rev").unwrap_err();
+        assert!(err.to_string().contains("edited by someone else"), "{err}");
+    }
+
+    #[test]
+    fn load_polyline_line_resolves_route_src_and_override() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        src_fixture(&conn);
+        conn.execute("UPDATE route SET current_route_version_id = 1", []).unwrap();
+        let snap = load_polyline_line(&conn, "1", 1).unwrap().unwrap();
+        assert_eq!(snap.route_id, 1);
+        assert_eq!(snap.src_encoded.as_deref(), Some("_p~iF~ps|U_ulLnnqC"));
+        assert!(snap.override_row.is_none());
+        assert_eq!(snap.route_version_id, Some(1));
+        assert!(load_polyline_line(&conn, "999", 1).unwrap().is_none());
+        apply_line_edit(&conn, &line_op(), "h", "n").unwrap();
+        let snap = load_polyline_line(&conn, "1", 1).unwrap().unwrap();
+        assert_eq!(snap.override_row.unwrap().encoded, "_ulLnnqC_p~iF~ps|U");
+    }
+
+    #[test]
+    fn effective_encoded_prefers_override_then_src() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        src_fixture(&conn);
+        // src branch
+        assert_eq!(effective_encoded(&conn, 1, "1", 1).unwrap(), "_p~iF~ps|U_ulLnnqC");
+        // neither branch: "" (readers treat "" as no_path)
+        assert_eq!(effective_encoded(&conn, 1, "1", 2).unwrap(), "");
+        // override branch
+        let a = apply_line_edit(&conn, &line_op(), "h", "n").unwrap();
+        assert_eq!(effective_encoded(&conn, 1, "1", 1).unwrap(), "_ulLnnqC_p~iF~ps|U");
+        // REVIEW-FOCUS pin: garbage encoded passes through VERBATIM — readers
+        // own decode failure; effective_encoded never falls back to src
+        let mut op2 = line_op();
+        op2.expected_updated_at = Some(a.updated_at.clone());
+        op2.encoded = "not-a-polyline".into();
+        apply_line_edit(&conn, &op2, "h", "n").unwrap();
+        assert_eq!(effective_encoded(&conn, 1, "1", 1).unwrap(), "not-a-polyline");
     }
 
     fn piece_op(pid: Option<i64>) -> PieceEditOp {
