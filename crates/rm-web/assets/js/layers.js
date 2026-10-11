@@ -126,9 +126,17 @@ export function flashStop(lat, lon) {
   m.bindTooltip('outlier', { direction: 'top' });
 }
 
-/// Raw staging compare: dashed blue src_route_point + square raw stops.
-/// Manual pieces draw orange; clicking one hands it to onEditPiece.
-export function drawRaw(raw, { onEditPiece } = {}) {
+/// Effective-line visibility (layer-effective checkbox; app.js calls this).
+let effectiveOn = true;
+
+export function setEffectiveOn(v) {
+  effectiveOn = v;
+}
+
+/// Raw staging compare: dashed purple src_route_point + square raw stops.
+/// The effective line (override ?? src — what match consumes) draws solid
+/// orange; clicking it hands off to onEditLine. Gated by layer-effective.
+export function drawRaw(raw, { onEditLine } = {}) {
   layers.raw.clearLayers();
   if (raw?.path?.geometry) {
     L.geoJSON(raw.path, {
@@ -148,13 +156,17 @@ export function drawRaw(raw, { onEditPiece } = {}) {
       .bindTooltip(`${s.source_order_no}. ${s.station_name} (node ${s.node_id})`, { direction: 'top' })
       .addTo(layers.raw);
   }
-  for (const p of raw?.manual_pieces ?? []) {
-    const line = L.polyline(p.points, {
+  const eff = raw?.effective;
+  if (effectiveOn && (eff?.points?.length ?? 0) >= 2) {
+    const label = eff.source === 'override'
+      ? `effective (override ${eff.updated_at})`
+      : 'effective (= src)';
+    const line = L.polyline(eff.points, {
       color: '#f59e0b', weight: 4, opacity: 0.95,
     })
-      .bindTooltip(`manual piece #${p.piece_id}`, { direction: 'top' })
+      .bindTooltip(label, { direction: 'top' })
       .addTo(layers.raw);
-    if (onEditPiece) line.on('click', () => onEditPiece(p));
+    if (onEditLine) line.on('click', () => onEditLine());
   }
 }
 

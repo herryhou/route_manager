@@ -67,8 +67,8 @@ pub fn router_with(state: AppState) -> Router {
             axum::routing::post(handlers::edit::move_station),
         )
         .route(
-            "/api/edit/polyline/{xno}/{direction}/piece",
-            axum::routing::post(handlers::edit::edit_polyline_piece),
+            "/api/edit/polyline/{xno}/{direction}/line",
+            axum::routing::post(handlers::edit::edit_polyline_line),
         )
         .with_state(state)
     } else {

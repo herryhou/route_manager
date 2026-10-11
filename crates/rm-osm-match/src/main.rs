@@ -10,6 +10,10 @@ struct Args {
     /// Import batch to process (default: latest)
     #[arg(long)]
     batch: Option<i64>,
+
+    /// Refresh only directions marked stale, then clear their marks
+    #[arg(long)]
+    stale: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -25,6 +29,17 @@ fn main() -> anyhow::Result<()> {
         Some(b) => b,
         None => rm_db::latest_batch(&conn)?.expect("no import batch; run rm-ingest first"),
     };
+
+    if args.stale {
+        match rm_osm_match::run_stale(&conn, batch)? {
+            Some(out) => println!(
+                "stale: {} directions, {} matched, {} failed, {} marks cleared, {} kept",
+                out.summary.directions, out.summary.matched, out.summary.failed, out.cleared, out.kept
+            ),
+            None => println!("nothing stale"),
+        }
+        return Ok(());
+    }
 
     let s = rm_osm_match::run(&conn, batch)?;
 

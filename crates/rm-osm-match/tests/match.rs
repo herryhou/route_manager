@@ -188,3 +188,165 @@ fn empty_osm_tables_is_an_error() {
     let err = rm_osm_match::run(&conn, batch).unwrap_err();
     assert!(err.to_string().contains("osm-prepare"), "{err}");
 }
+
+#[test]
+fn full_run_consumes_override_over_src() {
+    let (_dir, conn, batch) = setup();
+    insert_straight_road(&conn);
+    // kill the src polyline; the override is now the only geometry — if the
+    // run still read src, route2/dir0 would land in `unmatched`
+    conn.execute(
+        "UPDATE src_route_point SET encoded = '' WHERE batch_id = ?1 AND xno = '2' AND direction = 0",
+        rusqlite::params![batch],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO polyline_override (xno, direction, encoded, updated_at)
+         VALUES ('2', 0, ?1, '2026-01-01T00:00:00Z')",
+        rusqlite::params![straight_polyline()],
+    )
+    .unwrap();
+    let s = rm_osm_match::run(&conn, batch).unwrap();
+    assert_eq!(s.matched, 1, "override matched where empty src would not: {s:?}");
+}
+
+fn route2_rid(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row(
+        "SELECT route_id FROM route WHERE ext_uid = 'tcg:2'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+fn seg_mark(conn: &rusqlite::Connection, rid: i64, dir: i64, key: Option<String>) {
+    let key = key.unwrap_or(format!("{rid}:{dir}"));
+    // cause_edit_id carries an FK into edit_log (foreign_keys=ON in rm-db) —
+    // seed the cause row first
+    conn.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes)
+         VALUES ('2026-01-01T00:00:00Z', 'test', 'polyline', ?1, 'update', '{}')",
+        rusqlite::params![rid],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+         VALUES ('seg_match', ?1, 1, '2026-01-01T00:00:00Z')",
+        rusqlite::params![key],
+    )
+    .unwrap();
+}
+
+#[test]
+fn stale_run_recomputes_marked_direction_and_clears() {
+    let (_dir, conn, batch) = setup();
+    insert_straight_road(&conn);
+    conn.execute(
+        "UPDATE src_route_point SET encoded = '' WHERE batch_id = ?1 AND xno = '2' AND direction = 0",
+        rusqlite::params![batch],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO polyline_override (xno, direction, encoded, updated_at)
+         VALUES ('2', 0, ?1, '2026-01-01T00:00:00Z')",
+        rusqlite::params![straight_polyline()],
+    )
+    .unwrap();
+    let s = rm_osm_match::run(&conn, batch).unwrap();
+    assert_eq!(s.matched, 1, "{s:?}");
+    let (ways_before, stats_before): (i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM seg_match_way), (SELECT COUNT(*) FROM seg_match_stat)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(ways_before >= 1 && stats_before >= 1);
+
+    seg_mark(&conn, route2_rid(&conn), 0, None);
+    // the line moved on: garbage override → recompute drops route2's rows
+    conn.execute(
+        "UPDATE polyline_override SET encoded = 'zzzz' WHERE xno = '2' AND direction = 0",
+        [],
+    )
+    .unwrap();
+    let out = rm_osm_match::run_stale(&conn, batch).unwrap().unwrap();
+    assert_eq!(out.cleared, 1);
+    assert_eq!(out.kept, 0);
+    assert_eq!(out.summary.directions, 1, "{:?}", out.summary);
+    assert_eq!(out.summary.failed, 1, "garbage polyline fails decode: {:?}", out.summary);
+    // route2's rows are gone (deleted, not replaced), nothing else touched
+    let ways_after: i64 = conn
+        .query_row("SELECT COUNT(*) FROM seg_match_way", [], |r| r.get(0))
+        .unwrap();
+    let stats_after: i64 = conn
+        .query_row("SELECT COUNT(*) FROM seg_match_stat", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!((ways_after, stats_after), (0, 0));
+    let marks: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(marks, 0, "cleared");
+}
+
+#[test]
+fn stale_run_keeps_unknown_and_unmatched_marks() {
+    let (_dir, conn, batch) = setup();
+    insert_straight_road(&conn);
+    // fixture polyline doesn't follow the straight road — seed it so the
+    // full run writes rows the kept marks must NOT delete
+    conn.execute(
+        "UPDATE src_route_point SET encoded = ?1 WHERE batch_id = ?2 AND xno = '2' AND direction = 0",
+        rusqlite::params![straight_polyline(), batch],
+    )
+    .unwrap();
+    rm_osm_match::run(&conn, batch).unwrap();
+    // unknown route id + unparseable key: warn + keep, no deletes
+    seg_mark(&conn, 999, 0, Some("999:0".into()));
+    seg_mark(&conn, 0, 0, Some("bogus".into()));
+    let out = rm_osm_match::run_stale(&conn, batch).unwrap().unwrap();
+    assert_eq!((out.cleared, out.kept), (0, 2), "{out:?}");
+    assert_eq!(out.summary.directions, 0);
+    let marks: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(marks, 2, "kept");
+    // REVIEW-FOCUS pin: unknown marks never delete matched rows
+    let ways: i64 = conn
+        .query_row("SELECT COUNT(*) FROM seg_match_way", [], |r| r.get(0))
+        .unwrap();
+    assert!(ways >= 1, "route2's runs survived");
+}
+
+#[test]
+fn stale_run_keeps_mark_for_direction_without_staging_row() {
+    let (_dir, conn, batch) = setup();
+    insert_straight_road(&conn);
+    conn.execute(
+        "UPDATE src_route_point SET encoded = ?1 WHERE batch_id = ?2 AND xno = '2' AND direction = 0",
+        rusqlite::params![straight_polyline(), batch],
+    )
+    .unwrap();
+    rm_osm_match::run(&conn, batch).unwrap();
+    // published route, but direction 5 has no staging row in this batch
+    // (re-ingest dropped it): warn + keep — never delete rows not recomputed
+    seg_mark(&conn, route2_rid(&conn), 5, None);
+    let out = rm_osm_match::run_stale(&conn, batch).unwrap().unwrap();
+    assert_eq!((out.cleared, out.kept), (0, 1), "{out:?}");
+    assert_eq!(out.summary.directions, 0);
+    let marks: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(marks, 1, "mark kept for a later ingest to restore");
+    // REVIEW-FOCUS pin: kept mark never deletes matched rows
+    let ways: i64 = conn
+        .query_row("SELECT COUNT(*) FROM seg_match_way", [], |r| r.get(0))
+        .unwrap();
+    assert!(ways >= 1, "route2's runs survived");
+}
+
+#[test]
+fn stale_run_without_marks_is_none() {
+    let (_dir, conn, batch) = setup();
+    assert!(rm_osm_match::run_stale(&conn, batch).unwrap().is_none());
+}

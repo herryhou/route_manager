@@ -123,13 +123,7 @@ pub fn run(conn: &Connection, batch_id: i64) -> anyhow::Result<Summary> {
                 )
                 .ok();
             let path: Vec<LatLng> = match &xno {
-                Some(x) => tx
-                    .query_row(
-                        "SELECT encoded FROM src_route_point
-                         WHERE batch_id = ?1 AND xno = ?2 AND direction = ?3",
-                        rusqlite::params![batch_id, x, dir],
-                        |r| r.get::<_, String>(0),
-                    )
+                Some(x) => rm_db::effective_encoded(&tx, batch_id, x, dir)
                     .ok()
                     .and_then(|e| rm_core::polyline::decode(&e).ok())
                     .unwrap_or_default(),

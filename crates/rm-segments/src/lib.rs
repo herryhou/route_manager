@@ -158,19 +158,13 @@ fn run_inner(
             }
         }
 
-        // polylines for this route, by direction
+        // polylines for this route, by direction (effective = override ?? src)
         let mut encoded: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
         {
-            let mut stmt = tx.prepare(
-                "SELECT direction, encoded FROM src_route_point
-                 WHERE batch_id = ?1 AND xno = ?2",
-            )?;
-            let rows = stmt.query_map(rusqlite::params![batch_id, xno], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-            })?;
-            for row in rows {
-                let (d, e) = row?;
-                encoded.insert(d, e);
+            let dirs: std::collections::BTreeSet<i64> =
+                stops.iter().map(|s| s.direction).collect();
+            for dir in dirs {
+                encoded.insert(dir, rm_db::effective_encoded(&tx, batch_id, xno, dir)?);
             }
         }
 

@@ -48,9 +48,9 @@ pub async fn serve(State(state): State<AppState>, uri: Uri) -> Response {
             "application/javascript",
             include_str!("../../assets/js/panels.js"),
         ),
-        "/js/pieceEdit.js" => asset(
+        "/js/lineEdit.js" => asset(
             "application/javascript",
-            include_str!("../../assets/js/pieceEdit.js"),
+            include_str!("../../assets/js/lineEdit.js"),
         ),
         "/js/colors.js" => asset(
             "application/javascript",
