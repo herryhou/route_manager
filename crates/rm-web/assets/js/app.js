@@ -831,7 +831,12 @@ async function boot() {
             setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
             if (v.state === 'failed') status(`apply failed: ${v.error}`);
             else status(v.pending_marks > 0 ? `updates applied, ${v.pending_marks} mark(s) kept` : 'updates applied');
-            if (typeof syncLineBtn === 'function') syncLineBtn(); // redraw raw layer if open
+            // Derived data changed server-side (failed runs may still have
+            // committed earlier steps): drop the piece-panel way-run cache
+            // and redraw what's on screen.
+            for (const k of Object.keys(wayRunsCache)) delete wayRunsCache[k];
+            refreshAfterEdit();
+            syncLineBtn(); // line-btn visibility may change with the redraw
           } catch (e) {
             clearInterval(refreshTimer);
             refreshTimer = null;
