@@ -109,7 +109,9 @@ info).
 
 - **Apply updates** button (「套用更新」) in the topbar, visible only in
   edit mode.
-- Pending count badge (from `pending_marks`); disabled at 0.
+- Pending count badge (from `pending_marks`); stays enabled at 0 — a 0-mark
+  run is a harmless no-op, and new edits have no push channel to re-enable
+  a disabled button.
 - Click → confirm dialog (the "every write requires an explicit confirm"
   rule) → POST → button shows a spinner with the current step
   ("matching… / projecting… / bearings…"), polling the status endpoint

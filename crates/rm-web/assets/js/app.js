@@ -349,6 +349,11 @@ async function enableEditMode() {
   document.getElementById('edit-toggle').classList.add('on');
   status('edit mode on');
   document.getElementById('refresh-btn').hidden = false;
+  // Re-seed the pending-count badge: the boot seed may be stale (no token
+  // yet, or marks created in a previous session).
+  api.refreshStatus().then((v) => {
+    setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
+  }).catch(() => {});
 }
 
 function disableEditMode() {

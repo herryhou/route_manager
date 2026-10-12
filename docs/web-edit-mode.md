@@ -196,7 +196,7 @@ cleared means every amber badge is green again.
 - `run_db_write`: `rm_db::open()` (mutable, pragmas, migrations) per request
   on `spawn_blocking`, serialized by an app-level `tokio::Mutex`; WAL keeps
   viewers working during writes; busy_timeout is the backstop.
-- Endpoints (phase 1):
+- Endpoints (edit mode):
   - `POST /api/edit/stop/{stop_version_id}` — body
     `{lat?, lon?, stop_name?, note}`; position edits include the
     moved-distance sanity check client-side.
