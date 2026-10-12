@@ -362,6 +362,7 @@ function disableEditMode() {
   document.getElementById('edit-toggle').classList.remove('on');
   status('');
   document.getElementById('refresh-btn').hidden = true;
+  document.getElementById('refresh-btn').disabled = false;
   clearInterval(refreshTimer);
   refreshTimer = null;
 }
