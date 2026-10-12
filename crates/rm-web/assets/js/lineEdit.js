@@ -43,7 +43,10 @@ function render(s) {
   // the line being edited (the effective line, possibly already moved off src)
   s.line = L.polyline(s.pts, { color: '#f59e0b', weight: 4, opacity: 0.95 }).addTo(s.group);
   s.pts.forEach((p, i) => {
-    const m = L.marker(p, { icon: VTX('#f59e0b'), draggable: true }).addTo(s.group);
+    // zIndexOffset keeps session markers above the stops/bearings layer —
+    // app.js redraws that layer on every moveend, which re-appends its
+    // icons after ours and would otherwise bury any handle it overlaps.
+    const m = L.marker(p, { icon: VTX('#f59e0b'), draggable: true, zIndexOffset: 1000 }).addTo(s.group);
     m.on('drag', (e) => {
       s.pts[i] = [e.latlng.lat, e.latlng.lng];
       s.line.setLatLngs(s.pts);
@@ -56,13 +59,27 @@ function render(s) {
   // midpoint insert handles
   for (let i = 0; i < s.pts.length - 1; i++) {
     const mid = [(s.pts[i][0] + s.pts[i + 1][0]) / 2, (s.pts[i][1] + s.pts[i + 1][1]) / 2];
-    L.marker(mid, {
+    const h = L.marker(mid, {
       icon: L.divIcon({
         className: '',
         html: '<div style="width:8px;height:8px;background:#fff;border:2px solid #f59e0b;border-radius:50%;"></div>',
         iconSize: [8, 8], iconAnchor: [4, 4],
       }),
-    }).addTo(s.group).on('click', () => {
+      // one above the vertex handles: Leaflet orders same-pane markers by
+      // screen y, so without this a vertex 1px higher buries a midpoint in
+      // self-overlapping runs (loops) and clicks there never insert.
+      zIndexOffset: 1001,
+    }).addTo(s.group);
+    // Press = insert, on a raw mousedown: (1) stopPropagation keeps the
+    // gesture away from the map pane — otherwise mousedown arms map-drag and
+    // any micro-movement pans instead of inserting (Leaflet also suppresses
+    // the click via draggableMoved); (2) the DOM click event dies whenever
+    // the mouse drifts off the 8px handle between press and release (click
+    // fires on the press/release common ancestor), so click is not a
+    // reliable trigger here. Vertex markers are immune — their own Draggable
+    // claims the gesture first.
+    L.DomEvent.on(h.getElement(), 'mousedown', (e) => {
+      L.DomEvent.stopPropagation(e);
       s.pts.splice(i + 1, 0, mid);
       render(s);
     });
