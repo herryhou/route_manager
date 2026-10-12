@@ -44,6 +44,7 @@ let selectedRoute = null; // { route_id, dir, xno }
 let lastRouteDraw = null; // { p, s, onStopClick } — for bearing-toggle redraw
 let lastRaw = null; // { routeId, dir, v } — for line-edit entry
 let editMode = false;
+let refreshTimer = null;
 let pendingPlace = null; // armed move-place map handler — replaced/cancelled, never stacked
 let lineBtn = null; // 修線 + 線史 — created in boot() when edit is enabled
 let lineLogBtn = null;
@@ -347,6 +348,7 @@ async function enableEditMode() {
   setEditable(true);
   document.getElementById('edit-toggle').classList.add('on');
   status('edit mode on');
+  document.getElementById('refresh-btn').hidden = false;
 }
 
 function disableEditMode() {
@@ -359,6 +361,9 @@ function disableEditMode() {
   setEditable(false);
   document.getElementById('edit-toggle').classList.remove('on');
   status('');
+  document.getElementById('refresh-btn').hidden = true;
+  clearInterval(refreshTimer);
+  refreshTimer = null;
 }
 
 /// Esc aborts an armed place action (move/regroup): the handler's cancel
@@ -788,6 +793,47 @@ async function boot() {
     if (s.edit_enabled) {
       const btn = document.getElementById('edit-toggle');
       btn.hidden = false;
+      const rbtn = document.getElementById('refresh-btn');
+      rbtn.hidden = false;
+      // Seed the pending-count badge. The button stays ENABLED at 0
+      // pending (a no-op run is harmless) — edits made later in the
+      // session have no push channel, so a disabled-at-0 rule would
+      // brick the button after new edits (spec deviation, flagged).
+      api.refreshStatus().then((v) => {
+        setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
+      }).catch(() => {});
+      rbtn.addEventListener('click', async () => {
+        if (refreshTimer) return; // a run is already in flight
+        if (!confirm('Apply updates? Re-runs match, projections and bearings for all stale edits.')) return;
+        try {
+          await api.refreshApply();
+        } catch (e) {
+          status(`apply failed: ${e.message}`);
+          return;
+        }
+        rbtn.disabled = true;
+        refreshTimer = setInterval(async () => {
+          try {
+            const v = await api.refreshStatus();
+            if (v.state === 'running') {
+              rbtn.querySelector('b').textContent = v.step;
+              return;
+            }
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+            rbtn.disabled = false;
+            setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
+            if (v.state === 'failed') status(`apply failed: ${v.error}`);
+            else status(v.pending_marks > 0 ? `updates applied, ${v.pending_marks} mark(s) kept` : 'updates applied');
+            if (typeof syncLineBtn === 'function') syncLineBtn(); // redraw raw layer if open
+          } catch (e) {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+            rbtn.disabled = false;
+            status(`apply status failed: ${e.message}`);
+          }
+        }, 2000);
+      });
       // 修線 entry + 線史 (line edit log): visible only with edit mode +
       // raw layer + a raw payload up (syncLineBtn).
       lineBtn = document.createElement('button');

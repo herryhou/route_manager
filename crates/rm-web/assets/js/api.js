@@ -54,3 +54,5 @@ export const renameStation = (svi, body) => editFetch(`/api/edit/station/${svi}`
 export const moveStation = (svi, body) => editFetch(`/api/edit/station/${svi}/move`, body);
 export const editPolylineLine = (xno, dir, body) =>
   editFetch(`/api/edit/polyline/${encodeURIComponent(xno)}/${dir}/line`, body);
+export const refreshStatus = () => fetchJson('/api/edit/refresh');
+export const refreshApply = () => editFetch('/api/edit/refresh', {});
