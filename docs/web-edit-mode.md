@@ -131,6 +131,11 @@ steps own their transactions and clearing is a separate final one. Either
 way the clear lands last: a crash leaves the mark, so the badge stays amber,
 never green over stale data.
 
+Refresh runs from the web UI: the **Apply updates** button (edit mode)
+starts one in-server pass over all pending marks — see
+`docs/refresh-button.md`. The CLI chain below is the ops fallback and
+the reference for what each step consumes.
+
 Refresh is three CLI commands — the web server never spawns pipeline
 binaries. All three read `stale_mark` themselves; none takes ids:
 
@@ -197,6 +202,10 @@ cleared means every amber badge is green again.
     moved-distance sanity check client-side.
   - `GET  /api/edit/log?entity=&entity_id=` — history for a panel.
   - `POST /api/edit/undo/{edit_id}`.
+  - `POST /api/edit/refresh` — begin the apply-updates chain
+    (single-flight; `409` while one runs).
+  - `GET  /api/edit/refresh` — lifecycle state + pending `stale_mark`
+    count.
 - `/api/stats` response gains `edit_enabled: bool`; the client hides the edit
   toggle when false.
 
@@ -209,6 +218,9 @@ cleared means every amber badge is green again.
   re-renders from the new version row.
 - **Rename**: pencil icon → inline input on name fields in stop/station
   panels.
+- **Apply updates**: topbar button (edit mode only) — one confirm, then
+  the three `--stale` steps run in-server; the button shows the current
+  step and the kept-mark count after.
 - **Stale badge**: amber chip on stop/station panels whose derived data is
   marked stale.
 - **History + undo** (phase 2 UI): per-entity edit_log list with revert.
@@ -218,7 +230,8 @@ cleared means every amber badge is green again.
 
 - Incremental re-import / upstream-vs-manual conflict resolution.
 - Multi-writer concurrency beyond the app-level mutex (small team).
-- UI buttons that trigger refresh/pipeline runs.
+- Automatic (timer-driven) refresh — refresh is explicit: the
+  Apply-updates button or the CLI (`docs/refresh-button.md`).
 - Per-field permissions, user management UI.
 
 ## Phasing
@@ -231,6 +244,8 @@ cleared means every amber badge is green again.
 3. **Refresh runbook** (shipped): refresh `--stale` wiring (rm-segments +
    rm-registry), mark clearing, stale badges verified accurate.
 4. **Authoring**: new stops/stations, route-stop links.
+5. **Apply-updates button** (shipped): single-flight in-server refresh
+   chain + status endpoint — see `docs/refresh-button.md`.
 
 ## Testing
 

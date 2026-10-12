@@ -1,7 +1,7 @@
 # rm-web refresh button — design spec
 
 Date: 2026-10-12
-Status: approved (design); implementation not started
+Status: shipped
 
 ## Context
 

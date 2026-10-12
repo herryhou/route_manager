@@ -59,6 +59,7 @@ cargo run -r -p rm-registry      # stop_bearing / station_bearing +
 cargo run -r -p rm-osm-match -- --stale # re-match line overrides marked stale
 cargo run -r -p rm-segments -- --stale  # reproject routes marked stale by web edits
 cargo run -r -p rm-registry -- --stale  # rebuild bearings + split for marked-stale, clear marks
+# In the web UI (edit mode) the same chain is one button: ⟳ apply updates
 
 # 3. verify + QA exports (exits non-zero on any failed check)
 cargo run -r -p rm-verify -- --preset taichung   # | taipei | tainan
