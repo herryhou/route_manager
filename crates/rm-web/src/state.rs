@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use anyhow::Result;
 use rusqlite::Connection;
@@ -10,12 +11,42 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::error::ApiError;
 
+/// Which `--stale` step the refresh chain is on.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RefreshStep {
+    Match,
+    Segments,
+    Registry,
+}
+
+impl RefreshStep {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Match => "match",
+            Self::Segments => "segments",
+            Self::Registry => "registry",
+        }
+    }
+}
+
+/// Lifecycle of one Apply-updates run. `Idle` until the first POST; a
+/// server restart resets to `Idle` (marks, not status, are the durable
+/// state — see docs/refresh-button.md Decision 5).
+#[derive(Debug, Clone, PartialEq)]
+pub enum RefreshState {
+    Idle,
+    Running { step: RefreshStep, started_at: String },
+    Done { finished_at: String },
+    Failed { error: String, finished_at: String },
+}
+
 #[derive(Clone)]
 pub struct AppState {
     db_path: Arc<PathBuf>,
     tiles: Option<Arc<String>>,
     edit_tokens: Option<Arc<HashMap<String, String>>>,
     write_lock: Arc<AsyncMutex<()>>,
+    refresh: Arc<Mutex<RefreshState>>,
 }
 
 impl AppState {
@@ -29,6 +60,7 @@ impl AppState {
             tiles: tiles.map(Arc::new),
             edit_tokens: None,
             write_lock: Arc::new(AsyncMutex::new(())),
+            refresh: Arc::new(Mutex::new(RefreshState::Idle)),
         }
     }
 
@@ -72,6 +104,40 @@ impl AppState {
         let conn = rm_db::open_readonly(&self.db_path)?;
         crate::db::ensure_schema(&conn)?;
         Ok(conn)
+    }
+
+    /// Begin a refresh run: any non-running state → `Running(Match)`.
+    /// Already running → conflict (single-flight, spec Decision 4).
+    pub fn try_begin_refresh(&self, started_at: String) -> Result<(), ApiError> {
+        let mut g = self.refresh.lock().expect("refresh lock poisoned");
+        match *g {
+            RefreshState::Running { .. } => {
+                Err(ApiError::conflict("refresh already running"))
+            }
+            _ => {
+                *g = RefreshState::Running { step: RefreshStep::Match, started_at };
+                Ok(())
+            }
+        }
+    }
+
+    /// Clone of the current refresh lifecycle state.
+    pub fn refresh_state(&self) -> RefreshState {
+        self.refresh.lock().expect("refresh lock poisoned").clone()
+    }
+
+    /// Overwrite the lifecycle state (runner completion / failure).
+    pub fn set_refresh_state(&self, s: RefreshState) {
+        *self.refresh.lock().expect("refresh lock poisoned") = s;
+    }
+
+    /// Advance `Running.step`, preserving `started_at`.
+    pub fn set_refresh_step(&self, step: RefreshStep) {
+        let mut g = self.refresh.lock().expect("refresh lock poisoned");
+        if let RefreshState::Running { started_at, .. } = &*g {
+            let started_at = started_at.clone();
+            *g = RefreshState::Running { step, started_at };
+        }
     }
 }
 

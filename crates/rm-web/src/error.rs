@@ -5,9 +5,17 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
+#[derive(Debug)]
 pub struct ApiError {
     err: anyhow::Error,
     status: Option<StatusCode>,
+}
+
+/// Same text the JSON envelope carries (`IntoResponse`).
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.err)
+    }
 }
 
 impl ApiError {
