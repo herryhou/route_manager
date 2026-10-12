@@ -5,6 +5,7 @@ pub mod error;
 pub mod geojson;
 pub mod handlers;
 pub mod queries;
+pub mod refresh;
 pub mod state;
 
 use std::collections::HashMap;

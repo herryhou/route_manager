@@ -17,6 +17,9 @@ tracing-subscriber.workspace = true
 clap = { workspace = true, features = ["env"] }
 axum.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+rm-segments = { path = "../rm-segments" }
+rm-osm-match = { path = "../rm-osm-match" }
+rm-registry = { path = "../rm-registry" }
 
 [dev-dependencies]
 rm-ingest = { path = "../rm-ingest", features = ["testfix"] }
