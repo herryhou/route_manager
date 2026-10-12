@@ -1,8 +1,8 @@
 // Fetch helpers — one per endpoint, all returning parsed JSON.
 // Throws Error(`HTTP ${status}: ${body}`) on non-2xx.
 
-export async function fetchJson(path, { signal } = {}) {
-  const res = await fetch(path, { signal });
+export async function fetchJson(path, { headers, signal } = {}) {
+  const res = await fetch(path, { headers, signal });
   if (!res.ok) {
     let msg = '';
     try { msg = (await res.json()).error ?? ''; } catch { /* not json */ }
@@ -54,5 +54,6 @@ export const renameStation = (svi, body) => editFetch(`/api/edit/station/${svi}`
 export const moveStation = (svi, body) => editFetch(`/api/edit/station/${svi}/move`, body);
 export const editPolylineLine = (xno, dir, body) =>
   editFetch(`/api/edit/polyline/${encodeURIComponent(xno)}/${dir}/line`, body);
-export const refreshStatus = () => fetchJson('/api/edit/refresh');
+export const refreshStatus = () =>
+  fetchJson('/api/edit/refresh', { headers: { authorization: `Bearer ${editToken()}` } });
 export const refreshApply = () => editFetch('/api/edit/refresh', {});
