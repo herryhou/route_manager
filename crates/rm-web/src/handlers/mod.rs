@@ -3,6 +3,7 @@
 pub mod assets;
 pub mod edit;
 pub mod qa;
+pub mod refresh;
 pub mod routes;
 pub mod stats;
 pub mod stops;

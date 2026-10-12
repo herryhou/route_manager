@@ -16,6 +16,13 @@ const OUTLIER_M: f64 = 50.0;
 /// cannot clear it. Any step error (or join panic) lands in `Failed`.
 pub async fn run_chain(state: AppState) {
     let path = state.db_path().to_path_buf();
+    // Terminal states keep the run's started_at (spec: started_at shows for
+    // running / done / failed). Direct callers (tests) that skipped
+    // try_begin_refresh have no Running state to read; stamp now.
+    let started_at = match state.refresh_state() {
+        RefreshState::Running { started_at, .. } => started_at,
+        _ => rm_db::now_rfc3339(),
+    };
     // Step updates happen on the worker; `state` itself stays with the
     // caller for the terminal Done/Failed write after the join.
     let st = state.clone();
@@ -51,13 +58,15 @@ pub async fn run_chain(state: AppState) {
 
     let finished_at = rm_db::now_rfc3339();
     match joined {
-        Ok(Ok(())) => state.set_refresh_state(RefreshState::Done { finished_at }),
+        Ok(Ok(())) => state.set_refresh_state(RefreshState::Done { started_at, finished_at }),
         Ok(Err(e)) => state.set_refresh_state(RefreshState::Failed {
             error: e.to_string(),
+            started_at,
             finished_at,
         }),
         Err(join) => state.set_refresh_state(RefreshState::Failed {
             error: format!("refresh task failed: {join}"),
+            started_at,
             finished_at,
         }),
     }

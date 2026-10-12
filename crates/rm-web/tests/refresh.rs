@@ -2,7 +2,6 @@
 
 use axum::http::{Request, StatusCode};
 use axum::body::Body;
-use rusqlite::Connection;
 use tower::ServiceExt; // oneshot
 
 // --- Task 1: state machine ---
@@ -41,10 +40,14 @@ fn begin_refresh_then_conflict_then_recover() {
     }
 
     // terminal states open the gate again
-    state.set_refresh_state(rm_web::state::RefreshState::Done { finished_at: "t2".into() });
+    state.set_refresh_state(rm_web::state::RefreshState::Done {
+        started_at: "t1s".into(),
+        finished_at: "t2".into(),
+    });
     state.try_begin_refresh("t3".into()).unwrap();
     state.set_refresh_state(rm_web::state::RefreshState::Failed {
         error: "x".into(),
+        started_at: "t4s".into(),
         finished_at: "t4".into(),
     });
     state.try_begin_refresh("t5".into()).unwrap();
@@ -141,4 +144,116 @@ async fn run_chain_keeps_unconsumable_marks() {
         .query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))
         .unwrap();
     assert_eq!(n, 1, "unconsumable mark must survive a Done run");
+}
+
+// --- Task 3: endpoints ---
+
+fn authed_req(method: &str, uri: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", "Bearer sekrit")
+        .body(Body::empty())
+        .unwrap()
+}
+
+/// Authed GET /api/edit/refresh (the endpoint sits behind the token
+/// middleware, so the request must carry the header).
+async fn status_json(app: &axum::Router) -> serde_json::Value {
+    let res = app
+        .clone()
+        .oneshot(authed_req("GET", "/api/edit/refresh"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let b = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    serde_json::from_slice(&b).unwrap()
+}
+
+/// Poll GET /api/edit/refresh until the state leaves `running` (max ~5 s).
+async fn settled(app: axum::Router) -> serde_json::Value {
+    for _ in 0..100 {
+        let v = status_json(&app).await;
+        if v["state"] != "running" {
+            return v;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("refresh never settled");
+}
+
+#[tokio::test]
+async fn refresh_requires_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = runner_db(&dir);
+    for (method, auth, want) in [
+        ("POST", None::<&str>, StatusCode::UNAUTHORIZED),
+        ("POST", Some("Bearer nope"), StatusCode::FORBIDDEN),
+        ("GET", None::<&str>, StatusCode::UNAUTHORIZED),
+        ("GET", Some("Bearer nope"), StatusCode::FORBIDDEN),
+    ] {
+        let mut req = Request::builder().method(method).uri("/api/edit/refresh");
+        if let Some(a) = auth {
+            req = req.header("authorization", a);
+        }
+        let res = rm_web::router_with(state.clone())
+            .oneshot(req.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), want, "{method} {auth:?}");
+    }
+}
+
+#[tokio::test]
+async fn refresh_start_runs_to_done() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = runner_db(&dir);
+    let app = rm_web::router_with(state.clone());
+
+    let res = app
+        .clone()
+        .oneshot(authed_req("POST", "/api/edit/refresh"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+
+    let v = settled(app).await;
+    assert_eq!(v["state"], "done");
+    assert_eq!(v["pending_marks"], 0);
+    assert!(v["started_at"].is_string());
+    assert!(v["finished_at"].is_string());
+    assert!(v["error"].is_null());
+}
+
+#[tokio::test]
+async fn refresh_status_shapes_idle_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = runner_db(&dir);
+    let app = rm_web::router_with(state.clone());
+    let v = status_json(&app).await; // idle snapshot before any POST
+    assert_eq!(v["state"], "idle");
+    assert_eq!(v["pending_marks"], 0);
+    assert!(v["step"].is_null());
+}
+
+#[tokio::test]
+async fn refresh_routes_absent_without_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.db");
+    let conn = rm_db::open(&path).unwrap();
+    drop(conn);
+    let state = rm_web::state::AppState::new(path); // no tokens -> edit routes unmounted
+    for method in ["POST", "GET"] {
+        let res = rm_web::router_with(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri("/api/edit/refresh")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND, "{method}");
+    }
 }

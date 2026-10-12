@@ -71,6 +71,10 @@ pub fn router_with(state: AppState) -> Router {
             "/api/edit/polyline/{xno}/{direction}/line",
             axum::routing::post(handlers::edit::edit_polyline_line),
         )
+        .route(
+            "/api/edit/refresh",
+            axum::routing::post(handlers::refresh::start).get(handlers::refresh::status),
+        )
         .with_state(state)
     } else {
         r.with_state(state)

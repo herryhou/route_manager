@@ -36,8 +36,8 @@ impl RefreshStep {
 pub enum RefreshState {
     Idle,
     Running { step: RefreshStep, started_at: String },
-    Done { finished_at: String },
-    Failed { error: String, finished_at: String },
+    Done { started_at: String, finished_at: String },
+    Failed { error: String, started_at: String, finished_at: String },
 }
 
 #[derive(Clone)]
