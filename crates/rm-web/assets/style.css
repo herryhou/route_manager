@@ -414,9 +414,19 @@ body {
   color: var(--ink-soft);
 }
 
-#legend {
-  margin-top: 8px;
+/* Legend floats on the map (bottom-left): it names map line encodings,
+   not sidebar state. pointer-events:none keeps map drag/click through it. */
+#map-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 800;
+  pointer-events: none;
   font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--plate);
+  box-shadow: var(--lift);
 }
 
 .legend-row {

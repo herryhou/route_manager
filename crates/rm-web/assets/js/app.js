@@ -794,19 +794,25 @@ async function boot() {
     stopsTimer = setTimeout(refreshStopsLayer, 250);
   });
   // Legend: the map's line encodings, named. Static — the encodings are
-  // world constants (layers.js), not user state.
-  document.getElementById('legend').innerHTML = [
-    ['有效線（路線）', '#0857a2', 'line'],
-    ['無路徑段', '#c0331b', 'dash'],
-    ['原始比對線', '#16150f', 'dash'],
+  // world constants (layers.js), not user state. Floats on the map
+  // (bottom-left); dash swatches mirror the real dashArray values. Blue is
+  // the matched path; orange (有效線) is the override ?? src line the raw
+  // layer draws — the sidebar 有效線 toggle gates the orange one.
+  document.getElementById('map-legend').innerHTML = [
+    ['比對路徑（路線）', '#0857a2'],
+    ['原始比對線', '#16150f', '2 7'],
+    ['有效線（比對用）', '#d9531e'],
     ['站點環', '#e8a013', 'ring'],
   ]
-    .map(([label, c, kind]) => {
+    .map(([label, c, enc]) => {
       const style =
-        kind === 'dash'
-          ? `background:repeating-linear-gradient(90deg,${c} 0 3px,transparent 3px 6px)`
-          : kind === 'ring'
-            ? `width:9px;height:9px;border:2px solid ${c};background:none;border-radius:50%`
+        enc === 'ring'
+          ? `width:9px;height:9px;border:2px solid ${c};background:none;border-radius:50%`
+          : enc
+            ? (() => {
+                const [a, b] = enc.split(' ');
+                return `background:repeating-linear-gradient(90deg,${c} 0 ${a}px,transparent ${a}px ${+a + +b}px)`;
+              })()
             : `background:${c}`;
       return `<div class="legend-row"><span class="legend-swatch" style="${style}"></span>${label}</div>`;
     })
