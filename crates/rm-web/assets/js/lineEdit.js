@@ -1,6 +1,7 @@
 // Whole-line override editing (phase 2). One armed session at a time: the
 // effective line (override ?? src) renders fully editable — drag any vertex,
-// dblclick to delete, click a midpoint to insert; save = POST .../line
+// dblclick to delete, press a midpoint to insert (keep holding to drag the
+// new vertex); save = POST .../line
 // replacing the entire direction polyline. The server owns polyline math;
 // this file only collects [lat,lon] pairs. Esc / edit-off tear down.
 // src coords arrive GeoJSON lon-first and are normalized to [lat,lon]
@@ -43,11 +44,13 @@ function render(s) {
     .bindTooltip('src (raw)').addTo(s.group);
   // the line being edited (the effective line, possibly already moved off src)
   s.line = L.polyline(s.pts, { color: '#d9531e', weight: 4, opacity: 0.95 }).addTo(s.group);
+  s.vms = [];
   s.pts.forEach((p, i) => {
     // zIndexOffset keeps session markers above the stops/bearings layer —
     // app.js redraws that layer on every moveend, which re-appends its
     // icons after ours and would otherwise bury any handle it overlaps.
     const m = L.marker(p, { icon: VTX('#d9531e'), draggable: true, zIndexOffset: 1000 }).addTo(s.group);
+    s.vms[i] = m;
     m.on('drag', (e) => {
       s.pts[i] = [e.latlng.lat, e.latlng.lng];
       s.line.setLatLngs(s.pts);
@@ -83,8 +86,34 @@ function render(s) {
       L.DomEvent.stopPropagation(e);
       s.pts.splice(i + 1, 0, mid);
       render(s);
+      // render() rebuilt the layer after this mousedown, so the inserted
+      // vertex was born mid-gesture: it never saw a mousedown and its own
+      // Draggable is unarmed. Carry the still-held gesture to it by hand —
+      // otherwise the vertex can only be moved after release + re-press.
+      followInsertDrag(s, i + 1);
     });
   }
+}
+
+// Document-level continuation of a press-insert: mousemove moves the new
+// vertex (marker + line, same as the vertex drag handlers), mouseup does the
+// one rebuild. Listeners live on document because the marker element the
+// press started on is gone.
+function followInsertDrag(s, i) {
+  const m = s.vms[i];
+  const move = (e) => {
+    const ll = s.map.mouseEventToLatLng(e);
+    s.pts[i] = [ll.lat, ll.lng];
+    m.setLatLng(ll);
+    s.line.setLatLngs(s.pts);
+  };
+  const up = () => {
+    L.DomEvent.off(document, 'mousemove', move);
+    L.DomEvent.off(document, 'mouseup', up);
+    render(s);
+  };
+  L.DomEvent.on(document, 'mousemove', move);
+  L.DomEvent.on(document, 'mouseup', up);
 }
 
 export function startLineEdit(routeId, dir, xno, raw, onSaved) {
