@@ -3,6 +3,7 @@ import * as api from './api.js';
 import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, editLogPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, setEffectiveOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
 import { startLineEdit, stopLineEdit, lineEditActive } from './lineEdit.js';
+import { I } from './icons.js';
 
 export const map = L.map('map', { preferCanvas: true }).fitBounds([
   [23.974, 120.498],
@@ -59,8 +60,8 @@ function syncLineBtn() {
 }
 
 function onLineSaved(out, err) {
-  if (err) { status(`line save failed: ${err.message}`); return; }
-  status(out.created ? 'line override created' : 'line override updated');
+  if (err) { status(`線段儲存失敗: ${err.message}`); return; }
+  status(out.created ? '已建立線段覆寫' : '已更新線段覆寫');
   if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
 }
 
@@ -96,7 +97,7 @@ function refreshStations(q) {
       if (seq !== stationSeq) return; // stale
       renderStationList(v.stations ?? [], { onSelect: (s) => selectStation(s.station_id) });
     } catch (e) {
-      status(`station search failed: ${e.message}`);
+      status(`站點搜尋失敗: ${e.message}`);
     }
   }, 300);
 }
@@ -133,7 +134,7 @@ function paneForward(kind) {
 async function selectRouteById(routeId, dir = 0) {
   const r = allRoutes.find((x) => x.route_id === routeId);
   if (r) selectRoute(r, dir);
-  else status(`route ${routeId} not in list`);
+  else status(`路線 ${routeId} 不在清單`);
 }
 
 /// Way-run properties per `route_id:dir`, cached for piece-panel lookup —
@@ -159,7 +160,7 @@ async function fillPieceWays(el, routeId, dir, stops, p) {
   const lo = from?.chainage_m;
   const hi = to?.chainage_m;
   if (lo == null || hi == null || hi <= lo) {
-    el.innerHTML = '<p class="muted">no chainage window</p>';
+    el.innerHTML = '<p class="muted">無里程區間</p>';
     return;
   }
   try {
@@ -176,9 +177,9 @@ async function fillPieceWays(el, routeId, dir, stops, p) {
               `<tr><td>${esc(r.name ?? '—')} (#${r.osm_way_id})</td><td style="text-align:right">${fmt(r.overlap)}</td></tr>`
           )
           .join('')}</table>`
-      : '<p class="muted">no ways cover this piece</p>';
+      : '<p class="muted">無覆蓋的 OSM 街道</p>';
   } catch (e) {
-    el.innerHTML = `<p class="muted">ways load failed: ${esc(e.message)}</p>`;
+    el.innerHTML = `<p class="muted">街道載入失敗: ${esc(e.message)}</p>`;
   }
 }
 
@@ -224,10 +225,10 @@ async function selectRoute(r, dir = 0) {
       onDirection: (nd) => selectRoute(r, nd),
       onStopClick: (svid) => popupStop(svid),
     });
-    if ((p.features ?? []).length === 0) status('no path data for this direction');
+    if ((p.features ?? []).length === 0) status('此方向無路徑資料');
     location.hash = `#route=${route_id}&dir=${dir}`;
   } catch (e) {
-    status(`route load failed: ${e.message}`);
+    status(`路線載入失敗: ${e.message}`);
   } finally {
     busy(false);
   }
@@ -241,7 +242,7 @@ async function loadRaw(routeId, dir) {
     redrawRaw();
     syncLineBtn(); // entries may have been waiting for this payload
   } catch (e) {
-    status(`raw load failed: ${e.message}`);
+    status(`原始資料載入失敗: ${e.message}`);
   }
 }
 
@@ -256,7 +257,7 @@ async function openStopPopup(stopVersionId, marker) {
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
     stopPanel(d, { onPickRoute, onPickStation: selectStation, onEditStop });
   } catch (e) {
-    status(`stop load failed: ${e.message}`);
+    status(`站牌載入失敗: ${e.message}`);
   }
 }
 
@@ -271,7 +272,7 @@ async function openStationPopup(stationId, marker) {
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
     stationPanel(d, { onPickRoute, onPickStation: selectStation, onEditStation });
   } catch (e) {
-    status(`station load failed: ${e.message}`);
+    status(`站點載入失敗: ${e.message}`);
   }
 }
 
@@ -284,7 +285,7 @@ async function selectStation(stationId) {
     paneOpen('point', `station:${stationId}`, () => selectStation(stationId));
     clearHighlight();
     const m = L.circleMarker([st.lat, st.lon], {
-      radius: 10, color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.15,
+      radius: 10, color: '#0857a2', weight: 2, fillColor: '#0857a2', fillOpacity: 0.15,
     }).addTo(layers.highlight);
     m.bindPopup(stationPopupEl(d, {
       onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
@@ -294,7 +295,7 @@ async function selectStation(stationId) {
     stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickStation: selectStation, onEditStation });
     location.hash = `#station=${stationId}`;
   } catch (e) {
-    status(`station load failed: ${e.message}`);
+    status(`站點載入失敗: ${e.message}`);
   } finally {
     busy(false);
   }
@@ -309,14 +310,14 @@ async function popupStop(stopVersionId) {
     paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     clearHighlight();
     const m = L.circleMarker([s.lat, s.lon], {
-      radius: 10, color: '#f59e0b', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.15,
+      radius: 10, color: '#0857a2', weight: 2, fillColor: '#0857a2', fillOpacity: 0.15,
     }).addTo(layers.highlight);
     m.bindPopup(stopPopupEl(d, { onPickRoute }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([s.lat, s.lon], { animate: true });
     stopPanel(d, { onPickRoute, onPickStation: selectStation, onEditStop });
   } catch (e) {
-    status(`stop load failed: ${e.message}`);
+    status(`站牌載入失敗: ${e.message}`);
   }
 }
 
@@ -332,7 +333,7 @@ async function selectStop(stopVersionId) {
     });
     location.hash = `#stop=${stopVersionId}`;
   } catch (e) {
-    status(`stop load failed: ${e.message}`);
+    status(`站牌載入失敗: ${e.message}`);
   } finally {
     busy(false);
   }
@@ -340,14 +341,14 @@ async function selectStop(stopVersionId) {
 
 async function enableEditMode() {
   if (!sessionStorage.getItem('rm-edit-token')) {
-    const tok = prompt('edit token:');
+    const tok = prompt('編輯權杖:');
     if (!tok) return;
     sessionStorage.setItem('rm-edit-token', tok);
   }
   editMode = true;
   setEditable(true);
   document.getElementById('edit-toggle').classList.add('on');
-  status('edit mode on');
+  status('編輯模式開啟');
   document.getElementById('refresh-btn').hidden = false;
   // Re-seed the pending-count badge: the boot seed may be stale (no token
   // yet, or marks created in a previous session).
@@ -392,7 +393,7 @@ document.addEventListener('keydown', (e) => {
 function armPlace(from, onClick) {
   const mapEl = map.getContainer();
   const guide = L.polyline([from, from], {
-    color: '#f59e0b', weight: 2, dashArray: '6 6', interactive: false,
+    color: '#d9531e', weight: 2, dashArray: '6 6', interactive: false,
   }).addTo(map);
   mapEl.style.cursor = 'crosshair';
   const follow = (e) => guide.setLatLngs([from, e.latlng]);
@@ -427,7 +428,7 @@ async function refreshAfterEdit() {
 /// the next edit-mode toggle re-prompts instead of looping 403s.
 function editFail(what, e) {
   if (/HTTP 40[13]/.test(e.message)) sessionStorage.removeItem('rm-edit-token');
-  status(`${what} failed: ${e.message}`);
+  status(`${what}失敗: ${e.message}`);
 }
 
 /// stop-panel edit actions: rename now, move/regroup = one-shot place mode,
@@ -439,48 +440,48 @@ function onEditStop(act, stop, stationId) {
   } else if (act === 'rename') {
     const name = prompt(`rename stop #${stop.stop_code}:`, stop.stop_name);
     if (!name || name === stop.stop_name) return;
-    const note = prompt('note (required):', '') ?? '';
+    const note = prompt('備註（必填）:', '') ?? '';
     if (!note) return;
     api.editStop(stop.stop_version_id, { stop_name: name, note })
       .then(async (r) => {
-        status('renamed');
+        status('已改名');
         await refreshAfterEdit();
         return selectStop(r.new_stop_version_id);
       })
       .catch((e) => editFail('rename', e));
   } else if (act === 'regroup') {
-    status('click the target station');
+    status('點擊目標站點');
     armPlace([stop.lat, stop.lon], (e) => {
       if (!editMode) return;
       api.stationNearest(e.latlng.lat, e.latlng.lng, 100)
         .then((hit) => {
           if (hit.station_id === stationId) return status(`already at ${hit.station_name}`);
-          if (!confirm(`regroup stop #${stop.stop_code}\n${stop.stop_name} → ${hit.station_name} (${Math.round(hit.distance_m)} m)`)) return status('');
-          const note = prompt('note (required):', '') ?? '';
+          if (!confirm(`改歸站點？站牌 #${stop.stop_code}\n${stop.stop_name} → ${hit.station_name}（${Math.round(hit.distance_m)} 公尺）`)) return status('');
+          const note = prompt('備註（必填）:', '') ?? '';
           if (!note) return status('');
           return api.regroupStop(stop.stop_version_id, { new_station_id: hit.station_id, note })
             .then(async (r) => {
-              status('regrouped');
+              status('已改歸站點');
               await refreshAfterEdit();
               return selectStop(r.new_stop_version_id);
             });
         })
         .catch((err) => {
-          if (/HTTP 404/.test(err.message)) status('no station within 100 m');
+          if (/HTTP 404/.test(err.message)) status('100 公尺內無站點');
           else editFail('regroup', err);
         });
     });
   } else if (act === 'move') {
-    status('click the map to place the stop');
+    status('點擊地圖放置站牌');
     armPlace([stop.lat, stop.lon], (e) => {
       if (!editMode) return;
       const dist = Math.round(L.latLng([stop.lat, stop.lon]).distanceTo(e.latlng));
-      if (!confirm(`move stop #${stop.stop_code} ${dist} m?\n(${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}) → (${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)})`)) return status('');
-      const note = prompt('note (required):', '') ?? '';
+      if (!confirm(`搬移站牌 #${stop.stop_code} ${dist} 公尺？\n(${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}) → (${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)})`)) return status('');
+      const note = prompt('備註（必填）:', '') ?? '';
       if (!note) return status('');
       api.editStop(stop.stop_version_id, { lat: e.latlng.lat, lon: e.latlng.lng, note })
         .then(async (r) => {
-          status(`moved ${dist} m`);
+          status(`已搬移 ${dist} 公尺`);
           await refreshAfterEdit();
           return selectStop(r.new_stop_version_id);
         })
@@ -502,7 +503,7 @@ async function openEditLog(stop) {
       onUndo: (editId) => undoStopEdit(stop, editId),
     });
   } catch (e) {
-    status(`edit log load failed: ${e.message}`);
+    status(`編輯歷史載入失敗: ${e.message}`);
   } finally {
     busy(false);
   }
@@ -514,12 +515,12 @@ async function openEditLog(stop) {
 /// status bar via editFail.
 async function undoStopEdit(stop, editId) {
   if (!editMode) return;
-  if (!confirm(`undo edit #${editId} on stop #${stop.stop_code}?`)) return;
-  const note = prompt('note (required):', '') ?? '';
+  if (!confirm(`復原站牌 #${stop.stop_code} 的編輯 #${editId}？`)) return;
+  const note = prompt('備註（必填）:', '') ?? '';
   if (!note) return;
   try {
     const r = await api.undoEdit(editId, note);
-    status('undone');
+    status('已復原');
     await refreshAfterEdit();
     await selectStop(r.new_stop_version_id);
     await openEditLog(stop); // fresh rows — the undo row is now newest
@@ -541,33 +542,33 @@ function onEditStation(act, d) {
     const stops = d.stops ?? [];
     const matches = stops.filter((s) => s.stop_name === st.station_name).length;
     const lv = prompt(
-      `level:\n1 station only\n2 matching poles (${matches}/${stops.length} match)\n3 all poles (default)`, '3');
+      `層級:\n1 只改站點\n2 同名站牌 (${matches}/${stops.length} 根相符)\n3 全部站牌（預設）`, '3');
     if (!lv) return;
     const level = { 1: 'station', 2: 'matching', 3: 'all' }[lv.trim()];
-    if (!level) return status(`bad level: ${lv}`);
-    const reach = level === 'all' ? ` (${stops.length} poles)`
-      : level === 'matching' ? ` (${matches} poles)` : '';
-    if (!confirm(`${st.station_name} → ${name}\nlevel: ${level}${reach}`)) return status('');
-    const note = prompt('note (required):', '') ?? '';
+    if (!level) return status(`層級無效: ${lv}`);
+    const reach = level === 'all' ? ` (${stops.length} 根站牌)`
+      : level === 'matching' ? ` (${matches} 根站牌)` : '';
+    if (!confirm(`${st.station_name} → ${name}\n層級: ${level}${reach}`)) return status('');
+    const note = prompt('備註（必填）:', '') ?? '';
     if (!note) return status('');
     api.renameStation(st.station_version_id, { new_name: name, level, note })
       .then(async () => {
-        status('renamed');
+        status('已改名');
         await refreshAfterEdit();
         return selectStation(st.station_id);
       })
       .catch((e) => editFail('rename', e));
   } else if (act === 'move') {
-    status('click the new station position');
+    status('點擊新的站點位置');
     armPlace([st.lat, st.lon], (e) => {
       if (!editMode) return;
       const dist = Math.round(L.latLng([st.lat, st.lon]).distanceTo(e.latlng));
-      if (!confirm(`move station #${st.station_id} ${dist} m?\nstops stay put\n(${st.lat.toFixed(5)},${st.lon.toFixed(5)}) → (${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)})`)) return status('');
-      const note = prompt('note (required):', '') ?? '';
+      if (!confirm(`搬移站點 #${st.station_id} ${dist} 公尺？\n站牌不動\n(${st.lat.toFixed(5)},${st.lon.toFixed(5)}) → (${e.latlng.lat.toFixed(5)},${e.latlng.lng.toFixed(5)})`)) return status('');
+      const note = prompt('備註（必填）:', '') ?? '';
       if (!note) return status('');
       api.moveStation(st.station_version_id, { lat: e.latlng.lat, lon: e.latlng.lng, note })
         .then(async () => {
-          status('moved');
+          status('已搬移');
           await refreshAfterEdit();
           return selectStation(st.station_id);
         })
@@ -589,7 +590,7 @@ async function openStationEditLog(st) {
       onUndo: (editId) => undoStationEdit(st, editId),
     });
   } catch (e) {
-    status(`edit log load failed: ${e.message}`);
+    status(`編輯歷史載入失敗: ${e.message}`);
   } finally {
     busy(false);
   }
@@ -600,12 +601,12 @@ async function openStationEditLog(st) {
 /// re-fetch the log. A 409 lands in the status bar via editFail.
 async function undoStationEdit(st, editId) {
   if (!editMode) return;
-  if (!confirm(`undo edit #${editId} on station #${st.station_id}?`)) return;
-  const note = prompt('note (required):', '') ?? '';
+  if (!confirm(`復原站點 #${st.station_id} 的編輯 #${editId}？`)) return;
+  const note = prompt('備註（必填）:', '') ?? '';
   if (!note) return;
   try {
     const r = await api.undoEdit(editId, note);
-    status('undone');
+    status('已復原');
     await refreshAfterEdit();
     await selectStation(st.station_id);
     await openStationEditLog(st); // fresh rows — the undo row is now newest
@@ -627,7 +628,7 @@ async function openLineLog(routeId) {
       onUndo: (editId) => undoLineEdit(routeId, editId),
     });
   } catch (e) {
-    status(`line edit log load failed: ${e.message}`);
+    status(`線段歷史載入失敗: ${e.message}`);
   } finally {
     busy(false);
   }
@@ -640,12 +641,12 @@ async function openLineLog(routeId) {
 /// then the log for the fresh rows.
 async function undoLineEdit(routeId, editId) {
   if (!editMode) return;
-  if (!confirm(`undo edit #${editId} on route #${routeId} line?`)) return;
-  const note = prompt('note (required):', '') ?? '';
+  if (!confirm(`復原路線 #${routeId} 的線段編輯 #${editId}？`)) return;
+  const note = prompt('備註（必填）:', '') ?? '';
   if (!note) return;
   try {
     const r = await api.undoEdit(editId, note);
-    status(r.restored?.deleted ? 'line override deleted (back to src)' : 'line override restored');
+    status(r.restored?.deleted ? '已刪除線段覆寫（回到原始線）' : '已還原線段覆寫');
     if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
     await openLineLog(routeId); // fresh rows — the undo row is now newest
   } catch (e) {
@@ -668,7 +669,7 @@ async function openOutliers() {
     });
     location.hash = '#outliers';
   } catch (e) {
-    status(`outliers load failed: ${e.message}`);
+    status(`離群站牌載入失敗: ${e.message}`);
   } finally {
     busy(false);
   }
@@ -684,7 +685,7 @@ async function openMatchDevs() {
     });
     location.hash = '#matchdev';
   } catch (e) {
-    status(`path dev load failed: ${e.message}`);
+    status(`路徑偏離載入失敗: ${e.message}`);
   } finally {
     busy(false);
   }
@@ -711,9 +712,9 @@ async function refreshStopsLayer() {
       onStopClick: (svid, marker) => openStopPopup(svid, marker),
       onStationClick: (stid, marker) => openStationPopup(stid, marker),
     });
-    if (v.truncated) status(`${kind} layer truncated — zoom in`);
+    if (v.truncated) status(`${kind === 'stop' ? '站牌' : '站點'}圖層已截斷 — 請放大`);
   } catch (e) {
-    status(`stops layer load failed: ${e.message}`);
+    status(`站牌圖層載入失敗: ${e.message}`);
   }
 }
 
@@ -729,6 +730,11 @@ function parseHash() {
 }
 
 async function boot() {
+  // Icon slots: index.html carries no inline SVG — fill every [data-icon]
+  // from icons.js (one stroke, one weight across the whole UI).
+  for (const el of document.querySelectorAll('[data-icon]')) {
+    el.innerHTML = I[el.dataset.icon] ?? '';
+  }
   setPaneChangeHook((kind, closed) => {
     if (closed) paneCurrent[kind] = null;
     if (kind === 'point') clearPieceHighlight();
@@ -758,8 +764,8 @@ async function boot() {
   sidebarToggle.addEventListener('click', () => {
     const sb = document.getElementById('sidebar');
     sb.hidden = !sb.hidden;
-    sidebarToggle.textContent = sb.hidden ? '»' : '«';
-    sidebarToggle.title = sb.hidden ? 'show sidebar' : 'hide sidebar';
+    sidebarToggle.innerHTML = sb.hidden ? I.panelR : I.panelL;
+    sidebarToggle.title = sb.hidden ? '展開側欄' : '收合側欄';
     map.invalidateSize();
   });
   document.getElementById('chip-outliers').addEventListener('click', openOutliers);
@@ -786,6 +792,24 @@ async function boot() {
     clearTimeout(stopsTimer);
     stopsTimer = setTimeout(refreshStopsLayer, 250);
   });
+  // Legend: the map's line encodings, named. Static — the encodings are
+  // world constants (layers.js), not user state.
+  document.getElementById('legend').innerHTML = [
+    ['有效線（路線）', '#0857a2', 'line'],
+    ['無路徑段', '#c0331b', 'dash'],
+    ['原始比對線', '#16150f', 'dash'],
+    ['站點環', '#e8a013', 'ring'],
+  ]
+    .map(([label, c, kind]) => {
+      const style =
+        kind === 'dash'
+          ? `background:repeating-linear-gradient(90deg,${c} 0 3px,transparent 3px 6px)`
+          : kind === 'ring'
+            ? `width:9px;height:9px;border:2px solid ${c};background:none;border-radius:50%`
+            : `background:${c}`;
+      return `<div class="legend-row"><span class="legend-swatch" style="${style}"></span>${label}</div>`;
+    })
+    .join('');
 
   try {
     const [s, rv] = await Promise.all([api.stats(), api.routes()]);
@@ -810,11 +834,11 @@ async function boot() {
       }).catch(() => {});
       rbtn.addEventListener('click', async () => {
         if (refreshTimer) return; // a run is already in flight
-        if (!confirm('Apply updates? Re-runs match, projections and bearings for all stale edits.')) return;
+        if (!confirm('套用更新？將對所有過期編輯重跑比對、投影與方位。')) return;
         try {
           await api.refreshApply();
         } catch (e) {
-          status(`apply failed: ${e.message}`);
+          status(`套用失敗: ${e.message}`);
           return;
         }
         rbtn.disabled = true;
@@ -829,8 +853,8 @@ async function boot() {
             refreshTimer = null;
             rbtn.disabled = false;
             setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
-            if (v.state === 'failed') status(`apply failed: ${v.error}`);
-            else status(v.pending_marks > 0 ? `updates applied, ${v.pending_marks} mark(s) kept` : 'updates applied');
+            if (v.state === 'failed') status(`套用失敗: ${v.error}`);
+            else status(v.pending_marks > 0 ? `更新已套用，保留 ${v.pending_marks} 筆待標` : '更新已套用');
             // Derived data changed server-side (failed runs may still have
             // committed earlier steps): drop the piece-panel way-run cache
             // and redraw what's on screen.
@@ -841,7 +865,7 @@ async function boot() {
             clearInterval(refreshTimer);
             refreshTimer = null;
             rbtn.disabled = false;
-            status(`apply status failed: ${e.message}`);
+            status(`套用狀態輪詢失敗: ${e.message}`);
           }
         }, 2000);
       });
@@ -850,7 +874,8 @@ async function boot() {
       lineBtn = document.createElement('button');
       lineBtn.id = 'line-edit-btn';
       lineBtn.textContent = '修線';
-      lineBtn.style.cssText = 'display:none;margin-left:6px;';
+      lineBtn.className = 'band-btn';
+      lineBtn.style.cssText = 'display:none;';
       lineBtn.addEventListener('click', () => {
         if (!lastRaw || lineEditActive()) return;
         startLineEdit(lastRaw.routeId, lastRaw.dir, selectedRoute.xno, lastRaw.v, onLineSaved);
@@ -860,7 +885,8 @@ async function boot() {
       lineLogBtn.id = 'line-log-btn';
       lineLogBtn.textContent = '線史';
       lineLogBtn.title = 'line edit history';
-      lineLogBtn.style.cssText = 'display:none;margin-left:6px;';
+      lineLogBtn.className = 'band-btn';
+      lineLogBtn.style.cssText = 'display:none;';
       lineLogBtn.addEventListener('click', () => {
         if (!lastRaw) return;
         openLineLog(lastRaw.routeId);
@@ -893,7 +919,7 @@ async function boot() {
       selectStation(Number(h.station));
     }
   } catch (e) {
-    status(`boot failed: ${e.message}`);
+    status(`啟動失敗: ${e.message}`);
   }
 }
 

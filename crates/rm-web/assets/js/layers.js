@@ -44,8 +44,8 @@ export function drawRoute(pathFc, stopsJson, { onStopClick, onPathClick }) {
   L.geoJSON(pathFc, {
     style: (f) =>
       f.properties.geometry_method === 'no_path'
-        ? { color: '#cf3e3e', dashArray: '6 6', weight: 3 }
-        : { color: '#2563eb', weight: 4 },
+        ? { color: '#c0331b', dashArray: '6 6', weight: 3 }
+        : { color: '#0857a2', weight: 4 },
   })
     .bindTooltip((l) => pieceTip(l.feature.properties))
     .on('click', (e) => onPathClick(e.layer.feature))
@@ -84,7 +84,7 @@ export function fitRoute(pathFc, stopsJson) {
     for (const c of f.geometry?.coordinates ?? []) pts.push([c[1], c[0]]);
   }
   for (const s of stopsJson.stops ?? []) pts.push([s.lat, s.lon]);
-  if (pts.length) layers.routePath._map;
+  if (pts.length) layers.routePath._map?.fitBounds(L.latLngBounds(pts), { padding: [24, 24] });
 }
 
 /// Ring group-member stations for stop drill-down.
@@ -93,7 +93,7 @@ export function highlightGroup(members) {
   for (const m of members ?? []) {
     L.circleMarker([m.lat, m.lon], {
       radius: 12,
-      color: '#d19a00',
+      color: '#e8a013',
       weight: 2,
       fillOpacity: 0.15,
     })
@@ -106,7 +106,7 @@ export function highlightGroup(members) {
 /// group so the stop/group rings in layers.highlight survive its clears.
 export function drawPieceHighlight(geometry, label = 'selected piece') {
   clearPieceHighlight();
-  L.geoJSON(geometry, { style: { color: '#cf3e3e', weight: 5, opacity: 0.9 } })
+  L.geoJSON(geometry, { style: { color: '#d9531e', weight: 5, opacity: 0.9 } })
     .bindTooltip(label, { direction: 'top' })
     .addTo(layers.segHighlight);
 }
@@ -119,7 +119,7 @@ export function flashStop(lat, lon) {
   clearHighlight();
   const m = L.circleMarker([lat, lon], {
     radius: 10,
-    color: '#cf3e3e',
+    color: '#c0331b',
     weight: 3,
     fillOpacity: 0.2,
   }).addTo(layers.highlight);
@@ -140,7 +140,7 @@ export function drawRaw(raw, { onEditLine } = {}) {
   layers.raw.clearLayers();
   if (raw?.path?.geometry) {
     L.geoJSON(raw.path, {
-      style: { color: '#7c3aed', weight: 3, dashArray: '2 7', opacity: 0.8 },
+      style: { color: '#16150f', weight: 3, dashArray: '2 7', opacity: 0.8 },
     })
       .bindTooltip('src_route_point (raw)')
       .addTo(layers.raw);
@@ -151,7 +151,7 @@ export function drawRaw(raw, { onEditLine } = {}) {
         [s.lat - 0.00012, s.lon - 0.00012],
         [s.lat + 0.00012, s.lon + 0.00012],
       ],
-      { color: '#7c3aed', weight: 1.5, fillOpacity: 0.35 }
+      { color: '#5c5a50', weight: 1.5, fillOpacity: 0.35 }
     )
       .bindTooltip(`${s.source_order_no}. ${s.station_name} (node ${s.node_id})`, { direction: 'top' })
       .addTo(layers.raw);
@@ -162,7 +162,7 @@ export function drawRaw(raw, { onEditLine } = {}) {
       ? `effective (override ${eff.updated_at})`
       : 'effective (= src)';
     const line = L.polyline(eff.points, {
-      color: '#f59e0b', weight: 4, opacity: 0.95,
+      color: '#d9531e', weight: 4, opacity: 0.95,
     })
       .bindTooltip(label, { direction: 'top' })
       .addTo(layers.raw);
@@ -181,8 +181,8 @@ export function drawStopsLayer(fc, { onStopClick, onStationClick }) {
     const [lon, lat] = f.geometry.coordinates;
     const isStation = f.properties.kind === 'station';
     const m = isStation
-      ? L.circleMarker([lat, lon], { radius: 7, color: '#d19a00', weight: 1.5, fillOpacity: 0.1 })
-      : L.circleMarker([lat, lon], { radius: 2.5, color: '#404040', weight: 0.5, fillOpacity: 0.7 });
+      ? L.circleMarker([lat, lon], { radius: 7, color: '#e8a013', weight: 1.5, fillOpacity: 0.1 })
+      : L.circleMarker([lat, lon], { radius: 2.5, color: '#3a3831', weight: 0.5, fillOpacity: 0.7 });
     const p = f.properties;
     let tip = p.name;
     if (p.bearing != null) {

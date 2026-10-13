@@ -19,6 +19,7 @@ pub fn router() -> Router<AppState> {
         .route("/style.css", get(assets::serve))
         .route("/js/app.js", get(assets::serve))
         .route("/js/api.js", get(assets::serve))
+        .route("/js/icons.js", get(assets::serve))
         .route("/js/layers.js", get(assets::serve))
         .route("/js/panels.js", get(assets::serve))
         .route("/js/lineEdit.js", get(assets::serve))

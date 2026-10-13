@@ -1,5 +1,6 @@
 // Sidebar + detail panel rendering.
-import { snapColor, matchedBadge, METHOD_COLORS } from './colors.js';
+import { snapColor, matchedBadge, METHOD_COLORS, qaDot } from './colors.js';
+import { I } from './icons.js';
 
 /// Edit mode (phase 1): stop panels gain rename/move buttons when on.
 let editable = false;
@@ -16,7 +17,7 @@ export function renderRouteList(routes, { onSelect, selectedKey }) {
   if (!routes.length) {
     const empty = document.createElement('div');
     empty.className = 'list-empty';
-    empty.textContent = 'no routes match';
+    empty.textContent = '沒有符合的路線';
     list.append(empty);
     return;
   }
@@ -29,7 +30,7 @@ export function renderRouteList(routes, { onSelect, selectedKey }) {
     const name = document.createElement('span');
     name.className = 'route-name';
     name.textContent = r.subroute_name ?? r.ext_uid;
-    name.title = `${r.subroute_name ?? ''} · ${r.providers.join(', ') || 'no provider'}`;
+    name.title = `${r.subroute_name ?? ''} · ${r.providers.join(', ') || '無業者'}`;
     row.append(code, name);
     for (const d of r.directions ?? []) {
       const dot = document.createElement('span');
@@ -51,7 +52,7 @@ export function renderStationList(stations, { onSelect }) {
   if (!stations.length) return;
   const head = document.createElement('div');
   head.className = 'list-head';
-  head.textContent = `Stations (${stations.length})`;
+  head.textContent = `站點 (${stations.length})`;
   box.append(head);
   for (const s of stations) {
     const row = document.createElement('div');
@@ -202,35 +203,34 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
     .join('');
   const rows = (stops.stops ?? [])
     .map((s) => {
-      const badge =
-        s.method === 'OUTLIER' || s.method === 'NO_PATH'
-          ? `<span class="badge bad">${s.method}</span>`
-          : s.snap_dist_m != null && s.snap_dist_m > 50
-            ? `<span class="badge warn">${s.snap_dist_m.toFixed(0)}m</span>`
-            : '';
-      return `<div class="stop-row" data-svid="${s.stop_version_id}" data-lat="${s.lat}" data-lon="${s.lon}">
-        <span class="stop-seq">${s.stop_sequence}</span>
-        <span class="stop-name" title="${esc(s.stop_name)} · snap ${s.snap_dist_m?.toFixed(1) ?? '—'}m">${esc(s.stop_name)}</span>
-        ${badge}
+      const qa = qaDot(s);
+      const metre = qa.cls === 'q-ok'
+        ? ''
+        : `<span class="chain-metre ${qa.cls}">${qa.label}</span>`;
+      return `<div class="chain-stop" data-svid="${s.stop_version_id}" data-lat="${s.lat}" data-lon="${s.lon}">
+        <span class="chain-seq">${s.stop_sequence}</span>
+        <span class="chain-node ${qa.cls}" style="--nd:${qa.nd}px; --nh:${qa.nh}px"><i></i></span>
+        <span class="chain-name" title="${esc(s.stop_name)} · snap ${s.snap_dist_m?.toFixed(1) ?? '—'}m">${esc(s.stop_name)}</span>
+        ${metre}
       </div>`;
     })
     .join('');
   const html = `
     <div class="tabs">${dirBtns}</div>
     ${kv([
-    ['providers', d.providers.join(', ')],
-    ['version', `v${d.version_no} · ${d.status}`],
-    ['side routes', d.side_routes.join(', ')],
-    ['main routes', d.main_routes.join(', ')],
+    ['業者', d.providers.join(', ')],
+    ['版本', `v${d.version_no} · ${d.status}`],
+    ['支線', d.side_routes.join(', ')],
+    ['主線', d.main_routes.join(', ')],
   ])}
     <div class="tabs view-tabs">
-      <button data-view="stops" class="active">Stops (${(stops.stops ?? []).length})</button>
-      <button data-view="qa">QA profile</button>
+      <button data-view="stops" class="active">站序 (${(stops.stops ?? []).length})</button>
+      <button data-view="qa">QA 剖析</button>
     </div>
-    <div class="view-stops">${rows}</div>
+    <div class="chain view-stops">${rows}</div>
     <div class="view-qa" hidden>${profileSvg(stops.stops ?? [])}</div>
   `;
-  const pane = showPane('context', html, `Route ${d.route_code} ${d.subroute_name ?? ''}`.trim());
+  const pane = showPane('context', html, `路線 ${d.route_code} ${d.subroute_name ?? ''}`.trim());
   pane.querySelectorAll('.tabs:not(.view-tabs) button').forEach((b) =>
     b.addEventListener('click', () => onDirection(Number(b.dataset.dir)))
   );
@@ -242,8 +242,15 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
       pane.querySelector('.view-qa').hidden = b.dataset.view !== 'qa';
     })
   );
-  pane.querySelectorAll('.view-stops .stop-row').forEach((row) =>
-    row.addEventListener('click', () => onStopClick(Number(row.dataset.svid)))
+  pane.querySelectorAll('.view-stops .chain-stop').forEach((row) =>
+    row.addEventListener('click', () => {
+      // Selection isolation: the clicked plate lifts (.sel), siblings recede
+      // (.has-sel on the chain) — 120ms, the world's one authored motion.
+      pane.querySelectorAll('.chain-stop.sel').forEach((x) => x.classList.remove('sel'));
+      pane.querySelector('.chain')?.classList.add('has-sel');
+      row.classList.add('sel');
+      onStopClick(Number(row.dataset.svid));
+    })
   );
 }
 
@@ -262,8 +269,8 @@ export function profileSvg(stops) {
   const grid = [0, 15, 40, PROFILE_CAP_M]
     .map(
       (m) =>
-        `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(m)}" y2="${y(m)}" stroke="var(--border)" stroke-width="1"/>
-         <text x="${PAD.l - 4}" y="${y(m) + 3}" text-anchor="end" font-size="8" fill="var(--muted)">${m}m</text>`
+        `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(m)}" y2="${y(m)}" stroke="var(--hair)" stroke-width="1"/>
+         <text x="${PAD.l - 4}" y="${y(m) + 3}" text-anchor="end" font-size="8" fill="var(--ink-soft)">${m}m</text>`
     )
     .join('');
   const dots = stops
@@ -275,7 +282,7 @@ export function profileSvg(stops) {
     )
     .join('');
   return `
-    <p class="muted" style="margin:0 0 4px">snap distance along route (cap ${PROFILE_CAP_M}m; green &lt;15, amber &lt;40)</p>
+    <p class="muted" style="margin:0 0 4px">沿線 snap 距離（上限 ${PROFILE_CAP_M}m；綠 &lt;15、黃 &lt;40，點徑與網紋隨距離增大）</p>
     <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
       ${grid}${dots}
     </svg>`;
@@ -292,22 +299,22 @@ export function pathPiecePanel(p) {
     'point',
     isWay
       ? kv([
-        ['ordinal', p.ordinal],
-        ['way', `${p.name ?? '—'} (#${p.osm_way_id})`],
-        ['entry node', p.entry_node_id],
-        ['exit node', p.exit_node_id],
-        ['chainage', `${fmt(p.cum_start_m)} → ${fmt(p.cum_end_m)}`],
-        ['run length', fmt((p.cum_end_m ?? 0) - (p.cum_start_m ?? 0))],
+        ['序號', p.ordinal],
+        ['街道', `${p.name ?? '—'} (#${p.osm_way_id})`],
+        ['進入節點', p.entry_node_id],
+        ['離開節點', p.exit_node_id],
+        ['里程', `${fmt(p.cum_start_m)} → ${fmt(p.cum_end_m)}`],
+        ['段長', fmt((p.cum_end_m ?? 0) - (p.cum_start_m ?? 0))],
       ])
       : `<table class="kv">
-        <tr><td>ordinal</td><td>${p.ordinal}</td></tr>
-        <tr><td>method</td><td>${p.geometry_method}</td></tr>
-        <tr><td>length</td><td>${fmt(p.length_m)}</td></tr>
-        <tr><td>stop span</td><td>${p.from_seq} → ${p.to_seq}</td></tr>
+        <tr><td>序號</td><td>${p.ordinal}</td></tr>
+        <tr><td>方法</td><td>${p.geometry_method}</td></tr>
+        <tr><td>長度</td><td>${fmt(p.length_m)}</td></tr>
+        <tr><td>站牌區間</td><td>${p.from_seq} → ${p.to_seq}</td></tr>
       </table>
-      <h3>OSM ways</h3>
+      <h3>OSM 街道</h3>
       <div class="piece-ways"><p class="muted">…</p></div>`,
-    isWay ? `Way ${p.name ?? `#${p.osm_way_id}`}` : `Piece #${p.ordinal} ${p.geometry_method ?? ''}`.trim()
+    isWay ? `街道 ${p.name ?? `#${p.osm_way_id}`}` : `線段 #${p.ordinal} ${p.geometry_method ?? ''}`.trim()
   );
   return isWay ? null : pane.querySelector('.piece-ways');
 }
@@ -325,9 +332,9 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
     )
     .join('');
   const pane = showPane('context', `
-    <p class="muted">click to locate; route code opens the route</p>
-    ${items || '<p class="muted">none</p>'}
-  `, `Outliers (${(rows ?? []).length})`);
+    <p class="muted">點擊定位站牌；路線代號可開啟路線</p>
+    ${items || '<p class="muted">無資料</p>'}
+  `, `離群站牌 (${(rows ?? []).length})`);
   pane.querySelectorAll('.outlier-row').forEach((row, i) => {
     row.addEventListener('click', () => onPick(rows[i]));
     row.querySelector('.route-code').addEventListener('click', (e) => {
@@ -379,9 +386,9 @@ export function editLogPanel(rows, { onUndo, canUndo }) {
   const items = (rows ?? [])
     .map((r) => {
       const undoBtn = canUndo && r.edit_id === undoableEid
-        ? `<button class="mini-btn log-undo" data-eid="${r.edit_id}" title="undo this edit">↩</button>`
+        ? `<button class="mini-btn log-undo" data-eid="${r.edit_id}" title="復原此編輯">${I.undo}</button>`
         : '';
-      const undoOf = r.undo_of != null ? ` · ↩ #${r.undo_of}` : '';
+      const undoOf = r.undo_of != null ? ` · ${I.undo} #${r.undo_of}` : '';
       const meta = `${r.ts} · ${esc(r.editor)}${r.note ? ` · ${esc(r.note)}` : ''}${undoOf}`;
       return `<div class="stop-row log-row">
         <span class="badge ${ACTION_BADGE[r.action] ?? 'nodata'}">${esc(r.action)}</span>
@@ -392,9 +399,9 @@ export function editLogPanel(rows, { onUndo, canUndo }) {
     })
     .join('');
   const pane = showPane('context', `
-    <p class="muted">edit history, newest first — ↩ restores the previous version</p>
-    ${items || '<p class="muted">no edits</p>'}
-  `, `Edit log (${(rows ?? []).length})`);
+    <p class="muted">編輯歷史，新在上 — ${I.undo} 恢復上一版</p>
+    ${items || '<p class="muted">無編輯</p>'}
+  `, `編輯歷史 (${(rows ?? []).length})`);
   pane.querySelectorAll('.log-undo').forEach((el) =>
     el.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -418,9 +425,9 @@ export function matchDevPanel(rows, { onOpenRoute }) {
     )
     .join('');
   const pane = showPane('context', `
-    <p class="muted">matched path off src polyline (p95); click a row to open the route — compare ways vs raw layers</p>
-    ${items || '<p class="muted">none</p>'}
-  `, `Path dev (${(rows ?? []).length})`);
+    <p class="muted">比對路徑偏離原始線（p95）；點擊列開啟路線 — 以 ways/raw 圖層比較</p>
+    ${items || '<p class="muted">無資料</p>'}
+  `, `路徑偏離 (${(rows ?? []).length})`);
   pane.querySelectorAll('.matchdev-row').forEach((row, i) => {
     row.addEventListener('click', () => onOpenRoute(rows[i]));
   });
@@ -439,7 +446,7 @@ function dialSvg(b, { spread = null, color = 'var(--accent)' } = {}) {
   if (b != null && spread != null) {
     const s = Math.min(Math.max(spread, 0.6), 89);
     wedge = `<path d="M${C},${C} L${pol(b - s, R)} A${R},${R} 0 0 1 ${pol(b + s, R)} Z"
-      fill="${spread > 45 ? 'var(--warn)' : color}" opacity="0.16"/>`;
+      fill="${spread > 45 ? 'var(--qa-warn-dot)' : color}" opacity="0.16"/>`;
   }
   const glyph = b == null ? '' : `<g transform="rotate(${b} ${C} ${C})">
     <path d="M22 11 L28.6 34.1 L22 29.6 L15.4 34.1 Z" fill="${color}"/>
@@ -448,7 +455,7 @@ function dialSvg(b, { spread = null, color = 'var(--accent)' } = {}) {
     aria-label="${b == null ? 'no bearing' : `bearing ${Math.round(b)}°`}">
     ${wedge}${glyph}
     <rect x="1" y="1" width="42" height="42" rx="5" fill="none"
-      stroke="${b == null ? 'var(--border)' : color}" stroke-width="2"/>
+      stroke="${b == null ? 'var(--hair)' : color}" stroke-width="2"/>
   </svg>`;
 }
 
@@ -463,10 +470,10 @@ function stationCard({ station, bearing, routes, stops }, { onPickRoute }) {
   const spreadTxt = spread != null && spread > 45
     ? ` <span class="pp-hot">spread ${Math.round(spread)}°</span>`
     : '';
-  const subTitle = '<h3>:</h3>';
+  const subTitle = '<h3>經過路線</h3>';
   el.innerHTML = `
     <div class="pp-head">
-      ${dialSvg(bearing?.bearing_deg, { spread, color: 'var(--amber)' })}
+      ${dialSvg(bearing?.bearing_deg, { spread, color: 'var(--qa-warn-dot)' })}
       <div>
         <div class="pp-title">${station.station_name} <span class="pp-code">#${station.station_id}</span></div>
         ${!bearing || spreadTxt ? `<div class="pp-meta">${bearing ? spreadTxt : 'no bearing'}</div>` : ''}
@@ -543,21 +550,21 @@ export function stationPanel(d, { onPickRoute, onPickStation, onEditStation }) {
   const pane = showPane('point', `
     ${kv([
     ...(editable && onEditStation ? [['edit',
-      '<button class="mini-btn" data-act="rename" title="rename station">✎</button> ' +
-      '<button class="mini-btn" data-act="move" title="move station position">移動</button> ' +
-      '<button class="mini-btn" data-act="log" title="edit history / undo">↩ 歷史</button>',
+      `<button class="mini-btn" data-act="rename" title="改名站點">${I.edit}</button> ` +
+      `<button class="mini-btn" data-act="move" title="搬移站點位置">搬移</button> ` +
+      `<button class="mini-btn" data-act="log" title="編輯歷史與復原">${I.undo} 歷史</button>`,
     ]] : []),
-    ['axis', d.bearing ? `${Math.round(d.bearing.bearing_deg)}°` : '—'],
-    ['spread', d.bearing ? `${Math.round(d.bearing.max_spread_deg)}°` : '—'],
-    ['members', d.bearing?.member_count ?? stops.length],
-    ['group', d.group ? d.group.station_group_name : '—'],
-    ...(d.stale?.bearings ? [['stale', '<span class="pp-hot">⚠ bearings stale</span>']] : []),
+    ['方位', d.bearing ? `${Math.round(d.bearing.bearing_deg)}°` : '—'],
+    ['離散', d.bearing ? `${Math.round(d.bearing.max_spread_deg)}°` : '—'],
+    ['成員', d.bearing?.member_count ?? stops.length],
+    ['群組', d.group ? d.group.station_group_name : '—'],
+    ...(d.stale?.bearings ? [['過期', `<span class="pp-hot">${I.warn} 方位過期</span>`]] : []),
   ])}
-    <h3>其它 Stations (${others.length})</h3>
+    <h3>其它站點 (${others.length})</h3>
     <div class="other-station-chips"></div>
-    <h3>Stops (${stops.length})</h3>
+    <h3>站牌 (${stops.length})</h3>
     ${rows}
-    <h3>Routes (${uniqRoutes(d.routes).length})</h3>
+    <h3>經過路線 (${uniqRoutes(d.routes).length})</h3>
     <div class="station-routes"></div>
   `, `${d.station.station_name} #${d.station.station_id}`);
   pane.querySelector('.other-station-chips').append(
@@ -574,29 +581,29 @@ export function stationPanel(d, { onPickRoute, onPickStation, onEditStation }) {
 /// Stop drill-down panel: stop → station → group + serving routes.
 export function stopPanel(d, { onPickRoute, onPickStation, onEditStop }) {
   const stCell = (st) =>
-    `<td class="st-pick" data-sid="${st.station_id}" title="open station detail">${st.station_name ?? st.station_id}</td>`;
+    `<td class="st-pick" data-sid="${st.station_id}" title="開啟站點詳情">${st.station_name ?? st.station_id}</td>`;
   const pane = showPane('point', `
     <table class="kv">
       <tr><td>stop</td><td>${esc(d.stop.stop_name)} (${d.stop.stop_code})
-        ${editable ? '<button class="mini-btn" data-act="rename" title="rename stop">✎</button>' : ''}
-        ${editable ? '<button class="mini-btn" data-act="move" title="move stop position">移動位置</button>' : ''}
-        ${editable ? '<button class="mini-btn" data-act="regroup" title="regroup stop to another station">換站</button>' : ''}
-        ${editable ? '<button class="mini-btn" data-act="log" title="edit history / undo">↩ 歷史</button>' : ''}</td></tr>
+        ${editable ? `<button class="mini-btn" data-act="rename" title="改名站牌">${I.edit}</button>` : ''}
+        ${editable ? `<button class="mini-btn" data-act="move" title="搬移站牌位置">搬移</button>` : ''}
+        ${editable ? '<button class="mini-btn" data-act="regroup" title="改歸另一站點">換站</button>' : ''}
+        ${editable ? `<button class="mini-btn" data-act="log" title="編輯歷史與復原">${I.undo} 歷史</button>` : ''}</td></tr>
       ${d.stale && (d.stale.projections?.length || d.stale.bearings)
-        ? `<tr><td>stale</td><td><span class="pp-hot">⚠ ${d.stale.projections?.length ?? 0} route projections · bearings ${d.stale.bearings ? 'stale' : 'ok'}</span></td></tr>`
+        ? `<tr><td>過期</td><td><span class="pp-hot">${I.warn} ${d.stale.projections?.length ?? 0} 條路線投影 · 方位${d.stale.bearings ? '過期' : '正常'}</span></td></tr>`
         : ''}
-      <tr><td>bearing</td><td>${d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'}</td></tr>
-      <tr><td>station</td>${stCell(d.station)}</tr>
-    <tr><td>station bearing</td><td>${d.station_bearing
-      ? `${Math.round(d.station_bearing.bearing_deg)}° · spread ${Math.round(d.station_bearing.max_spread_deg)}° · ${d.station_bearing.member_count} members`
+      <tr><td>方位</td><td>${d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'}</td></tr>
+      <tr><td>站點</td>${stCell(d.station)}</tr>
+    <tr><td>站點方位</td><td>${d.station_bearing
+      ? `${Math.round(d.station_bearing.bearing_deg)}° · 離散 ${Math.round(d.station_bearing.max_spread_deg)}° · ${d.station_bearing.member_count} 成員`
       : '—'}</td></tr>
-    <tr><td>group</td><td>${d.group.station_group_name} · ${d.group.source}</td></tr>
+    <tr><td>群組</td><td>${d.group.station_group_name} · ${d.group.source}</td></tr>
     </table>
-    <h3>其它 Stations (${(d.group_members ?? []).filter((m) => m.station_id !== d.station.station_id).length})</h3>
+    <h3>其它站點 (${(d.group_members ?? []).filter((m) => m.station_id !== d.station.station_id).length})</h3>
     <div class="group-chips"></div>
-    <h3>Routes serving this stop (${uniqRoutes(d.routes_by_stop).length})</h3>
+    <h3>停靠路線 (${uniqRoutes(d.routes_by_stop).length})</h3>
     <div class="routes-stop-chips"></div>
-    <h3>Routes serving station (${uniqRoutes(d.routes_by_station).length})</h3>
+    <h3>站點路線 (${uniqRoutes(d.routes_by_station).length})</h3>
     <div class="routes-station-chips"></div>
 
   `, `${d.stop.stop_name} #${d.stop.stop_code}`);

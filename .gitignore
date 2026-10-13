@@ -5,3 +5,4 @@ qa/
 .playwright-cli/
 .codegraph/
 *.osm.pbf
+.impeccable/

@@ -1,48 +1,51 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
 
 <head>
   <link rel="icon" href="data:,">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>rm-web — Taichung route explorer</title>
+  <title>rm-web — 台灣公車路線管理台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/leaflet.css">
   <link rel="stylesheet" href="/style.css">
 </head>
 
 <body>
   <header id="topbar">
-    <button id="sidebar-toggle" title="hide sidebar">«</button>
-    <span id="title">rm-web</span>
-    <span class="chip" id="chip-routes" title="Routes">routes <b>—</b></span>
-    <span class="chip" id="chip-stops" title="Current stop versions">stops <b>—</b></span>
-    <span class="chip" id="chip-stations" title="Current station versions">stations <b>—</b></span>
-    <span class="chip" id="chip-match" title="Directions with match stats / total directions">matched <b>—</b></span>
-    <span class="chip chip-click" id="chip-outliers" title="Outlier stops — click to list">outliers <b>—</b></span>
+    <button id="sidebar-toggle" title="收合側欄"><span data-icon="panelL"></span></button>
+    <span id="title"><span data-icon="brand"></span>rm-web</span>
+    <span class="chip" id="chip-routes" title="路線總數">路線 <b>—</b></span>
+    <span class="chip" id="chip-stops" title="當前站牌版本數">站牌 <b>—</b></span>
+    <span class="chip" id="chip-stations" title="當前站點版本數">站點 <b>—</b></span>
+    <span class="chip" id="chip-match" title="有比對統計的方向數 / 總方向數">比對 <b>—</b></span>
+    <span class="chip chip-click" id="chip-outliers" title="離群站牌（點擊列表）">離群 <b>—</b></span>
     <span class="chip chip-click" id="chip-matchdev"
-      title="Directions whose matched OSM path strays from the src polyline (p95) — click to list">path dev
+      title="比對出的 OSM 路徑偏離原始線（p95）的方向（點擊列表）">路徑偏離
       <b>—</b></span>
-    <button id="edit-toggle" class="chip chip-click" hidden title="toggle edit mode">✎ edit</button>
-    <button id="refresh-btn" class="chip chip-click" hidden
-      title="Re-run match / projections / bearings for stale edits">⟳ apply updates <b>—</b></button>
+    <button id="edit-toggle" class="chip chip-click band-btn" hidden title="切換編輯模式"><span data-icon="edit"></span>編輯</button>
+    <button id="refresh-btn" class="chip chip-click band-btn" hidden
+      title="對過期編輯重跑比對、投影與方位"><span data-icon="refresh"></span>更新 <b>—</b></button>
   </header>
   <div id="main">
     <aside id="sidebar">
-      <input id="route-search" type="search" placeholder="Search route code or station name…" autocomplete="off">
+      <input id="route-search" type="search" placeholder="搜尋路線代號或站名…" autocomplete="off">
       <div id="station-list" hidden></div>
       <div id="route-list"></div>
       <div id="layer-controls">
-        <h3>Layers</h3>
-        <label><input type="checkbox" id="layer-stops"> Stops / stations</label>
-        <label><input type="checkbox" id="layer-bearings" checked> Bearings <small>(dot + arrow)</small></label>
-        <label class="layer-sub">route path
+        <h3>圖層</h3>
+        <label><input type="checkbox" id="layer-stops"> 站牌 / 站點</label>
+        <label><input type="checkbox" id="layer-bearings" checked> 方位 <small>（點＋箭頭）</small></label>
+        <label class="layer-sub">路徑來源
           <select id="route-geom">
-            <option value="provider">provider polyline</option>
-            <option value="osm">OSM ways</option>
+            <option value="provider">業者線</option>
+            <option value="osm">OSM 街道線</option>
           </select>
         </label>
-        <label><input type="checkbox" id="layer-raw"> Raw compare <small>(needs route)</small></label>
-        <label><input type="checkbox" id="layer-effective" checked> Effective line <small>(what match consumes)</small></label>
+        <label><input type="checkbox" id="layer-raw"> 原始比對 <small>（需選路線）</small></label>
+        <label><input type="checkbox" id="layer-effective" checked> 有效線 <small>（比對用）</small></label>
         <div id="legend"></div>
       </div>
     </aside>
@@ -50,21 +53,23 @@
     <section id="detail" hidden>
       <div class="dpane dpane-context" hidden>
         <div class="dpane-head"><span class="dpane-title"></span><span class="dpane-nav"><button class="dpane-back"
-              title="back" disabled>ᐸ</button><button class="dpane-fwd" title="forward" disabled>ᐳ</button><button
-              class="dpane-close" title="close">X</button></span></div>
+              title="上一頁" disabled><span data-icon="back"></span></button><button class="dpane-fwd" title="下一頁"
+              disabled><span data-icon="fwd"></span></button><button
+              class="dpane-close" title="關閉"><span data-icon="close"></span></button></span></div>
         <div class="dpane-body"></div>
       </div>
       <div class="dpane dpane-point" hidden>
         <div class="dpane-head"><span class="dpane-title"></span><span class="dpane-nav"><button class="dpane-back"
-              title="back" disabled>ᐸ</button><button class="dpane-fwd" title="forward" disabled>ᐳ</button><button
-              class="dpane-close" title="close">X</button></span></div>
+              title="上一頁" disabled><span data-icon="back"></span></button><button class="dpane-fwd" title="下一頁"
+              disabled><span data-icon="fwd"></span></button><button
+              class="dpane-close" title="關閉"><span data-icon="close"></span></button></span></div>
         <div class="dpane-body"></div>
       </div>
     </section>
   </div>
   <footer id="statusbar">
     <span class="status-left"><span id="busy" hidden></span><span id="status-msg"></span></span>
-    <span id="tile-note">basemap tiles require internet — data layers are local</span>
+    <span id="tile-note">底圖圖資需要網路連線，資料圖層皆為本機</span>
   </footer>
   <script src="/vendor/leaflet.js"></script>
   <script>window.RM_TILES = "__TILES__";</script>

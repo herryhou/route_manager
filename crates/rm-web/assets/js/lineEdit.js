@@ -6,6 +6,7 @@
 // src coords arrive GeoJSON lon-first and are normalized to [lat,lon]
 // exactly once, here; effective.points are already [lat,lon].
 import { editPolylineLine } from './api.js';
+import { I } from './icons.js';
 
 const VTX = (color) =>
   L.divIcon({
@@ -38,15 +39,15 @@ function render(s) {
   s.group.clearLayers();
   s.line = null;
   // dimmed raw capture line (already [lat,lon]) — reference, not editable
-  L.polyline(s.src, { color: '#7c3aed', weight: 2, dashArray: '2 7', opacity: 0.4 })
+  L.polyline(s.src, { color: '#16150f', weight: 2, dashArray: '2 7', opacity: 0.4 })
     .bindTooltip('src (raw)').addTo(s.group);
   // the line being edited (the effective line, possibly already moved off src)
-  s.line = L.polyline(s.pts, { color: '#f59e0b', weight: 4, opacity: 0.95 }).addTo(s.group);
+  s.line = L.polyline(s.pts, { color: '#d9531e', weight: 4, opacity: 0.95 }).addTo(s.group);
   s.pts.forEach((p, i) => {
     // zIndexOffset keeps session markers above the stops/bearings layer —
     // app.js redraws that layer on every moveend, which re-appends its
     // icons after ours and would otherwise bury any handle it overlaps.
-    const m = L.marker(p, { icon: VTX('#f59e0b'), draggable: true, zIndexOffset: 1000 }).addTo(s.group);
+    const m = L.marker(p, { icon: VTX('#d9531e'), draggable: true, zIndexOffset: 1000 }).addTo(s.group);
     m.on('drag', (e) => {
       s.pts[i] = [e.latlng.lat, e.latlng.lng];
       s.line.setLatLngs(s.pts);
@@ -62,7 +63,7 @@ function render(s) {
     const h = L.marker(mid, {
       icon: L.divIcon({
         className: '',
-        html: '<div style="width:8px;height:8px;background:#fff;border:2px solid #f59e0b;border-radius:50%;"></div>',
+        html: '<div style="width:8px;height:8px;background:#fff;border:2px solid #d9531e;border-radius:50%;"></div>',
         iconSize: [8, 8], iconAnchor: [4, 4],
       }),
       // one above the vertex handles: Leaflet orders same-pane markers by
@@ -106,8 +107,8 @@ export function startLineEdit(routeId, dir, xno, raw, onSaved) {
   const btn = document.createElement('div');
   btn.style.cssText = 'position:absolute;bottom:56px;right:12px;z-index:1000;display:flex;gap:6px;';
   btn.innerHTML = `
-    <button id="line-save" style="padding:4px 10px;cursor:pointer;">✓ 存線</button>
-    <button id="line-cancel" style="padding:4px 10px;cursor:pointer;">✕</button>`;
+    <button id="line-save" class="le-btn le-save">${I.check} 存線</button>
+    <button id="line-cancel" class="le-btn">${I.close}</button>`;
   document.body.appendChild(btn);
   session.btn = btn;
   btn.querySelector('#line-cancel').onclick = () => stopLineEdit();

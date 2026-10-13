@@ -1,30 +1,58 @@
+/* rm-web — 公車站牌 The Stop Plate
+   Enamel-blue topbar band; plate-white panels floating on mineral-grey
+   ground; ink hairlines; route chips as the product's atoms. QA magnitude
+   is encoded by dot radius + hatch density, colour only reinforcing. */
+
 :root {
-  --bg: #f7f7f5;
-  --panel: #ffffff;
-  --border: #d9d9d4;
-  --text: #26261f;
-  --muted: #6b6b60;
-  --accent: #2563eb;
-  --accent-soft: #e3edfd;
-  --amber: #f59e0b;
-  --good: #2e9e44;
-  --warn: #d19a00;
-  --bad: #cf3e3e;
-  --nodata: #9ca3af;
+  --enamel: #0857a2;
+  --enamel-deep: #06457f;
+  --enamel-soft: #e8f0fa;
+  --plate: #faf8f4;
+  --plate-bright: #ffffff;
+  --ground: #e4e5e1;
+  --ink: #16150f;
+  --ink-soft: #5c5a50;
+  --hair: #d9d6cc;
+  --alert: #d9531e;
+  --alert-ink: #b23f12;
+  --qa-ok: #1e7a3c;
+  --qa-warn: #8a5e00;
+  --qa-warn-dot: #e8a013;
+  --qa-bad: #c0331b;
+  --nodata: #8a8880;
+  --accent: var(--enamel);
+  --font: "Archivo", "Noto Sans TC", "PingFang TC", sans-serif;
+  --lift: 0 2px 10px rgba(22, 21, 15, 0.16);
 }
 
 * {
   box-sizing: border-box;
 }
 
-/* Keyboard navigation: visible ring on controls only (rows stay clean). */
+/* Browser surfaces carry the world too: selection, caret, checkboxes,
+   scrollbars, focus rings — all from the palette, never defaults. */
+::selection {
+  background: var(--enamel);
+  color: #fff;
+}
+
+input,
+textarea {
+  caret-color: var(--enamel);
+}
+
+input[type="checkbox"],
+select {
+  accent-color: var(--enamel);
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 .chip-click:focus-visible,
 .chip-route:focus-visible,
 .st-pick:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--enamel);
   outline-offset: 1px;
 }
 
@@ -35,75 +63,170 @@ body {
 }
 
 body {
-  font: 13px/1.45 system-ui, -apple-system, "PingFang TC", sans-serif;
-  color: var(--text);
-  background: var(--bg);
+  font: 13px/1.5 var(--font);
+  color: var(--ink);
+  background: var(--ground);
   display: flex;
   flex-direction: column;
 }
 
+.ic {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  vertical-align: -2px;
+}
+
+/* ---------- topbar: the enamel band ---------- */
+
 #topbar {
+  height: 56px;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  padding: 0 14px;
+  background: var(--enamel);
+  color: #fff;
 }
 
 #title {
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 800;
+  font-size: 1.1remx;
+  letter-spacing: 0.01em;
   margin-right: 8px;
 }
 
-.chip {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 10px;
-  color: var(--muted);
+.ic-brand {
+  width: 22px;
+  height: 22px;
+}
+
+/* Stat chips sit on the band as translucent enamel plates. */
+#topbar .chip {
+  background: rgba(255, 255, 255, 0.13);
+  border: none;
+  border-radius: 6px;
+  padding: 3px 9px;
+  color: rgba(255, 255, 255, 0.92);
   white-space: nowrap;
+  font-size: 12px;
 }
 
-.chip b {
-  color: var(--text);
+#topbar .chip b {
+  color: #fff;
   font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 
-/* Plain count chips (routes/stops/…) are passive info, not controls —
-   drop the pill so only the clickable QA chips read as interactive. */
-.chip:not(.chip-click) {
+/* Passive info chips lose the plate — only QA chips read as controls. */
+#topbar .chip:not(.chip-click) {
   background: transparent;
-  border-color: transparent;
   padding-inline: 2px;
 }
 
 .chip-click {
   cursor: pointer;
-  transition: border-color .12s, color .12s;
+  font: inherit;
+  transition: background-color 0.12s, color 0.12s;
 }
 
-.chip-click:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+#topbar .chip-click:hover {
+  background: rgba(255, 255, 255, 0.24);
+  color: #fff;
 }
 
-/* QA chips with a non-zero count (setChip toggles .hot): count reads red. */
-.chip-click.hot b {
-  color: var(--bad);
+/* QA chip with issues (setChip toggles .hot): a white plate with the
+   reserved alert orange — the one shout on the band. */
+#topbar .chip-click.hot {
+  background: #fff;
+  color: var(--alert-ink);
+  /* box-shadow: inset 0 0 0 2px var(--alert); */
 }
+
+#topbar .chip-click.hot b {
+  color: var(--alert-ink);
+}
+
+/* Band action buttons: little white plates. */
+.band-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  border-radius: 8px;
+  background: var(--plate);
+  color: var(--ink);
+  font: 700 12.5px/1 var(--font);
+  padding: 7px 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.12s;
+}
+
+.band-btn:hover {
+  background: var(--enamel-soft);
+}
+
+.band-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.band-btn b {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Band buttons keep chip/chip-click classes (setChip contract) — restyle
+   as white plates with the plate-white ground, so they read as buttons
+   against the enamel band; .hot keeps the QA-chip alert ring. Sits before
+   #edit-toggle.on so the .on state still wins. */
+#topbar .band-btn {
+  background: var(--plate);
+  color: var(--ink);
+  font-size: 12.5px;
+  padding: 7px 11px;
+}
+
+#topbar .band-btn.hot {
+  background: #fff;
+  color: var(--alert-ink);
+  box-shadow: inset 0 0 0 2px var(--alert);
+}
+
+#topbar .band-btn.hot b {
+  color: var(--alert-ink);
+}
+
+/* Edit active: the button turns alert — the session is an intervention. */
+#edit-toggle.on {
+  background: var(--alert);
+  color: #fff;
+}
+
+#edit-toggle.on:hover {
+  background: var(--alert-ink);
+}
+
+/* ---------- frame: plate panels on mineral ground ---------- */
 
 #main {
   flex: 1;
   display: flex;
+  gap: 8px;
+  padding: 8px;
   min-height: 0;
+  background: var(--ground);
 }
 
 #sidebar {
-  width: 320px;
+  width: 280px;
   flex: none;
-  background: var(--panel);
-  border-right: 1px solid var(--border);
+  background: var(--plate);
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -115,31 +238,36 @@ body {
 }
 
 #sidebar-toggle {
-  border: 1px solid var(--border);
-  background: var(--bg);
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
   cursor: pointer;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1;
-  padding: 2px 7px;
+  color: #fff;
+  padding: 7px;
 }
 
 #sidebar-toggle:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.24);
 }
 
 #route-search {
-  margin: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 13px;
+  margin: 10px;
+  padding: 7px 11px;
+  border: 1.5px solid var(--hair);
+  border-radius: 8px;
+  background: var(--plate-bright);
+  font: 13px var(--font);
+  color: var(--ink);
+}
+
+#route-search::placeholder {
+  color: var(--ink-soft);
 }
 
 #route-search:focus {
-  border-color: var(--accent);
+  border-color: var(--enamel);
   outline: none;
 }
 
@@ -147,46 +275,47 @@ body {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  padding: 0 6px 6px;
 }
 
 .route-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 8px;
   cursor: pointer;
-  border-bottom: 1px solid var(--bg);
-  transition: background-color .12s;
+  border-radius: 8px;
+  transition: background-color 0.12s;
 }
 
 .route-row:hover {
-  background: var(--bg);
+  background: rgba(22, 21, 15, 0.05);
 }
 
 .route-row.selected {
-  background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--enamel-soft);
+  box-shadow: inset 0 0 0 1.5px var(--enamel);
 }
 
 #station-list {
   flex: none;
   max-height: 35%;
   overflow-y: auto;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--hair);
 }
 
 .list-head {
-  padding: 4px 10px 2px;
+  padding: 6px 12px 2px;
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
 }
 
 /* Sidebar route-list empty result (filter with no match). */
 .list-empty {
   padding: 16px 10px;
-  color: var(--muted);
+  color: var(--ink-soft);
   text-align: center;
 }
 
@@ -194,14 +323,13 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 12px;
   cursor: pointer;
-  border-bottom: 1px solid var(--bg);
-  transition: background-color .12s;
+  transition: background-color 0.12s;
 }
 
 .station-row:hover {
-  background: var(--bg);
+  background: rgba(22, 21, 15, 0.05);
 }
 
 .station-name {
@@ -212,16 +340,19 @@ body {
   white-space: nowrap;
 }
 
+/* The route chip — the product's own atom: white ground, 2px enamel
+   border, 8px radius, Archivo 800 numerals. */
 .route-code {
-  font-weight: 700;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: var(--plate-bright);
+  border: 1px solid var(--enamel);
+  border-radius: 8px;
   padding: 1px 7px;
   flex: none;
-  min-width: 34px;
+  min-width: 36px;
   text-align: center;
-  font-variant-numeric: tabular-nums;
+  color: var(--enamel);
 }
 
 .route-name {
@@ -230,32 +361,36 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
+  color: var(--ink-soft);
 }
 
 .dir-dot {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   display: inline-block;
   flex: none;
+  box-shadow: 0 0 0 1.5px var(--plate);
 }
 
 #layer-controls {
-  border-top: 1px solid var(--border);
-  padding: 8px 10px;
-  color: var(--muted);
+  border-top: 1px solid var(--hair);
+  padding: 10px 12px;
+  color: var(--ink-soft);
 }
 
 #layer-controls h3 {
   margin: 0 0 6px;
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: .04em;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink);
 }
 
 #layer-controls label {
   display: block;
-  margin: 3px 0;
+  margin: 4px 0;
 }
 
 #layer-controls .layer-sub {
@@ -267,11 +402,16 @@ body {
 }
 
 #layer-controls .layer-sub select {
-  font-size: 12px;
+  font: 12px var(--font);
+  border: 1.5px solid var(--hair);
+  border-radius: 6px;
+  background: var(--plate-bright);
+  color: var(--ink);
+  padding: 2px 4px;
 }
 
 #layer-controls small {
-  color: var(--muted);
+  color: var(--ink-soft);
 }
 
 #legend {
@@ -296,16 +436,18 @@ body {
 #map {
   flex: 1;
   min-width: 0;
+  border-radius: 10px;
 }
 
+/* ---------- detail: two stacked plates ---------- */
+
 #detail {
-  width: 380px;
+  width: 360px;
   flex: none;
-  background: var(--panel);
-  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  gap: 8px;
+  overflow: visible;
 }
 
 /* display:flex above would override the hidden attribute — restore it. */
@@ -313,28 +455,14 @@ body {
   display: none;
 }
 
-/* Detail pane slides in when first shown (motion-gated at the bottom). */
-#detail:not([hidden]) {
-  animation: pane-in .15s ease-out;
-}
-
-@keyframes pane-in {
-  from {
-    opacity: 0;
-    transform: translateX(12px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
 /* Two stacked panes: context (route/outliers) 2/3, point detail 1/3. */
 .dpane {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  background: var(--plate);
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .dpane[hidden] {
@@ -347,26 +475,25 @@ body {
 
 .dpane-point {
   flex: 1;
-  border-top: 1px solid var(--border);
 }
 
+/* Pane head: the plate's rim — ink hairline rule, plate title. */
 .dpane-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--bg);
+  padding: 8px 12px;
+  border-bottom: 1.5px solid var(--ink);
   flex: none;
-  background: darkslateblue;
-  color: #fff;
-  padding: 2px 8px;
-  border-radius: 4px;
 }
 
 .dpane-title {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dpane-nav {
@@ -378,29 +505,36 @@ body {
 .dpane-close,
 .dpane-back,
 .dpane-fwd {
+  display: inline-flex;
+  align-items: center;
   border: none;
   background: none;
   cursor: pointer;
-  color: #fff;
-  font-size: 12px;
-  padding: 0 2px;
+  color: var(--ink-soft);
+  padding: 3px;
+  border-radius: 6px;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.dpane-close:hover,
+.dpane-back:hover,
+.dpane-fwd:hover {
+  background: rgba(22, 21, 15, 0.06);
+  color: var(--ink);
 }
 
 /* Empty back/forward history: dim in place instead of hiding (stable nav width). */
 .dpane-back:disabled,
 .dpane-fwd:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: default;
 }
 
-/* .dpane-close:hover {
-  color: var(--bad);
+.dpane-back:disabled:hover,
+.dpane-fwd:disabled:hover {
+  background: none;
+  color: var(--ink-soft);
 }
-
-.dpane-back:hover,
-.dpane-fwd:hover {
-  color: var(--accent);
-} */
 
 .dpane-body {
   flex: 1;
@@ -411,19 +545,25 @@ body {
 #detail h3 {
   margin: 12px 0 4px;
   font-size: 12px;
-  text-transform: uppercase;
-  color: var(--muted);
-  letter-spacing: .04em;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 0.02em;
 }
 
 #detail .close {
   float: right;
   cursor: pointer;
-  color: var(--muted);
+  color: var(--ink-soft);
   border: none;
   background: none;
   font-size: 15px;
 }
+
+.muted {
+  color: var(--ink-soft);
+}
+
+/* ---------- tabs / segmented direction toggle ---------- */
 
 .tabs {
   display: flex;
@@ -432,41 +572,177 @@ body {
 }
 
 .tabs button {
-  border: 1px solid var(--border);
-  background: var(--panel);
-  border-radius: 6px;
-  padding: 3px 10px;
+  border: 1.5px solid var(--hair);
+  background: var(--plate-bright);
+  border-radius: 8px;
+  padding: 4px 11px;
   cursor: pointer;
-  font-size: 12px;
-  transition: background-color .12s, border-color .12s, color .12s;
+  font: 500 12px/1.3 var(--font);
+  color: var(--ink);
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
 }
 
 .tabs button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--enamel);
+  color: var(--enamel);
 }
 
 .tabs button.active {
-  background: var(--accent);
+  background: var(--enamel);
   color: #fff;
-  border-color: var(--accent);
+  border-color: var(--enamel);
+  font-weight: 700;
 }
 
+/* ---------- 站序鏈: the ordered stop chain ---------- */
+
+/* Each row is a plate on the printed line: seq numeral, QA node on the
+   ink connector, name, metres. Selection lifts the plate (white ground +
+   soft offset shadow) while the rest of the chain recedes one step —
+   the single authored motion moment, 120ms ease-out. */
+.chain {
+  margin: 6px 0 0;
+}
+
+.chain-stop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px 22px 1fr auto;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px 5px 2px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background-color 0.12s ease-out, box-shadow 0.12s ease-out, opacity 0.12s ease-out;
+}
+
+.chain-stop:hover {
+  background: rgba(22, 21, 15, 0.05);
+}
+
+/* The printed line through the node column (skips first/last halves). */
+/* 2px padding-left + 26px seq + 4px gap + (22px node column − 1px) / 2.
+   Absolute origin is the padding-box edge, so the row's own padding-left
+   is part of the sum. */
+.chain-stop::before {
+  content: "";
+  position: absolute;
+  left: calc(2px + 26px + 4px + 10px);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ink);
+  opacity: 0.85;
+}
+
+.chain-stop:first-child::before {
+  top: 50%;
+}
+
+.chain-stop:last-child::before {
+  bottom: 50%;
+}
+
+.chain-seq {
+  color: var(--ink-soft);
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chain-node {
+  position: relative;
+  z-index: 1;
+  justify-self: center;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  background: var(--plate);
+}
+
+/* The QA node: radius + hatch density grow with snap metres; the ink ring
+   carries non-text contrast and the printed-mark look. --nd/--nh set
+   inline from colours.js qaDot(). */
+.chain-node i {
+  display: block;
+  width: var(--nd, 8px);
+  height: var(--nd, 8px);
+  border-radius: 50%;
+  background: var(--qa-ok);
+  border: 1.5px solid var(--ink);
+}
+
+.chain-node.q-warn i {
+  background-color: var(--qa-warn-dot);
+  background-image: repeating-linear-gradient(45deg,
+      transparent 0,
+      transparent calc(var(--nh, 3px) - 1px),
+      rgba(255, 255, 255, 0.75) calc(var(--nh, 3px) - 1px),
+      rgba(255, 255, 255, 0.75) var(--nh, 3px));
+}
+
+.chain-node.q-bad i {
+  background-color: var(--qa-bad);
+  background-image: repeating-linear-gradient(45deg,
+      transparent 0,
+      transparent calc(var(--nh, 2px) - 0.8px),
+      rgba(255, 255, 255, 0.8) calc(var(--nh, 2px) - 0.8px),
+      rgba(255, 255, 255, 0.8) var(--nh, 2px));
+}
+
+.chain-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chain-metre {
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.chain-metre.q-warn {
+  color: var(--qa-warn);
+}
+
+.chain-metre.q-bad {
+  color: var(--qa-bad);
+}
+
+/* Selection isolation: the selected plate lifts, siblings recede. */
+.chain.has-sel .chain-stop:not(.sel) {
+  opacity: 0.66;
+}
+
+.chain-stop.sel {
+  background: var(--plate-bright);
+  box-shadow: var(--lift);
+}
+
+.chain-stop.sel .chain-name {
+  font-weight: 700;
+}
+
+/* Generic rows (QA lists, logs) */
 .stop-row {
   display: flex;
   gap: 8px;
   padding: 4px 8px;
   cursor: pointer;
-  border-radius: 4px;
-  transition: background-color .12s;
+  border-radius: 8px;
+  transition: background-color 0.12s;
 }
 
 .stop-row:hover {
-  background: var(--bg);
+  background: rgba(22, 21, 15, 0.05);
 }
 
 .stop-seq {
-  color: var(--muted);
+  color: var(--ink-soft);
   min-width: 28px;
   text-align: right;
   flex: none;
@@ -481,13 +757,13 @@ body {
   white-space: nowrap;
 }
 
-/* Edit-log rows (↩ 歷史 panel): display only, not clickable. */
+/* Edit-log rows (歷史 panel): display only, not clickable. */
 .log-row {
   cursor: default;
 }
 
 .log-meta {
-  color: var(--muted);
+  color: var(--ink-soft);
   font-size: 11px;
   flex: none;
   max-width: 45%;
@@ -497,13 +773,10 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-#title {
-  font-size: 1.1rem;
-}
-
 .badge {
   font-size: 11px;
-  border-radius: 4px;
+  font-weight: 700;
+  border-radius: 5px;
   padding: 0 5px;
   flex: none;
   color: #fff;
@@ -511,35 +784,40 @@ body {
 }
 
 .badge.good {
-  background: var(--good);
+  background: var(--qa-ok);
 }
 
 .badge.warn {
-  background: var(--warn);
+  background: var(--qa-warn-dot);
+  color: var(--ink);
 }
 
 .badge.bad {
-  background: var(--bad);
+  background: var(--qa-bad);
 }
 
 .badge.nodata {
   background: var(--nodata);
 }
 
+/* Route chips in panels/popups — same atom as the sidebar. */
 .chip-route {
   display: inline-block;
   margin: 2px;
   padding: 1px 8px;
   cursor: pointer;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  transition: background-color .12s, border-color .12s;
+  background: var(--plate-bright);
+  border: 1px solid var(--enamel);
+  border-radius: 8px;
+  color: var(--enamel);
+  /* font-weight: 800; */
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.12s, color 0.12s;
 }
 
 .chip-route:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--enamel);
+  color: #fff;
 }
 
 table.kv {
@@ -548,26 +826,29 @@ table.kv {
 }
 
 table.kv td {
-  padding: 2px 6px;
-  border-bottom: 1px solid var(--bg);
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--hair);
   vertical-align: top;
 }
 
 table.kv td:first-child {
-  color: var(--muted);
+  color: var(--ink-soft);
   white-space: nowrap;
   width: 40%;
 }
 
+/* ---------- statusbar ---------- */
+
 #statusbar {
+  height: 28px;
+  flex: none;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  padding: 3px 12px;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
-  color: var(--muted);
+  padding: 0 14px;
+  background: var(--ground);
+  color: var(--ink-soft);
   font-size: 12px;
 }
 
@@ -578,15 +859,15 @@ table.kv td:first-child {
   min-width: 0;
 }
 
-/* Fetch spinner (app.js busy()): shown while a primary load runs. */
+/* Fetch spinner (app.js busy()): functional feedback, not decoration. */
 #busy {
   width: 10px;
   height: 10px;
   flex: none;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
+  border: 1px solid var(--hair);
+  border-top-color: var(--enamel);
   border-radius: 50%;
-  animation: spin .7s linear infinite;
+  animation: spin 0.7s linear infinite;
 }
 
 #busy[hidden] {
@@ -599,22 +880,40 @@ table.kv td:first-child {
   }
 }
 
+/* ---------- Leaflet surfaces ---------- */
+
 .leaflet-container {
   font: inherit;
+  background: var(--ground);
 }
 
-/* Popups share the app's surface tokens instead of Leaflet's defaults. */
+/* Popups share the plate world instead of Leaflet's defaults. */
 .leaflet-popup-content-wrapper {
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  background: var(--plate);
+  color: var(--ink);
+  border: 1.5px solid var(--ink);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(22, 21, 15, 0.18);
 }
 
 .leaflet-popup-tip {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--plate);
+  border: 1.5px solid var(--ink);
+}
+
+.leaflet-popup-content {
+  margin: 10px 12px;
+}
+
+.leaflet-bar a {
+  background: var(--plate);
+  color: var(--ink);
+  border-color: var(--hair);
+}
+
+.leaflet-bar a:hover {
+  background: var(--enamel-soft);
+  color: var(--enamel);
 }
 
 /* Thin scrollbars on the scrolling lists/panes. */
@@ -623,7 +922,7 @@ table.kv td:first-child {
 .dpane-body,
 .pp-chips {
   scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--hair) transparent;
 }
 
 #route-list::-webkit-scrollbar,
@@ -637,13 +936,13 @@ table.kv td:first-child {
 #station-list::-webkit-scrollbar-thumb,
 .dpane-body::-webkit-scrollbar-thumb,
 .pp-chips::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--hair);
   border-radius: 4px;
 }
 
 /* Dim basemap tiles so routes/stops stand out. */
 .leaflet-tile-pane {
-  opacity: 0.7;
+  opacity: 0.75;
 }
 
 /* Bearing markers: dot+arrow group, rotated around the stop point.
@@ -679,8 +978,8 @@ table.kv td:first-child {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 1px white;
+  background: var(--enamel);
+  box-shadow: 0 0 0 1px #fff;
 }
 
 .barrow {
@@ -689,11 +988,13 @@ table.kv td:first-child {
   top: 2px;
   width: 20px;
   height: 20px;
-  fill: var(--accent);
-  stroke: white;
+  fill: var(--enamel);
+  stroke: #fff;
   stroke-width: 0.4;
   stroke-linejoin: round;
 }
+
+/* ---------- popups ---------- */
 
 /* Stop/station popups: bearing dial + name header, chips, nested station card. */
 .stop-popup {
@@ -703,7 +1004,7 @@ table.kv td:first-child {
 
 .stop-popup b {
   font-variant-numeric: tabular-nums;
-  color: var(--text);
+  color: var(--ink);
   font-weight: 700;
 }
 
@@ -720,31 +1021,31 @@ table.kv td:first-child {
 
 .pp-title {
   font-weight: 700;
-  font-size: 20px;
+  font-size: 19px;
 }
 
 .pp-code {
-  color: var(--muted);
+  color: var(--ink-soft);
   font-weight: 400;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
 .pp-meta {
-  color: var(--muted);
+  color: var(--ink-soft);
   font-size: 11px;
   margin-top: 1px;
 }
 
 .pp-hot {
-  color: var(--warn);
+  color: var(--alert-ink);
   font-weight: 700;
 }
 
 .pp-label {
   margin-top: 8px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--ink-soft);
 }
 
 .pp-chips {
@@ -759,23 +1060,101 @@ table.kv td:first-child {
 
 /* Clickable station cells in panels: drill-through to station detail */
 .st-pick {
-  color: var(--accent);
+  color: var(--enamel);
   cursor: pointer;
   text-decoration: underline dotted;
-  transition: opacity .12s;
+  text-underline-offset: 2px;
+  transition: opacity 0.12s;
 }
 
 .st-pick:hover {
   opacity: 0.75;
 }
 
-/* Reduced motion: drop decorative transitions/animations; keep the busy
-   spinner (functional feedback) but slow it. */
-@media (prefers-reduced-motion: reduce) {
-  #detail:not([hidden]) {
-    animation: none;
+/* Edit mode inline mini-buttons inside panel kv rows. */
+.mini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+  padding: 1px 7px;
+  font: 600 12px var(--font);
+  border: 1.5px solid var(--hair);
+  border-radius: 6px;
+  background: var(--plate-bright);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.mini-btn:hover {
+  border-color: var(--enamel);
+  color: var(--enamel);
+}
+
+/* Line-edit session buttons (lineEdit.js), plate-styled. */
+.le-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 8px;
+  background: var(--plate);
+  color: var(--ink);
+  font: 700 12.5px/1 var(--font);
+  padding: 7px 11px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(22, 21, 15, 0.2);
+}
+
+.le-btn:hover {
+  background: var(--enamel-soft);
+}
+
+.le-btn.le-save {
+  background: var(--alert);
+  color: #fff;
+}
+
+.le-btn.le-save:hover {
+  background: var(--alert-ink);
+}
+
+/* ---------- small viewports ---------- */
+
+/* The ops tool targets desktop; below 900px the plates stack so every
+   region stays reachable instead of forcing horizontal scroll. */
+@media (max-width: 900px) {
+  #topbar {
+    height: auto;
+    min-height: 56px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    row-gap: 6px;
   }
 
+  #main {
+    flex-direction: column;
+  }
+
+  #sidebar {
+    width: auto;
+    max-height: 42vh;
+  }
+
+  #map {
+    min-height: 48vh;
+  }
+
+  #detail {
+    width: auto;
+  }
+}
+
+/* ---------- reduced motion ---------- */
+
+/* Drop decorative transitions; keep the busy spinner (functional) but slow. */
+@media (prefers-reduced-motion: reduce) {
   #busy {
     animation-duration: 1.5s;
   }
@@ -783,23 +1162,16 @@ table.kv td:first-child {
   .route-row,
   .station-row,
   .stop-row,
+  .chain-stop,
   .chip-click,
   .chip-route,
   .tabs button,
-  .st-pick {
+  .st-pick,
+  .mini-btn,
+  .band-btn,
+  .dpane-close,
+  .dpane-back,
+  .dpane-fwd {
     transition: none;
   }
-}
-
-/* Edit mode (phase 1): amber topbar toggle + inline stop-panel buttons. */
-#edit-toggle.on {
-  background: var(--amber, #f59e0b);
-  color: #000;
-}
-
-.mini-btn {
-  margin-left: 4px;
-  padding: 0 6px;
-  font-size: 12px;
-  cursor: pointer;
 }
