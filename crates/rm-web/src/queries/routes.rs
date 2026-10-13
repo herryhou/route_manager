@@ -1,6 +1,6 @@
 //! Route list/detail queries.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rm_core::polyline;
 use rm_core::LatLng;
 use rusqlite::Connection;
@@ -443,8 +443,8 @@ pub fn raw(conn: &Connection, route_id: i64, dir: i64) -> Result<Option<Value>> 
         Err(rusqlite::Error::QueryReturnedNoRows) => None,
         Err(e) => return Err(e.into()),
     };
-    let path = match encoded {
-        Some(enc) => match polyline::decode(&enc) {
+    let path = match encoded.as_ref() {
+        Some(enc) => match polyline::decode(enc) {
             Ok(pts) if pts.len() >= 2 => Some(geojson::feature(
                 geojson::line_string(&pts),
                 json!({ "source": "src_route_point" }),
@@ -476,24 +476,35 @@ pub fn raw(conn: &Connection, route_id: i64, dir: i64) -> Result<Option<Value>> 
 
     // effective = override ?? src — the line match/segments/registry
     // consume. `updated_at` is the override's concurrency token (null when
-    // the effective line is plain src).
-    let eff_encoded = rm_db::effective_encoded(conn, batch_id, &xno, dir)?;
-    let source: &str = if conn.query_row(
-        "SELECT COUNT(*) FROM polyline_override WHERE xno = ?1 AND direction = ?2",
-        rusqlite::params![xno, dir],
-        |r| r.get::<_, i64>(0),
-    )? > 0 {
-        "override"
-    } else {
-        "src"
-    };
-    let eff_updated_at: Option<String> = conn
+    // the effective line is plain src). A DB migrated only through 0012 has
+    // no polyline_override table at all: degrade to plain src (the viewer
+    // never migrates; the first edit-write creates the table lazily).
+    let has_override_table: bool = conn
         .query_row(
-            "SELECT updated_at FROM polyline_override WHERE xno = ?1 AND direction = ?2",
-            rusqlite::params![xno, dir],
-            |r| r.get(0),
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'polyline_override'",
+            [],
+            |r| r.get::<_, i64>(0),
         )
-        .ok();
+        .context("probe polyline_override")?
+        > 0;
+    let (eff_encoded, source, eff_updated_at): (String, &str, Option<String>) = if has_override_table
+    {
+        let updated_at = conn
+            .query_row(
+                "SELECT updated_at FROM polyline_override WHERE xno = ?1 AND direction = ?2",
+                rusqlite::params![xno, dir],
+                |r| r.get(0),
+            )
+            .ok();
+        let source = if updated_at.is_some() { "override" } else { "src" };
+        (
+            rm_db::effective_encoded(conn, batch_id, &xno, dir)?,
+            source,
+            updated_at,
+        )
+    } else {
+        (encoded.clone().unwrap_or_default(), "src", None)
+    };
     let eff_points: Vec<Vec<f64>> = polyline::decode(&eff_encoded)
         .map(|pts| pts.iter().map(|p| vec![p.lat, p.lon]).collect())
         .unwrap_or_default();

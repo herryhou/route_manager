@@ -701,3 +701,32 @@ async fn raw_endpoint_survives_missing_staging_row() {
     );
 }
 
+#[tokio::test]
+async fn raw_endpoint_survives_missing_override_table() {
+    let (_dir, db) = fixture_db_matched();
+    // a DB migrated only through 0012: no polyline_override table yet — the
+    // read endpoint degrades to plain src instead of 500ing
+    let conn = rm_db::open(&db).unwrap();
+    conn.execute("DROP TABLE polyline_override", []).unwrap();
+    drop(conn);
+
+    let app = router_with(AppState::new(db));
+    let v = get_json(&app, "/api/routes/1/directions/0/raw").await;
+    assert_eq!(
+        v["effective"]["source"].as_str(),
+        Some("src"),
+        "missing override table → source src, not 500: {v}"
+    );
+    assert!(
+        v["effective"]["updated_at"].is_null(),
+        "no override → no concurrency token: {v}"
+    );
+    assert!(
+        !v["effective"]["points"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "effective line falls back to src points: {v}"
+    );
+}
+
