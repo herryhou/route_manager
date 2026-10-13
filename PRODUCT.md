@@ -1,6 +1,6 @@
 # PRODUCT.md — rm-web
 
-Date: 2026-10-13 · 為前端重新設計而寫的現況盤點。資料來源：`crates/rm-web/README.md`、`docs/web-edit-mode.md`、`docs/refresh-button.md`、`assets/` 原始碼。
+Date: 2026-10-13 · 現況盤點（「The Stop Plate」視覺重設計後更新）。資料來源：`crates/rm-web/README.md`、`DESIGN.md`（視覺規格）、`docs/web-edit-mode.md`、`docs/refresh-button.md`、`assets/` 原始碼。
 
 ---
 
@@ -38,7 +38,7 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 | 點擊 path piece | 開 piece 面板，該段紅色高亮 |
 | 站牌 drill-down | 點站牌 → popup（bearing 羅盤、名稱、經過路線 chips）→ 面板逐層：stop → station → station group，各層可服路線；所有交叉引用可點 |
 | 視窗圖層 | Stops/stations 圖層按 bbox 載入：zoom 12–14 畫 station、≥15 畫個別 stop（pan debounce） |
-| QA chips | 頂欄顯示 dataset 統計（routes/stops/stations/matched）；outliers 與 path dev 兩顆可點、非零轉紅 |
+| QA chips | 頂欄顯示 dataset 統計（路線/站牌/站點/比對）；離群 與 路徑偏離 兩顆可點、非零反白＋橘環警示 |
 | QA outlier 面板 | 最差站牌投影（snap > 50 m 或 `OUTLIER`/`NO_PATH`），列點位可 pan |
 | QA path dev 面板 | matched OSM 路徑偏離來源 polyline 的方向（p95 > 50 m），同 rm-verify 報表 |
 | QA profile | 每路線面板一個 tab：snap distance 沿里程的 SVG scatter；路線列表圓點依 p50 snap 著色（綠 <15 m / 黃 <40 m） |
@@ -46,7 +46,7 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 | Raw compare | 疊最新 batch 的原始 staging 資料（`src_route_point` 虛線 + `src_stop_edge` 方塊）對照 canonical |
 | Effective line | 顯示 match 實際吃的線（override ?? src） |
 | Bearings | dot+arrow 依出站朝向旋轉的 marker，預設開，側欄可關 |
-| 雙面板歷史 | 詳細面板兩層堆疊（context / point），各自獨立 ᐸ/ᐳ 歷史，不重抓 |
+| 雙面板歷史 | 詳細面板兩層堆疊（context / point），各自獨立 ‹ › 歷史導覽，不重抓 |
 | URL hash 分享 | `#route=1&dir=0`、`#stop=123`、`#station=45` 開機時重放 |
 | 快捷鍵 | `Esc` 關閉鏈（popup → point pane → context pane）、`/` 聚焦搜尋 |
 
@@ -54,7 +54,7 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 
 | 功能 | 說明 |
 |---|---|
-| Edit toggle | 頂欄 ✎（server 回報 `edit_enabled` 才顯示）；token 進 sessionStorage |
+| Edit toggle | 頂欄「編輯」band 按鈕（icon + `aria-pressed`，server 回報 `edit_enabled` 才顯示）；token 進 sessionStorage |
 | 搬站牌 | 編輯模式下 stop marker 可拖；放下 → confirm（移動距離 + note）→ POST 新版本 |
 | 改名 | stop / station 面板 pencil → `prompt()` 輸入新名 |
 | Regroup | 把 stop 改歸另一個 station：arm one-shot place mode（十字游標）→ 點地圖目標 station → 距離 confirm |
@@ -62,70 +62,71 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 | 線編輯 | `lineEdit.js`：effective line 全線可編 — 拖頂點、dblclick 刪點、 midpoint 插入；存檔整條取代該方向 polyline；帶 `expected_updated_at` 樂觀鎖 |
 | 歷史 + undo | 每實體 edit_log 面板，可 revert（undo of undo = 再編輯） |
 | Stale badge | 編輯使衍生資料過期 → 受影響面板 amber badge（`stale_mark` 表驅動） |
-| Apply updates | 頂欄 ⟳：單一 flight 的 in-server refresh 鏈（match → segments → registry 的 `--stale`），顯示目前步驟與剩餘 mark 數 |
+| Apply updates | 頂欄「更新」band 按鈕（icon）：單一 flight 的 in-server refresh 鏈（match → segments → registry 的 `--stale`），顯示目前步驟與剩餘 mark 數 |
 | 無聲編輯禁止 | 每次寫入都要 explicit confirm + note |
 
 ## 目前畫面元素
 
+2026-10 起套用「The Stop Plate」視覺系統（完整規格見 **`DESIGN.md`**：色票 token、字體、元件、命名規則）。enamel 藍帶 topbar、plate 白面板浮在 mineral 灰底上、墨色髮絲線做結構；QA 強度以「尺寸＋hatch＋色相」三重編碼；圖示一律出自 `js/icons.js`（`data-icon` slot 或 `I` import），不用 unicode 字元當圖示。
+
 ```
-┌────────────────────────────────────────────────────────────┐
-│ topbar  « | rm-web | routes·stops·stations·matched 統計chips │
-│         | outliers* pathdev* | ✎edit | ⟳apply-updates      │   * 可點、非零紅
-├──────────┬─────────────────────────────────┬───────────────┤
-│ sidebar  │                                 │ detail panel  │
-│ 搜尋框    │                                 │ (選取才出現)    │
-│ 路線列表   │          Leaflet 地圖            │ ┌─context pane┐│
-│ (或站名列)│   路徑線/站牌/bearing/疊圖        │ │ ᐸ ᐳ X 標題  ││
-│          │   編輯 handle(編輯模式)           │ └─內容────────┘│
-│ Layers   │                                 │ ┌─point pane──┐│
-│ ☐stops   │                                 │ │ ᐸ ᐳ X 標題  ││
-│ ☑bearings│                                 │ └─內容────────┘│
-│ path▾    │                                 │               │
-│ ☐raw     │   [存線][✕] ← 線編輯浮動鈕(右下)   │               │
-│ ☑eff     │                                 │               │
-│ legend   │                                 │               │
-├──────────┴─────────────────────────────────┴───────────────┤
-│ statusbar  spinner·訊息          | basemap 需網路提示         │
-└────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ topbar  « | ◆rm-web | 路線·站牌·站點·比對 統計chips            │
+│         | 離群* 路徑偏離* | [編輯] [更新]（編輯模式）           │  * 可點、非零警示
+├──────────┬───────────────────────────────────┬───────────────┤
+│ sidebar  │                                   │ detail(選取才現)│
+│ 搜尋框    │                                   │ ┌context pane─┐│
+│ 路線列表   │          Leaflet 地圖              │ │ ‹ › ✕ 標題  ││
+│ (或站名列)│   路徑線/站牌/方位/疊圖             │ └─內容────────┘│
+│ 圖層      │   編輯 handle(編輯模式)            │ ┌point pane───┐│
+│ ☐站牌/站點│                                   │ │ ‹ › ✕ 標題  ││
+│ ☑方位    │                                   │ └─內容────────┘│
+│ 路徑來源▾ │                                   │               │
+│ ☐原始比對 │   [存線][✕] ← 線編輯浮動鈕(右下)    │               │
+│ ☑有效線  │                                   │               │
+│ 圖例     │                                   │               │
+├──────────┴───────────────────────────────────┴───────────────┤
+│ statusbar  spinner·訊息          | 底圖圖資需網路提示           │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 元素清單：
 
-- **topbar**：側欄收合鈕 `«`、標題、4 顆統計 chip、2 顆可點 QA chip（outliers / path dev）、edit toggle、apply-updates 按鈕（編輯模式）。
-- **sidebar**：搜尋框（路線與站名二合一，站名結果暫時取代路線列表）、路線列表（數字開頭優先；圓點 = 每方向 QA 色點）、Layers 區（4 個 checkbox + 1 個幾何來源下拉 + 圖例）。
-- **地圖**：Leaflet，全部圖層的畫布。popup 兩種（stop / station）。編輯模式的 handle（頂點圓點、midpoint 白點、十字游標 place）。
-- **detail panel**：兩層堆疊 pane。context pane 放路線詳情 / QA 清單；point pane 放 stop / station / path piece。各自 ᐸ ᐳ 歷史 + X。
-- **statusbar**：busy spinner、狀態訊息、basemap 提示。
-- **浮動元素**：線編輯的 存線/✕ 按鈕（地圖右下）。
-- **面板內容型別**：路線詳情（providers、方向列表、QA profile tab）、有序站牌表、piece 面板、outlier 表、path-dev 表、stop 卡（羅盤 + 經過路線 + 編輯列）、station 卡（group、成員、bearing 軸、編輯列）、edit-log 表、popup。
+- **topbar**（enamel 藍帶）：側欄收合鈕（icon）、brand glyph + `rm-web` 字標、4 顆統計 chip（路線/站牌/站點/比對）、2 顆可點 QA chip（離群/路徑偏離；非零反白＋橘環警示）、「編輯」toggle（`aria-pressed`）、「更新」按鈕（編輯模式）。
+- **sidebar**：搜尋框（路線與站名二合一，站名結果暫時取代路線列表）、路線列表（數字開頭優先；每方向一顆 QA 色點）、圖層區（站牌/站點、方位、路徑來源下拉（業者線/OSM 街道線）、原始比對、有效線＋靜態圖例 — app.js 由 world constants 填，新線型編碼須加圖例列）。
+- **地圖**：Leaflet，全部圖層的畫布；basemap 調暗（tile opacity 0.75）讓資料圖層讀前。popup 兩種（stop：bearing dial + 經過路線 chips；station）。編輯模式的 handle（頂點橘點、midpoint 白點、十字游標 place）。
+- **detail**：兩塊 dpane plate 直疊（context 2/3 + point 1/3），各帶 rim 標題列（1.5px 墨線）＋ icon 化 ‹ › ✕ 導覽（disabled 以淡化而非隱藏）＋獨立捲動 body。
+- **statusbar**：busy spinner、狀態訊息、底圖網路提示。
+- **浮動元素**：線編輯的 存線/✕ 浮動鈕（地圖右下；存線是警示橘 — The One Shout Rule）。
+- **面板內容型別**：路線詳情（providers、去返程 tabs、**站序鏈**（有序站牌表：序號/QA 節點/站名/公尺格線，乾淨站不顯示公尺）、QA 剖面 tab）、piece 面板、離群表、路徑偏離表、stop 卡（bearing dial + 經過路線 chips + 編輯列）、station 卡（group、成員、bearing 軸、編輯列）、edit-log 表、popup。
 
-## 設計限制（重新設計時的邊界）
+## 設計限制（任何後續改動的邊界）
 
 ### 架構不變量
 
-1. **單 binary、零 runtime 檔案**：所有 static assets `include_str!` 內嵌，Leaflet vendored。重新設計若引入 build step（ bundler / framework ），必須回答「產物怎麼回到 `assets/` 並內嵌」。
+1. **單 binary、零 runtime 檔案**：所有 static assets `include_str!` 內嵌，Leaflet vendored（webfonts 是唯一外部依賴，見 #8）。任何改動若引入 build step（bundler / framework），必須回答「產物怎麼回到 `assets/` 並內嵌」；新 JS 檔要同時註冊 `handlers/assets.rs` 與 `handlers/mod.rs`。
 2. **讀寫分離**：viewer 永遠 readonly connection；寫入走 `/api/edit/*` + auth middleware。前端重新設計不得打破「瀏覽不變更狀態」的保證。
 3. **編輯 = 版本附加**：所有寫入是 append 新 version row + audit log + stale mark，不是 UPDATE。UI 的責任：每筆編輯 confirm + note、顯示 stale badge、提供 undo。API 不可同步等待 refresh 完成（refresh 是單一 flight 的長任務，按鈕輪詢狀態）。
 4. **server 擁有地理數學**：client 只收集 `[lat,lon]`（lineEdit.js 明文約定）。前端不做 snap、投影、polyline 運算。
-5. **API 形狀**：GET 全部 JSON、錯誤 non-2xx `{"error"}`；編輯以 current version id 定址。重新設計可以包新 UI，但換 API = 動 axum handlers + 測試。
+5. **API 形狀**：GET 全部 JSON、錯誤 non-2xx `{"error"}`；編輯以 current version id 定址。UI 可以重包，但換 API = 動 axum handlers + 測試。
 
 ### 資源限制
 
-6. **無 JS framework、無 build step、無 JS 測試**：vanilla ES modules，約 3,000 行（app.js 900、panels.js 619、style.css 804）。JS 驗證靠手動 + 瀏覽器檢查。重新設計要自帶測試策略。
+6. **無 JS framework、無 build step、無 JS 測試**：vanilla ES modules，重設計時已拆 7 個模組、約 2,100 行 JS（app.js 928、panels.js 626、layers.js 249、lineEdit.js 135、api.js 59、colors.js 57、icons.js 23）＋ style.css 1,176 行。JS 驗證仍靠手動 + 瀏覽器檢查；要自帶測試策略。
 7. **單人維護**：複雜度預算極低。伺服器目前開一個 port、無部署管線；`--db` 換檔即換城。
-8. **離線優先（basemap 除外）**：basemap tiles 需網路，其餘全部本地。statusbar 有固定提示文案。
+8. **離線優先（basemap、webfonts 除外）**：basemap tiles 與 Google Fonts（Archivo / Noto Sans TC；離線退回 PingFang TC / system sans）需網路，其餘全部本地。statusbar 有固定提示文案。
 
 ### 互動限制
 
-9. **桌機滑鼠前提**：拖曳編輯、map-click place、dblclick 刪點皆無 touch 替代路径。目前無 responsive 設計（有 viewport meta 但版面是固定三欄）。
+9. **桌機滑鼠前提**：拖曳編輯、map-click place、dblclick 刪點皆無 touch 替代路徑。有單一 `max-width: 900px` 斷點把面板直疊保持可達，但無 touch 親和設計，仍以桌機為前提。
 10. **小團隊單寫入**：寫入以 app-level mutex 序列化，無樂觀併發 UI（僅線編輯帶 `expected_updated_at`）；無 per-field 權限、無使用者管理畫面。設計不需做多人在線、衝突合併 UI。
 11. **原生對話框**：改名/notes 用 `prompt()`、確認用 `confirm()` — 是已知粗糙點，重新設計可替換，但「明確 confirm + note」的行為必須保留。
-12. **中文為主 UI**：站名/方向（去程/返程）/存線等字串為台灣慣用語；無 i18n 機制。
+12. **zh-Hant 為唯一 UI 語言**：站名/去程/返程/存線等字串是台灣慣用語，且是刻意設計決策（DESIGN.md 明列），不是 i18n 缺口；無 i18n 機制。
 
-### 已知痛點（重設計的動機清單）
+### 已知痛點（下一輪改善的標的；2026-10 重設計後複核）
 
-- marker z-order 靠 `zIndexOffset` 魔術數字（1000/1001）撐住編輯 handle 不被重繪蓋掉 — `lineEdit.js:49,71`。
-- 單一 `app.js` 900 行，狀態（選取、圖層、編輯 session、pane 歷史）分散在模組頂層變數。
-- `prompt()`/`confirm()` 原生對話框與整體 UI 風格斷裂。
-- 無任何 JS 測試；回歸靠手動瀏覽器檢查（最近 8 項 UI 檢查仍待人工驗證）。
+- marker z-order 靠 `zIndexOffset` 魔術數字（1000/1001）撐住編輯 handle 不被重繪蓋掉 — `lineEdit.js:50,72`。
+- `app.js` 仍 928 行，選取、圖層、編輯 session、pane 歷史等狀態分散在模組頂層變數（視覺層已拆出 colors/icons/layers/panels，狀態層未動）。
+- `prompt()`/`confirm()` 原生對話框與 Stop Plate 風格斷裂（改名、備註、confirm 全走原生，約 18 個呼叫點）。
+- 無任何 JS 測試；回歸靠手動瀏覽器檢查。
 - 編輯 arm/place 模式（十字游標 one-shot）可發現性低 — 新使用者難以知道目前處於「待點擊」狀態。
