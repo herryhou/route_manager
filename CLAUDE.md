@@ -30,21 +30,27 @@ Diagnosis tip: if one of these runs seems inexplicably slow, check
 `ps aux | grep rm-` — the binary path shows `target/debug/` vs
 `target/release/` immediately.
 
-## rm-web: never change the Leaflet zoom level programmatically
+## rm-web: never change the Leaflet zoom or pan programmatically (except whitelist)
 
 In the rm-web frontend, application code is forbidden from changing the map
-zoom level. Re-centering on selection (route / stop / station click, popup
-links, etc.) must pan only and preserve the user's current zoom. Use
-`panTo` (or `setView(latlng, map.getZoom())`); never call `setZoom`,
+zoom level. The single allowed exception is the initial view at map creation
+(`L.map(...).fitBounds(...)` in `assets/js/app.js`). Never call `setZoom`,
 `setView` with a zoom argument, `flyTo`, `fitBounds`, or `zoomIn`/`zoomOut`
-from app logic. The single allowed exception is the initial view at map
-creation (`L.map(...).fitBounds(...)` in `assets/js/app.js`).
+from app logic. User-driven zoom (scroll wheel, +/- controls) stays fully
+allowed — the ban is on the program moving the zoom, not on the user.
 
-User-driven zoom (scroll wheel, +/- controls) stays fully allowed — the ban
-is on the program moving the zoom, not on the user.
+Panning is likewise forbidden except for exactly four whitelisted flows
+(2026-10-13 decision — all other selection is display-only: markers,
+popups, panels, hash, layers change; the viewport never moves):
 
-Refinement (2026-10-13): picking a route from a stop/station popup or panel
-(the 站點路線 / 經過路線 chips) must not even pan — the map is already
-showing that stop/station, so the route switches display only. Those call
-sites pass `{ center: false }`; direct picks elsewhere (sidebar route list,
-hash restore, QA panels) keep the pan-to-center.
+1. Route info panel stop click (`popupStop`) — pans to the clicked stop.
+2. Stop drill-down (`selectStop`) — pans to the stop (covers hash `#stop=`
+   restore, pane ←/→ nav, post-edit jumps to new stops).
+3. Station select (`selectStation`) — pans to the station (covers hash
+   `#station=` restore, search list, popup/panel chips, edit flows).
+4. QA outlier panel pick (`openOutliers` `onPick`) — pans to the outlier
+   (edit workflow needs to locate off-map stops).
+
+Route selection (`selectRoute`/`selectRouteById`) no longer pans at all —
+no `center` option exists; don't reintroduce one.
+
