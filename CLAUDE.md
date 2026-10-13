@@ -42,3 +42,9 @@ creation (`L.map(...).fitBounds(...)` in `assets/js/app.js`).
 
 User-driven zoom (scroll wheel, +/- controls) stays fully allowed — the ban
 is on the program moving the zoom, not on the user.
+
+Refinement (2026-10-13): picking a route from a stop/station popup or panel
+(the 站點路線 / 經過路線 chips) must not even pan — the map is already
+showing that stop/station, so the route switches display only. Those call
+sites pass `{ center: false }`; direct picks elsewhere (sidebar route list,
+hash restore, QA panels) keep the pan-to-center.

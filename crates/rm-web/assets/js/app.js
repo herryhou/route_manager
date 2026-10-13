@@ -131,9 +131,9 @@ function paneForward(kind) {
   reopen();
 }
 
-async function selectRouteById(routeId, dir = 0) {
+async function selectRouteById(routeId, dir = 0, opts = {}) {
   const r = allRoutes.find((x) => x.route_id === routeId);
-  if (r) selectRoute(r, dir);
+  if (r) selectRoute(r, dir, opts);
   else status(`路線 ${routeId} 不在清單`);
 }
 
@@ -183,7 +183,7 @@ async function fillPieceWays(el, routeId, dir, stops, p) {
   }
 }
 
-async function selectRoute(r, dir = 0) {
+async function selectRoute(r, dir = 0, { center = true } = {}) {
   selectedKey = `${r.route_id}`;
   selectedRoute = { route_id: r.route_id, dir };
   refreshList(document.getElementById('route-search').value);
@@ -219,7 +219,7 @@ async function selectRoute(r, dir = 0) {
     drawRoute(p, s, { onStopClick, onPathClick });
     if (document.getElementById('layer-raw').checked) loadRaw(route_id, dir);
     else clearRaw();
-    centerRoute(p, s);
+    if (center) centerRoute(p, s);
     paneOpen('context', `route:${route_id}:${dir}`, () => selectRouteById(route_id, dir));
     routeStopsPanel(d, dir, s, {
       onDirection: (nd) => selectRoute(r, nd),
@@ -250,7 +250,7 @@ async function loadRaw(routeId, dir) {
 async function openStopPopup(stopVersionId, marker) {
   try {
     const d = await api.stopDetail(stopVersionId);
-    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
+    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0, { center: false });
     paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     const el = stopPopupEl(d, { onPickRoute });
     marker.unbindPopup();
@@ -265,7 +265,7 @@ async function openStopPopup(stopVersionId, marker) {
 async function openStationPopup(stationId, marker) {
   try {
     const d = await api.stationDetail(stationId);
-    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
+    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0, { center: false });
     paneOpen('point', `station:${stationId}`, () => selectStation(stationId));
     const el = stationPopupEl(d, { onPickRoute });
     marker.unbindPopup();
@@ -288,11 +288,11 @@ async function selectStation(stationId) {
       radius: 10, color: '#0857a2', weight: 2, fillColor: '#0857a2', fillOpacity: 0.15,
     }).addTo(layers.highlight);
     m.bindPopup(stationPopupEl(d, {
-      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0),
+      onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0, { center: false }),
     }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([st.lat, st.lon], { animate: true });
-    stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickStation: selectStation, onEditStation });
+    stationPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0, { center: false }), onPickStation: selectStation, onEditStation });
     location.hash = `#station=${stationId}`;
   } catch (e) {
     status(`站點載入失敗: ${e.message}`);
@@ -306,7 +306,7 @@ async function popupStop(stopVersionId) {
   try {
     const d = await api.stopDetail(stopVersionId);
     const s = d.stop;
-    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
+    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0, { center: false });
     paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     clearHighlight();
     const m = L.circleMarker([s.lat, s.lon], {
@@ -327,7 +327,7 @@ async function selectStop(stopVersionId) {
     const d = await api.stopDetail(stopVersionId);
     paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     highlightGroup(d.group_members);
-    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickStation: selectStation, onEditStop });
+    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0, { center: false }), onPickStation: selectStation, onEditStop });
     map.panTo([d.stop.lat, d.stop.lon], {
       animate: true,
     });
