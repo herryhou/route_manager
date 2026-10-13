@@ -29,3 +29,16 @@ is needed.
 Diagnosis tip: if one of these runs seems inexplicably slow, check
 `ps aux | grep rm-` — the binary path shows `target/debug/` vs
 `target/release/` immediately.
+
+## rm-web: never change the Leaflet zoom level programmatically
+
+In the rm-web frontend, application code is forbidden from changing the map
+zoom level. Re-centering on selection (route / stop / station click, popup
+links, etc.) must pan only and preserve the user's current zoom. Use
+`panTo` (or `setView(latlng, map.getZoom())`); never call `setZoom`,
+`setView` with a zoom argument, `flyTo`, `fitBounds`, or `zoomIn`/`zoomOut`
+from app logic. The single allowed exception is the initial view at map
+creation (`L.map(...).fitBounds(...)` in `assets/js/app.js`).
+
+User-driven zoom (scroll wheel, +/- controls) stays fully allowed — the ban
+is on the program moving the zoom, not on the user.

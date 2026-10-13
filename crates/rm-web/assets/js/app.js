@@ -1,7 +1,7 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
 import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, editLogPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
-import { initLayers, layers, clearHighlight, drawRoute, fitRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, setEffectiveOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
+import { initLayers, layers, clearHighlight, drawRoute, centerRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, setEffectiveOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
 import { startLineEdit, stopLineEdit, lineEditActive } from './lineEdit.js';
 import { I } from './icons.js';
 
@@ -219,7 +219,7 @@ async function selectRoute(r, dir = 0) {
     drawRoute(p, s, { onStopClick, onPathClick });
     if (document.getElementById('layer-raw').checked) loadRaw(route_id, dir);
     else clearRaw();
-    fitRoute(p, s);
+    centerRoute(p, s);
     paneOpen('context', `route:${route_id}:${dir}`, () => selectRouteById(route_id, dir));
     routeStopsPanel(d, dir, s, {
       onDirection: (nd) => selectRoute(r, nd),

@@ -78,13 +78,15 @@ export function drawRoute(pathFc, stopsJson, { onStopClick, onPathClick }) {
   }
 }
 
-export function fitRoute(pathFc, stopsJson) {
+/// Pan to the route's extent center WITHOUT changing zoom — app code must
+/// never alter the zoom level (see CLAUDE.md, rm-web zoom rule).
+export function centerRoute(pathFc, stopsJson) {
   const pts = [];
   for (const f of pathFc.features ?? []) {
     for (const c of f.geometry?.coordinates ?? []) pts.push([c[1], c[0]]);
   }
   for (const s of stopsJson.stops ?? []) pts.push([s.lat, s.lon]);
-  if (pts.length) layers.routePath._map?.fitBounds(L.latLngBounds(pts), { padding: [24, 24] });
+  if (pts.length) layers.routePath._map?.panTo(L.latLngBounds(pts).getCenter());
 }
 
 /// Ring group-member stations for stop drill-down.
