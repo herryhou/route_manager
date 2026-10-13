@@ -916,6 +916,14 @@ table.kv td:first-child {
   color: var(--enamel);
 }
 
+/* Keep the vendored leaflet.css pristine (upgrade-safe); hairline overrides live here. */
+.leaflet-zoom-box,
+.leaflet-control-scale-line,
+.leaflet-touch .leaflet-control-layers,
+.leaflet-touch .leaflet-bar {
+  border-width: 1px;
+}
+
 /* Thin scrollbars on the scrolling lists/panes. */
 #route-list,
 #station-list,
