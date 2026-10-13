@@ -348,6 +348,7 @@ async function enableEditMode() {
   editMode = true;
   setEditable(true);
   document.getElementById('edit-toggle').classList.add('on');
+  document.getElementById('edit-toggle').setAttribute('aria-pressed', 'true');
   status('編輯模式開啟');
   document.getElementById('refresh-btn').hidden = false;
   // Re-seed the pending-count badge: the boot seed may be stale (no token
@@ -366,6 +367,7 @@ function disableEditMode() {
   }
   setEditable(false);
   document.getElementById('edit-toggle').classList.remove('on');
+  document.getElementById('edit-toggle').setAttribute('aria-pressed', 'false');
   status('');
   document.getElementById('refresh-btn').hidden = true;
   document.getElementById('refresh-btn').disabled = false;
