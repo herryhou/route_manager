@@ -17,7 +17,9 @@ cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
 | `--addr` | `127.0.0.1:8787` | listen address |
 | `--tiles` | OpenStreetMap raster tiles | basemap URL template override |
 
-The default basemap needs internet; every other layer is offline. Leaflet
+The default basemap needs internet; every other layer is offline. Web
+fonts (Archivo / Noto Sans TC) load from Google Fonts when online and
+fall back to PingFang TC / system sans offline. Leaflet
 is vendored (`assets/vendor/`) and all static assets are `include_str!`-embedded
 (`src/handlers/assets.rs`), so the binary has no runtime files.
 
