@@ -506,6 +506,11 @@ body {
   white-space: nowrap;
 }
 
+.dpane-title .ic {
+  color: var(--ink-soft);
+  margin-right: 5px;
+}
+
 .dpane-nav {
   display: flex;
   gap: 2px;

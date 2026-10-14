@@ -88,11 +88,13 @@ function paneEl(kind) {
   return document.getElementById('detail').querySelector(`.dpane-${kind}`);
 }
 
-export function showPane(kind, html, title) {
+export function showPane(kind, html, title, icon = null) {
   const pane = paneEl(kind);
   document.getElementById('detail').hidden = false;
   pane.hidden = false;
-  pane.querySelector('.dpane-title').textContent = title;
+  const titleEl = pane.querySelector('.dpane-title');
+  titleEl.textContent = title;
+  if (icon) titleEl.insertAdjacentHTML('afterbegin', icon);
   pane.querySelector('.dpane-close').onclick = () => closePane(kind);
   const body = pane.querySelector('.dpane-body');
   body.innerHTML = html;
@@ -230,7 +232,7 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
     <div class="chain view-stops">${rows}</div>
     <div class="view-qa" hidden>${profileSvg(stops.stops ?? [])}</div>
   `;
-  const pane = showPane('context', html, `路線 ${d.route_code} ${d.subroute_name ?? ''}`.trim());
+  const pane = showPane('context', html, `路線 ${d.route_code} ${d.subroute_name ?? ''}`.trim(), I.route);
   pane.querySelectorAll('.tabs:not(.view-tabs) button').forEach((b) =>
     b.addEventListener('click', () => onDirection(Number(b.dataset.dir)))
   );
@@ -317,7 +319,8 @@ export function pathPiecePanel(p) {
       <div class="piece-ways"><p class="muted">…</p></div>
       <h3>站對路線</h3>
       <div class="piece-pair-routes"><p class="muted">…</p></div>`,
-    isWay ? `街道 ${p.name ?? `#${p.osm_way_id}`}` : `線段 #${p.ordinal} ${p.geometry_method ?? ''}`.trim()
+    isWay ? `街道 ${p.name ?? `#${p.osm_way_id}`}` : `線段 #${p.ordinal} ${p.geometry_method ?? ''}`.trim(),
+    I.piece
   );
   return isWay ? null : pane;
 }
@@ -337,7 +340,7 @@ export function outlierPanel(rows, { onPick, onOpenRoute }) {
   const pane = showPane('context', `
     <p class="muted">點擊定位站牌；路線代號可開啟路線</p>
     ${items || '<p class="muted">無資料</p>'}
-  `, `離群站牌 (${(rows ?? []).length})`);
+  `, `離群站牌 (${(rows ?? []).length})`, I.warn);
   pane.querySelectorAll('.outlier-row').forEach((row, i) => {
     row.addEventListener('click', () => onPick(rows[i]));
     row.querySelector('.route-code').addEventListener('click', (e) => {
@@ -404,7 +407,7 @@ export function editLogPanel(rows, { onUndo, canUndo }) {
   const pane = showPane('context', `
     <p class="muted">編輯歷史，新在上 — ${I.undo} 恢復上一版</p>
     ${items || '<p class="muted">無編輯</p>'}
-  `, `編輯歷史 (${(rows ?? []).length})`);
+  `, `編輯歷史 (${(rows ?? []).length})`, I.undo);
   pane.querySelectorAll('.log-undo').forEach((el) =>
     el.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -430,7 +433,7 @@ export function matchDevPanel(rows, { onOpenRoute }) {
   const pane = showPane('context', `
     <p class="muted">比對路徑偏離原始線（p95）；點擊列開啟路線 — 以 ways/raw 圖層比較</p>
     ${items || '<p class="muted">無資料</p>'}
-  `, `路徑偏離 (${(rows ?? []).length})`);
+  `, `路徑偏離 (${(rows ?? []).length})`, I.warn);
   pane.querySelectorAll('.matchdev-row').forEach((row, i) => {
     row.addEventListener('click', () => onOpenRoute(rows[i]));
   });
@@ -569,7 +572,7 @@ export function stationPanel(d, { onPickRoute, onPickStation, onEditStation }) {
     ${rows}
     <h3>經過路線 (${uniqRoutes(d.routes).length})</h3>
     <div class="station-routes"></div>
-  `, `${d.station.station_name} #${d.station.station_id}`);
+  `, `${d.station.station_name} #${d.station.station_id}`, I.station);
   pane.querySelector('.other-station-chips').append(
     otherStationChips(d.group_members, d.station.station_id, onPickStation)
   );
@@ -609,7 +612,7 @@ export function stopPanel(d, { onPickRoute, onPickStation, onEditStop }) {
     <h3>站點路線 (${uniqRoutes(d.routes_by_station).length})</h3>
     <div class="routes-station-chips"></div>
 
-  `, `${d.stop.stop_name} #${d.stop.stop_code}`);
+  `, `${d.stop.stop_name} #${d.stop.stop_code}`, I.stop);
   pane.querySelectorAll('.st-pick').forEach((el) =>
     el.addEventListener('click', () => onPickStation(Number(el.dataset.sid)))
   );

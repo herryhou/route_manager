@@ -17,6 +17,11 @@ export const I = {
   check: svg('<path d="M20 6L9 17l-5-5"/>'),
   panelL: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'),
   panelR: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'),
+  // Panel title glyphs — content-type marks for the detail-pane rims.
+  route: svg('<circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="5" r="2.5"/><path d="M6.8 17.2L17.2 6.8"/>'),
+  piece: svg('<circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="12" r="2.5"/><path d="M7.5 12h9"/>'),
+  station: svg('<circle cx="12" cy="12" r="7"/>'),
+  stop: svg('<rect x="8" y="3" width="8" height="11" rx="2"/><path d="M12 14v7"/>'),
   // Brand mark: the stop plate itself — enamel plate, two stops on the line.
   brand:
     '<div></div>',
