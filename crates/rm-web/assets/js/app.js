@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, editLogPanel, pathPiecePanel, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, editLogPanel, pathPiecePanel, routeChips, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, setEffectiveOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
 import { startLineEdit, stopLineEdit, lineEditActive } from './lineEdit.js';
 import { I } from './icons.js';
@@ -192,6 +192,41 @@ async function fillPieceWays(el, routeId, dir, stops, p) {
   }
 }
 
+/// Fill the piece panel's `.piece-pair-routes`: route directions running the
+/// piece's directed station pair as consecutive stops, grouped into length
+/// corridors (the retired registry's corridor-split rule); the clicked
+/// piece's own corridor is badged. Async — lands when the fetch resolves.
+async function fillPiecePairRoutes(el, p) {
+  if (p.from_station_id == null || p.to_station_id == null) {
+    el.innerHTML = '<p class="muted">無站對資料</p>';
+    return;
+  }
+  try {
+    const v = await api.stationPairRoutes(p.from_station_id, p.to_station_id);
+    const corridors = v.corridors ?? [];
+    el.innerHTML = corridors.length
+      ? corridors
+        .map((c) => {
+          const own = p.length_m != null && p.length_m >= c.min_m && p.length_m <= c.max_m;
+          const span = c.min_m === c.max_m
+            ? `~${c.corridor_m.toFixed(0)}m`
+            : `${c.min_m.toFixed(0)}–${c.max_m.toFixed(0)}m`;
+          return `<div class="pair-corridor">
+            <div class="pair-head">${own ? '<span class="badge nodata">本走廊</span>' : ''}
+              <span class="pair-span">${span}</span></div>
+            <div class="pair-chips"></div>
+          </div>`;
+        })
+        .join('')
+      : '<p class="muted">無其他路線</p>';
+    el.querySelectorAll('.pair-chips').forEach((box, i) => {
+      box.append(routeChips(corridors[i].routes, (rid, d) => selectRouteById(rid, d ?? 0)));
+    });
+  } catch (e) {
+    el.innerHTML = `<p class="muted">站對路線載入失敗: ${esc(e.message)}</p>`;
+  }
+}
+
 async function selectRoute(r, dir = 0) {
   selectedKey = `${r.route_id}`;
   selectedRoute = { route_id: r.route_id, dir };
@@ -215,8 +250,11 @@ async function selectRoute(r, dir = 0) {
       const p = feature.properties;
       const dirStops = s.stops ?? [];
       const show = () => {
-        const waysEl = pathPiecePanel(p);
-        if (waysEl) fillPieceWays(waysEl, route_id, dir, dirStops, p);
+        const pane = pathPiecePanel(p);
+        if (pane) {
+          fillPieceWays(pane.querySelector('.piece-ways'), route_id, dir, dirStops, p);
+          fillPiecePairRoutes(pane.querySelector('.piece-pair-routes'), p);
+        }
         if (feature.geometry) {
           drawPieceHighlight(feature.geometry, p.osm_way_id != null ? 'selected way' : 'selected piece');
         }

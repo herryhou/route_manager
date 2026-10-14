@@ -75,6 +75,18 @@ pub async fn ways(
     Ok(Json(v))
 }
 
+/// `GET /api/station-pair/{from_station}/{to_station}/routes`
+pub async fn pair_routes(
+    Path((from_station, to_station)): Path<(i64, i64)>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, crate::error::ApiError> {
+    let v = run_db(state, move |conn| {
+        crate::queries::pairs::pair_routes(conn, from_station, to_station)
+    })
+    .await?;
+    Ok(Json(v))
+}
+
 pub async fn raw(
     Path((route_id, dir)): Path<(i64, i64)>,
     State(state): State<AppState>,

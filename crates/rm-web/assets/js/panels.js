@@ -290,8 +290,8 @@ export function profileSvg(stops) {
 
 /// Route path piece detail (point pane, polyline click): provider draft piece
 /// or OSM way run — shape depends on the route-geom select the map drew.
-/// Draft pieces get an empty `.piece-ways` container app.js fills with the
-/// OSM ways covering the piece's chainage window (returned; null for way runs).
+/// Draft pieces get empty `.piece-ways` / `.piece-pair-routes` containers
+/// app.js fills async (returned pane; null for way runs).
 export function pathPiecePanel(p) {
   const fmt = (m) => `${(m ?? 0).toFixed(0)}m`;
   const isWay = p.osm_way_id != null;
@@ -311,12 +311,15 @@ export function pathPiecePanel(p) {
         <tr><td>方法</td><td>${p.geometry_method}</td></tr>
         <tr><td>長度</td><td>${fmt(p.length_m)}</td></tr>
         <tr><td>站牌區間</td><td>${p.from_seq} → ${p.to_seq}</td></tr>
+        <tr><td>站對</td><td title="station ${p.from_station_id} → ${p.to_station_id}">${esc(p.from_station_name)} → ${esc(p.to_station_name)}</td></tr>
       </table>
       <h3>OSM 街道</h3>
-      <div class="piece-ways"><p class="muted">…</p></div>`,
+      <div class="piece-ways"><p class="muted">…</p></div>
+      <h3>站對路線</h3>
+      <div class="piece-pair-routes"><p class="muted">…</p></div>`,
     isWay ? `街道 ${p.name ?? `#${p.osm_way_id}`}` : `線段 #${p.ordinal} ${p.geometry_method ?? ''}`.trim()
   );
-  return isWay ? null : pane.querySelector('.piece-ways');
+  return isWay ? null : pane;
 }
 
 /// Outlier list panel (topbar outliers chip).

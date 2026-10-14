@@ -20,6 +20,8 @@ export const routeWays = (id, dir) => fetchJson(`/api/routes/${id}/directions/${
 export const routeRaw = (id, dir) => fetchJson(`/api/routes/${id}/directions/${dir}/raw`);
 export const stopDetail = (id) => fetchJson(`/api/stops/${id}`);
 export const stationDetail = (id) => fetchJson(`/api/stations/${id}`);
+export const stationPairRoutes = (fromStation, toStation) =>
+  fetchJson(`/api/station-pair/${fromStation}/${toStation}/routes`);
 export const stopsBbox = (bbox, kind) =>
   fetchJson(`/api/stops?bbox=${bbox}&kind=${kind}`);
 export const stopsSearch = (q) => fetchJson(`/api/stops?q=${encodeURIComponent(q)}`);

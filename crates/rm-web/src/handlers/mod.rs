@@ -36,6 +36,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/routes/{id}/directions/{dir}/ways", get(routes::ways))
         .route("/api/routes/{id}/directions/{dir}/raw", get(routes::raw))
+        .route(
+            "/api/station-pair/{from_station}/{to_station}/routes",
+            get(routes::pair_routes),
+        )
         .route("/api/stops", get(stops::viewport))
         .route("/api/stops/{id}", get(stops::detail))
         .route("/api/stations", get(stops::station_search))

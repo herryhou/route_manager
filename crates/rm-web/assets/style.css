@@ -1138,6 +1138,27 @@ table.kv td:first-child {
   background: var(--alert-ink);
 }
 
+/* ---------- piece panel: station-pair corridors ---------- */
+
+/* Corridor groups in the piece drill-down: a quiet length label per
+   length-bucket corridor, route chips beneath (the shared route-chip atom). */
+.pair-corridor + .pair-corridor {
+  margin-top: 8px;
+}
+
+.pair-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.pair-span {
+  font-size: 11px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- small viewports ---------- */
 
 /* The ops tool targets desktop; below 900px the plates stack so every

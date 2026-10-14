@@ -235,14 +235,24 @@ pub fn detail(conn: &Connection, route_id: i64) -> Result<Option<Value>> {
 }
 
 /// `GET /api/routes/{id}/directions/{dir}/path` — canonical geometry
-/// as one LineString feature per seg_geometry_draft piece.
+/// as one LineString feature per seg_geometry_draft piece. Each piece's
+/// boundary stations (the directed station pair) ride along in properties.
 pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
     let mut stmt = conn.prepare(
         "SELECT gd.ordinal, gd.encoded_polyline, gd.length_m, gd.geometry_method,
-                gd.from_route_stop_version_id, gd.to_route_stop_version_id
+                gd.from_route_stop_version_id, gd.to_route_stop_version_id,
+                fst.station_id, fst.station_name, tst.station_id, tst.station_name
          FROM seg_geometry_draft gd
          JOIN subroute_version sv ON sv.subroute_version_id = gd.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         JOIN route_stop_version frs
+           ON frs.route_stop_version_id = gd.from_route_stop_version_id
+         JOIN stop_version fsv ON fsv.stop_version_id = frs.stop_version_id
+         JOIN station_version fst ON fst.station_id = fsv.station_id AND fst.valid_to IS NULL
+         JOIN route_stop_version trs
+           ON trs.route_stop_version_id = gd.to_route_stop_version_id
+         JOIN stop_version tsv ON tsv.stop_version_id = trs.stop_version_id
+         JOIN station_version tst ON tst.station_id = tsv.station_id AND tst.valid_to IS NULL
          WHERE rv.route_id = ?1 AND gd.direction = ?2
          ORDER BY gd.ordinal",
     )?;
@@ -254,12 +264,27 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
             r.get::<_, String>(3)?,
             r.get::<_, i64>(4)?,
             r.get::<_, i64>(5)?,
+            r.get::<_, i64>(6)?,
+            r.get::<_, String>(7)?,
+            r.get::<_, i64>(8)?,
+            r.get::<_, String>(9)?,
         ))
     })?;
 
     let mut features = Vec::new();
     for row in it {
-        let (ordinal, encoded, length_m, method, from_rsv, to_rsv) = row?;
+        let (
+            ordinal,
+            encoded,
+            length_m,
+            method,
+            from_rsv,
+            to_rsv,
+            from_sid,
+            from_sname,
+            to_sid,
+            to_sname,
+        ) = row?;
         let pts = polyline::decode(&encoded)?;
         if pts.len() < 2 {
             continue; // degenerate piece — nothing to draw
@@ -273,6 +298,10 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
                 "geometry_method": method,
                 "from_seq": from_seq,
                 "to_seq": to_seq,
+                "from_station_id": from_sid,
+                "from_station_name": from_sname,
+                "to_station_id": to_sid,
+                "to_station_name": to_sname,
             }),
         ));
     }
@@ -487,24 +516,28 @@ pub fn raw(conn: &Connection, route_id: i64, dir: i64) -> Result<Option<Value>> 
         )
         .context("probe polyline_override")?
         > 0;
-    let (eff_encoded, source, eff_updated_at): (String, &str, Option<String>) = if has_override_table
-    {
-        let updated_at = conn
-            .query_row(
-                "SELECT updated_at FROM polyline_override WHERE xno = ?1 AND direction = ?2",
-                rusqlite::params![xno, dir],
-                |r| r.get(0),
+    let (eff_encoded, source, eff_updated_at): (String, &str, Option<String>) =
+        if has_override_table {
+            let updated_at = conn
+                .query_row(
+                    "SELECT updated_at FROM polyline_override WHERE xno = ?1 AND direction = ?2",
+                    rusqlite::params![xno, dir],
+                    |r| r.get(0),
+                )
+                .ok();
+            let source = if updated_at.is_some() {
+                "override"
+            } else {
+                "src"
+            };
+            (
+                rm_db::effective_encoded(conn, batch_id, &xno, dir)?,
+                source,
+                updated_at,
             )
-            .ok();
-        let source = if updated_at.is_some() { "override" } else { "src" };
-        (
-            rm_db::effective_encoded(conn, batch_id, &xno, dir)?,
-            source,
-            updated_at,
-        )
-    } else {
-        (encoded.clone().unwrap_or_default(), "src", None)
-    };
+        } else {
+            (encoded.clone().unwrap_or_default(), "src", None)
+        };
     let eff_points: Vec<Vec<f64>> = polyline::decode(&eff_encoded)
         .map(|pts| pts.iter().map(|p| vec![p.lat, p.lon]).collect())
         .unwrap_or_default();

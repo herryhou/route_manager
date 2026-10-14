@@ -168,6 +168,11 @@ async fn route_path_stops_and_drilldown() {
         assert!((23.0..25.0).contains(&lat), "lat second, got {cs:?}");
         assert!(f["properties"]["length_m"].is_f64());
         assert!(f["properties"]["geometry_method"].is_string());
+        // station pair of the piece's boundary stops
+        assert!(f["properties"]["from_station_id"].is_i64(), "{f}");
+        assert!(f["properties"]["to_station_id"].is_i64(), "{f}");
+        assert!(f["properties"]["from_station_name"].is_string(), "{f}");
+        assert!(f["properties"]["to_station_name"].is_string(), "{f}");
     }
 
     // stops: ordered, with projection QA fields
@@ -249,6 +254,101 @@ fn fixture_db_with_outlier() -> (tempfile::TempDir, std::path::PathBuf) {
     rm_publish::run(&mut conn, s.batch_id).unwrap();
     rm_segments::run(&conn, s.batch_id, 50.0).unwrap();
     (dir, db)
+}
+
+/// Route 2 gains a second stop reusing route 1's pair-end stop, so both
+/// routes traverse the same directed station pair — route 2's cut seeded
+/// 500 m longer, which the corridor split must separate into its own cluster.
+#[tokio::test]
+async fn station_pair_routes_cluster_corridors() {
+    let (_dir, db) = fixture_db();
+    let app = router_with(AppState::new(db.clone()));
+
+    let routes = get_json(&app, "/api/routes").await;
+    let find = |code: &str| {
+        routes["routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["route_code"] == serde_json::json!(code))
+            .unwrap()["route_id"]
+            .as_i64()
+            .unwrap()
+    };
+    let (id1, id2) = (find("1"), find("2"));
+
+    // piece properties carry the pair this test keys on
+    let p = get_json(&app, &format!("/api/routes/{id1}/directions/0/path")).await;
+    let prop = &p["features"][0]["properties"];
+    let (from_station, to_station) = (
+        prop["from_station_id"].as_i64().unwrap(),
+        prop["to_station_id"].as_i64().unwrap(),
+    );
+
+    let uri = format!("/api/station-pair/{from_station}/{to_station}/routes");
+    let v = get_json(&app, &uri).await;
+    let cs = v["corridors"].as_array().unwrap();
+    assert_eq!(cs.len(), 1, "pre-seed: only route 1 runs the pair: {v}");
+    assert_eq!(cs[0]["routes"][0]["route_id"], serde_json::json!(id1));
+    let len1 = cs[0]["min_m"].as_f64().unwrap();
+    assert!(cs[0]["routes"][0]["length_m"].is_f64());
+    assert!(cs[0]["routes"][0]["direction"].is_i64());
+
+    // seed route 2 onto the same directed pair, 500 m longer
+    {
+        let conn = rm_db::open(&db).unwrap();
+        let (to_svid,): (i64,) = conn
+            .query_row(
+                "SELECT r2.stop_version_id
+                 FROM route_stop_current r1
+                 JOIN route_stop_current r2
+                   ON r2.subroute_version_id = r1.subroute_version_id
+                  AND r2.direction = r1.direction
+                  AND r2.stop_sequence = r1.stop_sequence + 1
+                 WHERE r1.route_id = ?1 AND r1.direction = 0",
+                [id1],
+                |r| Ok((r.get(0)?,)),
+            )
+            .unwrap();
+        let (sv2, from_rsv): (i64, i64) = conn
+            .query_row(
+                "SELECT sv.subroute_version_id, rsv.route_stop_version_id
+                 FROM subroute_version sv
+                 JOIN route_stop_version rsv ON rsv.subroute_version_id = sv.subroute_version_id
+                 JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+                 WHERE rv.route_id = ?1 AND rsv.direction = 0 AND rsv.stop_sequence = 1",
+                [id2],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        conn.execute(
+            "INSERT INTO route_stop_version
+                (subroute_version_id, stop_version_id, direction, stop_sequence, created_at)
+             VALUES (?1, ?2, 0, 2, '2026-01-01T00:00:00Z')",
+            rusqlite::params![sv2, to_svid],
+        )
+        .unwrap();
+        let new_rsv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO seg_geometry_draft
+                (subroute_version_id, direction, ordinal, from_route_stop_version_id,
+                 to_route_stop_version_id, encoded_polyline, length_m, geometry_method)
+             VALUES (?1, 0, 1, ?2, ?3, '_p~iF~ps|U', ?4, 'path')",
+            rusqlite::params![sv2, from_rsv, new_rsv, len1 + 500.0],
+        )
+        .unwrap();
+    }
+
+    let v = get_json(&app, &uri).await;
+    let cs = v["corridors"].as_array().unwrap();
+    assert_eq!(cs.len(), 2, "500 m gap must split the pair: {v}");
+    assert_eq!(cs[0]["routes"][0]["route_id"], serde_json::json!(id1));
+    assert_eq!(cs[1]["routes"][0]["route_id"], serde_json::json!(id2));
+    assert!(
+        cs[0]["max_m"].as_f64().unwrap() < cs[1]["min_m"].as_f64().unwrap(),
+        "corridors ascend: {v}"
+    );
+    assert!(cs[1]["corridor_m"].is_f64(), "{v}");
 }
 
 #[tokio::test]
@@ -722,11 +822,7 @@ async fn raw_endpoint_survives_missing_override_table() {
         "no override → no concurrency token: {v}"
     );
     assert!(
-        !v["effective"]["points"]
-            .as_array()
-            .unwrap()
-            .is_empty(),
+        !v["effective"]["points"].as_array().unwrap().is_empty(),
         "effective line falls back to src points: {v}"
     );
 }
-
