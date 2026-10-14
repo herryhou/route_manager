@@ -22,7 +22,10 @@ pub async fn start(
 }
 
 /// Status snapshot for the UI button (polled every ~2 s while running).
-pub async fn status(State(state): State<AppState>, Editor(_editor): Editor) -> Result<Json<Value>, ApiError> {
+pub async fn status(
+    State(state): State<AppState>,
+    Editor(_editor): Editor,
+) -> Result<Json<Value>, ApiError> {
     let pending: i64 = run_db(state.clone(), |conn| {
         conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))
             .map_err(Into::into)
@@ -33,10 +36,17 @@ pub async fn status(State(state): State<AppState>, Editor(_editor): Editor) -> R
         RefreshState::Running { step, started_at } => json!({
             "state": "running", "step": step.as_str(), "started_at": started_at,
         }),
-        RefreshState::Done { started_at, finished_at } => json!({
+        RefreshState::Done {
+            started_at,
+            finished_at,
+        } => json!({
             "state": "done", "started_at": started_at, "finished_at": finished_at,
         }),
-        RefreshState::Failed { error, started_at, finished_at } => json!({
+        RefreshState::Failed {
+            error,
+            started_at,
+            finished_at,
+        } => json!({
             "state": "failed", "error": error, "started_at": started_at, "finished_at": finished_at,
         }),
     };

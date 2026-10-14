@@ -1,7 +1,7 @@
 //! Apply-updates refresh: state machine, chain runner, endpoints.
 
-use axum::http::{Request, StatusCode};
 use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use tower::ServiceExt; // oneshot
 
 // --- Task 1: state machine ---
@@ -166,7 +166,9 @@ async fn status_json(app: &axum::Router) -> serde_json::Value {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let b = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let b = axum::body::to_bytes(res.into_body(), 1 << 20)
+        .await
+        .unwrap();
     serde_json::from_slice(&b).unwrap()
 }
 

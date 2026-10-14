@@ -29,8 +29,8 @@ pub async fn serve(
         None => AppState::with_tiles(db_path, tiles),
     };
     state.conn()?; // probe: friendly error before binding if DB missing/stale
-    // Seed the initial map view from the dataset bbox — one cheap aggregate
-    // at boot; the client falls back to its hardcoded box when absent.
+                   // Seed the initial map view from the dataset bbox — one cheap aggregate
+                   // at boot; the client falls back to its hardcoded box when absent.
     {
         let conn = state.conn()?;
         if let Some(b) = crate::queries::qa::bounds(&conn)? {

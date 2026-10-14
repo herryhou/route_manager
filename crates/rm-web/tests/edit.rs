@@ -87,7 +87,10 @@ fn fixture(conn: &Connection) -> i64 {
          VALUES (1, 'assets/x', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'CLOSED', '2026-01-01T00:00:00Z')", []).unwrap();
     conn.execute(
         "INSERT INTO src_route_point (batch_id, xno, direction, encoded)
-         VALUES (1, '1', 1, '_p~iF~ps|U_ulLnnqC')", []).unwrap();
+         VALUES (1, '1', 1, '_p~iF~ps|U_ulLnnqC')",
+        [],
+    )
+    .unwrap();
     10
 }
 
@@ -227,30 +230,48 @@ async fn log_and_undo_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let state = edit_state(&dir);
     // edit stop 10 (name only — no stale marks needed for this test)
-    let res = rm_web::router_with(state.clone()).oneshot(
-        Request::builder().method("POST").uri("/api/edit/stop/10")
-            .header("authorization", "Bearer sekrit")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"stop_name": "New", "note": "fix"}"#)).unwrap(),
-    ).await.unwrap();
+    let res = rm_web::router_with(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/edit/stop/10")
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"stop_name": "New", "note": "fix"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     let v = body_json(res).await;
     let edit_id = v["edit_id"].as_i64().unwrap();
 
     // log lists it
-    let res = rm_web::router_with(state.clone()).oneshot(
-        Request::builder().uri("/api/edit/log?entity=stop&entity_id=1").body(Body::empty()).unwrap(),
-    ).await.unwrap();
+    let res = rm_web::router_with(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/edit/log?entity=stop&entity_id=1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let v = body_json(res).await;
     assert_eq!(v["rows"].as_array().unwrap().len(), 1);
 
     // undo restores, requires token
-    let res = rm_web::router_with(state).oneshot(
-        Request::builder().method("POST").uri(format!("/api/edit/undo/{edit_id}"))
-            .header("authorization", "Bearer sekrit")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"note": "revert"}"#)).unwrap(),
-    ).await.unwrap();
+    let res = rm_web::router_with(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/edit/undo/{edit_id}"))
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"note": "revert"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let v = body_json(res).await;
     assert_eq!(v["new_stop_version_id"].as_i64().unwrap(), 10);
@@ -260,17 +281,31 @@ async fn log_and_undo_roundtrip() {
 async fn stop_detail_reports_staleness_after_position_edit() {
     let dir = tempfile::tempdir().unwrap();
     let state = edit_state(&dir);
-    let res = rm_web::router_with(state.clone()).oneshot(
-        Request::builder().method("POST").uri("/api/edit/stop/10")
-            .header("authorization", "Bearer sekrit")
-            .header("content-type", "application/json")
-            .body(Body::from(r#"{"lat": 24.001, "note": "move"}"#)).unwrap(),
-    ).await.unwrap();
-    let new_id = body_json(res).await["new_stop_version_id"].as_i64().unwrap();
+    let res = rm_web::router_with(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/edit/stop/10")
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"lat": 24.001, "note": "move"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let new_id = body_json(res).await["new_stop_version_id"]
+        .as_i64()
+        .unwrap();
 
-    let res = rm_web::router_with(state.clone()).oneshot(
-        Request::builder().uri(format!("/api/stops/{new_id}")).body(Body::empty()).unwrap(),
-    ).await.unwrap();
+    let res = rm_web::router_with(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/stops/{new_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let v = body_json(res).await;
     assert_eq!(v["stale"]["projections"], serde_json::json!([1]));
@@ -280,9 +315,15 @@ async fn stop_detail_reports_staleness_after_position_edit() {
     let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
     conn.execute("DELETE FROM stale_mark", []).unwrap();
     drop(conn);
-    let res = rm_web::router_with(state).oneshot(
-        Request::builder().uri(format!("/api/stops/{new_id}")).body(Body::empty()).unwrap(),
-    ).await.unwrap();
+    let res = rm_web::router_with(state)
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/stops/{new_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     let v = body_json(res).await;
     assert_eq!(v["stale"]["projections"], serde_json::json!([]));
     assert_eq!(v["stale"]["bearings"], false);
@@ -311,7 +352,10 @@ async fn second_edit_of_same_version_conflicts() {
     assert_eq!(res.status(), StatusCode::CONFLICT);
     let v = body_json(res).await;
     assert!(
-        v["error"].as_str().unwrap().contains("not the current version"),
+        v["error"]
+            .as_str()
+            .unwrap()
+            .contains("not the current version"),
         "{v}"
     );
 }
@@ -458,7 +502,11 @@ fn station_fixture(conn: &Connection) {
     .unwrap();
 }
 
-async fn rename_st(state: &rm_web::state::AppState, svi: i64, body: &str) -> axum::response::Response {
+async fn rename_st(
+    state: &rm_web::state::AppState,
+    svi: i64,
+    body: &str,
+) -> axum::response::Response {
     rm_web::router_with(state.clone())
         .oneshot(
             Request::builder()
@@ -481,7 +529,12 @@ async fn rename_all_poles_mints_station_and_pole_versions() {
         let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
         station_fixture(&conn);
     }
-    let res = rename_st(&state, 1, r#"{"new_name": "N", "level": "all", "note": "r"}"#).await;
+    let res = rename_st(
+        &state,
+        1,
+        r#"{"new_name": "N", "level": "all", "note": "r"}"#,
+    )
+    .await;
     assert_eq!(res.status(), StatusCode::OK);
     let v = body_json(res).await;
     assert_eq!(v["new_station_version_id"].as_i64(), Some(2), "{v}");
@@ -512,7 +565,10 @@ async fn rename_all_poles_mints_station_and_pole_versions() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!((kind.as_str(), level.as_str()), ("station_rename", "AllPoles"));
+    assert_eq!(
+        (kind.as_str(), level.as_str()),
+        ("station_rename", "AllPoles")
+    );
 }
 
 #[tokio::test]
@@ -549,9 +605,18 @@ async fn rename_rejects_bad_level_empty_and_noop() {
     let dir = tempfile::tempdir().unwrap();
     let state = edit_state(&dir);
     for (body, want) in [
-        (r#"{"new_name": "N", "level": "poles", "note": "x"}"#, StatusCode::BAD_REQUEST),
-        (r#"{"new_name": "  ", "level": "all", "note": "x"}"#, StatusCode::BAD_REQUEST),
-        (r#"{"new_name": "S", "level": "all", "note": "x"}"#, StatusCode::BAD_REQUEST),
+        (
+            r#"{"new_name": "N", "level": "poles", "note": "x"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            r#"{"new_name": "  ", "level": "all", "note": "x"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            r#"{"new_name": "S", "level": "all", "note": "x"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
         (r#"{"level": "all"}"#, StatusCode::BAD_REQUEST),
     ] {
         let res = rename_st(&state, 1, body).await;
@@ -569,11 +634,20 @@ async fn rename_rejects_bad_level_empty_and_noop() {
 async fn rename_stale_svi_conflicts() {
     let dir = tempfile::tempdir().unwrap();
     let state = edit_state(&dir);
-    let res = rename_st(&state, 999, r#"{"new_name": "N", "level": "all", "note": "x"}"#).await;
+    let res = rename_st(
+        &state,
+        999,
+        r#"{"new_name": "N", "level": "all", "note": "x"}"#,
+    )
+    .await;
     assert_eq!(res.status(), StatusCode::CONFLICT);
 }
 
-async fn move_st(state: &rm_web::state::AppState, svi: i64, body: &str) -> axum::response::Response {
+async fn move_st(
+    state: &rm_web::state::AppState,
+    svi: i64,
+    body: &str,
+) -> axum::response::Response {
     rm_web::router_with(state.clone())
         .oneshot(
             Request::builder()
@@ -639,8 +713,14 @@ async fn move_station_validates_body_and_stale() {
     let dir = tempfile::tempdir().unwrap();
     let state = edit_state(&dir);
     for (body, want) in [
-        (r#"{"lat": 91.0, "lon": 120.0, "note": "x"}"#, StatusCode::BAD_REQUEST),
-        (r#"{"lat": 24.0, "lon": -181.0, "note": "x"}"#, StatusCode::BAD_REQUEST),
+        (
+            r#"{"lat": 91.0, "lon": 120.0, "note": "x"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            r#"{"lat": 24.0, "lon": -181.0, "note": "x"}"#,
+            StatusCode::BAD_REQUEST,
+        ),
         (r#"{"lat": 24.0, "note": "x"}"#, StatusCode::BAD_REQUEST),
     ] {
         let res = move_st(&state, 1, body).await;
@@ -673,7 +753,12 @@ async fn undo_route_dispatches_station_rename_rows() {
         let conn = rm_db::open(&dir.path().join("t.db")).unwrap();
         station_fixture(&conn);
     }
-    let res = rename_st(&state, 1, r#"{"new_name": "N", "level": "all", "note": "r"}"#).await;
+    let res = rename_st(
+        &state,
+        1,
+        r#"{"new_name": "N", "level": "all", "note": "r"}"#,
+    )
+    .await;
     assert_eq!(res.status(), StatusCode::OK);
     let edit_id = body_json(res).await["edit_id"].as_i64().unwrap();
 
@@ -728,7 +813,12 @@ fn line_post_req(
     app: &axum::Router,
     body: serde_json::Value,
     token: Option<&str>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<axum::response::Response, std::convert::Infallible>> + Send>> {
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<axum::response::Response, std::convert::Infallible>>
+            + Send,
+    >,
+> {
     let mut b = Request::builder()
         .method("POST")
         .uri("/api/edit/polyline/1/1/line");
@@ -736,12 +826,11 @@ fn line_post_req(
         b = b.header("authorization", format!("Bearer {t}"));
     }
     Box::pin(
-        app.clone()
-            .oneshot(
-                b.header("content-type", "application/json")
-                    .body(Body::from(body.to_string()))
-                    .unwrap(),
-            ),
+        app.clone().oneshot(
+            b.header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        ),
     )
 }
 
@@ -750,7 +839,9 @@ async fn line_post_happy_path_and_raw_readback() {
     let dir = tempfile::tempdir().unwrap();
     let state = edit_state(&dir);
     let app = rm_web::router_with(state.clone());
-    let res = line_post_req(&app, line_body(), Some("sekrit")).await.unwrap();
+    let res = line_post_req(&app, line_body(), Some("sekrit"))
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let v = body_json(res).await;
     assert_eq!(v["created"], serde_json::json!(true));
@@ -760,7 +851,10 @@ async fn line_post_happy_path_and_raw_readback() {
     // field is gone
     let raw = get_json(&app, "/api/routes/1/directions/1/raw").await;
     assert_eq!(raw["effective"]["source"], "override");
-    assert_eq!(raw["effective"]["points"][0], serde_json::json!([38.5, -120.2]));
+    assert_eq!(
+        raw["effective"]["points"][0],
+        serde_json::json!([38.5, -120.2])
+    );
     assert_eq!(raw["effective"]["updated_at"], v["updated_at"]);
     assert!(raw.get("manual_pieces").is_none());
 }
@@ -773,7 +867,10 @@ async fn raw_effective_defaults_to_src() {
     let raw = get_json(&app, "/api/routes/1/directions/1/raw").await;
     assert_eq!(raw["effective"]["source"], "src");
     assert_eq!(raw["effective"]["updated_at"], serde_json::Value::Null);
-    assert_eq!(raw["effective"]["points"][0], serde_json::json!([38.5, -120.2]));
+    assert_eq!(
+        raw["effective"]["points"][0],
+        serde_json::json!([38.5, -120.2])
+    );
 }
 
 #[tokio::test]
@@ -783,7 +880,9 @@ async fn line_post_requires_auth_and_valid_payload() {
     let app = rm_web::router_with(state);
     let res = line_post_req(&app, line_body(), None).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-    let res = line_post_req(&app, line_body(), Some("nope")).await.unwrap();
+    let res = line_post_req(&app, line_body(), Some("nope"))
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     // single point → 400
     let mut bad = line_body();
@@ -813,14 +912,20 @@ async fn line_post_stale_expectation_409() {
     let dir = tempfile::tempdir().unwrap();
     let state = edit_state(&dir);
     let app = rm_web::router_with(state);
-    let res = line_post_req(&app, line_body(), Some("sekrit")).await.unwrap();
+    let res = line_post_req(&app, line_body(), Some("sekrit"))
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let first = body_json(res).await;
     // identical resave (same points + fresh token) → 400 NoOpEdit
     let mut body = line_body();
     body["expected_updated_at"] = first["updated_at"].clone();
     let res = line_post_req(&app, body, Some("sekrit")).await.unwrap();
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "identical resave is a 400 no-op");
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "identical resave is a 400 no-op"
+    );
     // stale token → 409, not 400
     let mut body = line_body();
     body["expected_updated_at"] = serde_json::json!("2020-01-01T00:00:00Z");
@@ -833,7 +938,9 @@ async fn line_undo_via_log_deletes_override() {
     let dir = tempfile::tempdir().unwrap();
     let state = edit_state(&dir);
     let app = rm_web::router_with(state.clone());
-    let res = line_post_req(&app, line_body(), Some("sekrit")).await.unwrap();
+    let res = line_post_req(&app, line_body(), Some("sekrit"))
+        .await
+        .unwrap();
     let first = body_json(res).await;
     let edit_id = first["edit_id"].as_i64().unwrap();
     // undo through the generic endpoint (entity = polyline via the log)
@@ -878,4 +985,3 @@ async fn line_undo_via_log_deletes_override() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CONFLICT);
 }
-

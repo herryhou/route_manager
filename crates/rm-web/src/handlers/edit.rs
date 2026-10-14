@@ -77,19 +77,17 @@ pub struct StopEditBody {
 fn edit_conflict(err: ApiError) -> ApiError {
     if let Some(e) = err.downcast_ref::<rm_edit::EditError>() {
         return match e {
-            rm_edit::EditError::EmptyEdit | rm_edit::EditError::NoOpEdit
-            | rm_edit::EditError::EmptyNewName | rm_edit::EditError::NoOpRename
+            rm_edit::EditError::EmptyEdit
+            | rm_edit::EditError::NoOpEdit
+            | rm_edit::EditError::EmptyNewName
+            | rm_edit::EditError::NoOpRename
             | rm_edit::EditError::InvalidLine(_)
-            | rm_edit::EditError::UnknownRoute(_) => {
-                ApiError::bad_request(&e.to_string())
-            }
+            | rm_edit::EditError::UnknownRoute(_) => ApiError::bad_request(&e.to_string()),
             rm_edit::EditError::NotCurrent(_)
             | rm_edit::EditError::StationNotCurrent(_)
             | rm_edit::EditError::NotUndoable(_)
             | rm_edit::EditError::UnknownStation(_)
-            | rm_edit::EditError::LineNotCurrent(_, _) => {
-                ApiError::conflict(&e.to_string())
-            }
+            | rm_edit::EditError::LineNotCurrent(_, _) => ApiError::conflict(&e.to_string()),
         };
     }
     err
@@ -126,7 +124,11 @@ pub async fn edit_stop(
         rm_edit::edit_stop(
             conn,
             stop_version_id,
-            rm_edit::StopEdit { lat, lon, stop_name },
+            rm_edit::StopEdit {
+                lat,
+                lon,
+                stop_name,
+            },
             &editor,
             &note,
         )
@@ -208,10 +210,7 @@ pub async fn undo(
     Editor(editor): Editor,
     ApiJson(b): ApiJson<UndoBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let entity = run_db(state.clone(), move |conn| {
-        rm_db::edit_entity(conn, edit_id)
-    })
-    .await?;
+    let entity = run_db(state.clone(), move |conn| rm_db::edit_entity(conn, edit_id)).await?;
     let is_polyline = entity.as_deref() == Some("polyline");
     let is_station = entity.as_deref() == Some("station");
     let out = run_db_write(state, move |conn| {

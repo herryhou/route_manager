@@ -443,17 +443,14 @@ pub fn station_nearest(conn: &Connection, lat: f64, lon: f64, max_m: f64) -> Res
     )?;
     let mut best: Option<Value> = None;
     let mut best_d = f64::INFINITY;
-    let rows = stmt.query_map(
-        rusqlite::params![lat, lon, lat_delta, lon_delta],
-        |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, f64>(2)?,
-                r.get::<_, f64>(3)?,
-            ))
-        },
-    )?;
+    let rows = stmt.query_map(rusqlite::params![lat, lon, lat_delta, lon_delta], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, f64>(2)?,
+            r.get::<_, f64>(3)?,
+        ))
+    })?;
     for row in rows {
         let (station_id, station_name, slat, slon) = row?;
         let d = haversine_m(lat, lon, slat, slon);

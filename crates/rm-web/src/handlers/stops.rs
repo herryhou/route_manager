@@ -30,7 +30,10 @@ pub async fn station_search(
         return Err(crate::error::ApiError::bad_request("q required"));
     };
     let q = q.to_owned();
-    let v = run_db(state, move |conn| crate::queries::stops::station_search(conn, &q)).await?;
+    let v = run_db(state, move |conn| {
+        crate::queries::stops::station_search(conn, &q)
+    })
+    .await?;
     Ok(Json(v).into_response())
 }
 

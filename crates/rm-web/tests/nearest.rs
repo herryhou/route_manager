@@ -60,9 +60,10 @@ async fn get(app: &axum::Router, uri: &str) -> (StatusCode, serde_json::Value) {
         .await
         .unwrap();
     let status = res.status();
-    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
-    let v: serde_json::Value =
-        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, v)
 }
 
@@ -70,7 +71,11 @@ async fn get(app: &axum::Router, uri: &str) -> (StatusCode, serde_json::Value) {
 async fn nearest_returns_closest_station_with_distance() {
     let (_dir, app) = nearest_state();
     // midway point: A ≈ 50.9 m west, B ≈ 152 m east
-    let (s, v) = get(&app, "/api/stations/nearest?lat=24.0&lon=120.0005&max_m=100").await;
+    let (s, v) = get(
+        &app,
+        "/api/stations/nearest?lat=24.0&lon=120.0005&max_m=100",
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["station_id"], 1);
     assert_eq!(v["station_name"], "A");
@@ -86,7 +91,10 @@ async fn nearest_misses_when_nothing_within_max_m() {
     let (s, v) = get(&app, "/api/stations/nearest?lat=24.0&lon=120.0005&max_m=40").await;
     assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
     assert!(
-        v["error"].as_str().unwrap().contains("no station within 40 m"),
+        v["error"]
+            .as_str()
+            .unwrap()
+            .contains("no station within 40 m"),
         "{v}"
     );
 }
@@ -134,14 +142,14 @@ async fn nearest_bbox_covers_radius_band_due_north() {
 async fn nearest_validates_params() {
     let (_dir, app) = nearest_state();
     for q in [
-        "lon=120.0&max_m=100",            // missing lat
-        "lat=24.0&max_m=100",             // missing lon
-        "lat=91&lon=120.0&max_m=100",     // lat out of range
-        "lat=24.0&lon=181&max_m=100",     // lon out of range
-        "lat=24.0&lon=120.0",             // missing max_m
-        "lat=24.0&lon=120.0&max_m=501",   // over cap
-        "lat=24.0&lon=120.0&max_m=-1",    // negative
-        "lat=x&lon=120.0&max_m=100",      // unparseable
+        "lon=120.0&max_m=100",          // missing lat
+        "lat=24.0&max_m=100",           // missing lon
+        "lat=91&lon=120.0&max_m=100",   // lat out of range
+        "lat=24.0&lon=181&max_m=100",   // lon out of range
+        "lat=24.0&lon=120.0",           // missing max_m
+        "lat=24.0&lon=120.0&max_m=501", // over cap
+        "lat=24.0&lon=120.0&max_m=-1",  // negative
+        "lat=x&lon=120.0&max_m=100",    // unparseable
     ] {
         let (s, v) = get(&app, &format!("/api/stations/nearest?{q}")).await;
         assert_eq!(s, StatusCode::BAD_REQUEST, "query {q}: {v}");

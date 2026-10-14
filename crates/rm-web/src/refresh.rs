@@ -35,7 +35,9 @@ pub async fn run_chain(state: AppState) {
         if let Some(o) = rm_osm_match::run_stale(&conn, batch)? {
             tracing::info!(
                 "refresh: match: {} directions, {} cleared, {} kept",
-                o.summary.directions, o.cleared, o.kept
+                o.summary.directions,
+                o.cleared,
+                o.kept
             );
         }
 
@@ -43,7 +45,9 @@ pub async fn run_chain(state: AppState) {
         if let Some(o) = rm_segments::run_stale(&conn, batch, OUTLIER_M)? {
             tracing::info!(
                 "refresh: segments: {} directions, {} cleared, {} kept",
-                o.summary.directions, o.cleared, o.kept
+                o.summary.directions,
+                o.cleared,
+                o.kept
             );
         }
 
@@ -58,7 +62,10 @@ pub async fn run_chain(state: AppState) {
 
     let finished_at = rm_db::now_rfc3339();
     match joined {
-        Ok(Ok(())) => state.set_refresh_state(RefreshState::Done { started_at, finished_at }),
+        Ok(Ok(())) => state.set_refresh_state(RefreshState::Done {
+            started_at,
+            finished_at,
+        }),
         Ok(Err(e)) => state.set_refresh_state(RefreshState::Failed {
             error: e.to_string(),
             started_at,

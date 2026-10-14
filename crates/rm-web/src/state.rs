@@ -35,9 +35,19 @@ impl RefreshStep {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RefreshState {
     Idle,
-    Running { step: RefreshStep, started_at: String },
-    Done { started_at: String, finished_at: String },
-    Failed { error: String, started_at: String, finished_at: String },
+    Running {
+        step: RefreshStep,
+        started_at: String,
+    },
+    Done {
+        started_at: String,
+        finished_at: String,
+    },
+    Failed {
+        error: String,
+        started_at: String,
+        finished_at: String,
+    },
 }
 
 #[derive(Clone)]
@@ -124,11 +134,12 @@ impl AppState {
     pub fn try_begin_refresh(&self, started_at: String) -> Result<(), ApiError> {
         let mut g = self.refresh.lock().expect("refresh lock poisoned");
         match *g {
-            RefreshState::Running { .. } => {
-                Err(ApiError::conflict("refresh already running"))
-            }
+            RefreshState::Running { .. } => Err(ApiError::conflict("refresh already running")),
             _ => {
-                *g = RefreshState::Running { step: RefreshStep::Match, started_at };
+                *g = RefreshState::Running {
+                    step: RefreshStep::Match,
+                    started_at,
+                };
                 Ok(())
             }
         }
