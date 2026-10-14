@@ -22,6 +22,7 @@ export const I = {
   piece: svg('<circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="12" r="2.5"/><path d="M7.5 12h9"/>'),
   station: svg('<circle cx="12" cy="12" r="7"/>'),
   stop: svg('<rect x="8" y="3" width="8" height="11" rx="2"/><path d="M12 14v7"/>'),
+  search: svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4.35-4.35"/>'),
   // Brand mark: the stop plate itself — enamel plate, two stops on the line.
   brand:
     '<div></div>',

@@ -252,9 +252,24 @@ body {
   background: rgba(255, 255, 255, 0.24);
 }
 
-#route-search {
+.search {
+  position: relative;
   margin: 10px;
-  padding: 7px 11px;
+}
+
+.search .ic {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+
+#route-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 11px 7px 32px;
   border: 1.5px solid var(--hair);
   border-radius: 8px;
   background: var(--plate-bright);
