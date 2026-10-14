@@ -252,6 +252,8 @@ Zero inline SVG in `index.html`; static chrome marks slots with `data-icon="name
 - **Do** keep browser surfaces in-world: enamel selection/caret/accent, 2px enamel focus-visible outlines, thin hairline scrollbars.
 - **Do** register any new JS file in both `handlers/assets.rs` and `handlers/mod.rs`; assets stay zero-build `include_str!` ES modules with no-cache headers.
 - **Do** honour `prefers-reduced-motion`: strip state transitions; the busy spinner stays but slows to 1.5s (it is functional feedback).
+- **Do** keep data-changing actions explicit and user-triggered (the Apply-updates button model) — never implicit auto-refresh of edited data.
+- **Do** propagate a proven interaction pattern to its sibling elements (highlight, arm/confirm) — map interactions stay consistent across stop/station/segment.
 
 ### Don't:
 - **Don't** use alert orange (`#D9531E`) decoratively — it is alarms and live edit sessions only (The One Shout Rule).
@@ -262,3 +264,4 @@ Zero inline SVG in `index.html`; static chrome marks slots with `data-icon="name
 - **Don't** introduce a build step, framework, or un-embedded asset — the single-binary `include_str!` architecture is a product constraint, not a preference.
 - **Don't** do geo math client-side; the server owns projection/snap/polyline logic (lineEdit.js collects `[lat,lon]` only).
 - **Don't** put metres on clean (green) chain stops — silence is the clean signal.
+- **Don't** make non-actionable information look actionable (or the reverse) — affordance must be truthful.
