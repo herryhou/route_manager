@@ -1,19 +1,47 @@
 # route_manger — Taiwan bus pipeline
 
-All-Rust pipeline turning raw city ebus captures (Taichung 392, Taipei 406,
-Tainan 113 routes) into one versioned SQLite database per city with
-OSM-aligned route geometry and station bearings, implementing
-`docs/Architecture_design_spec.md` and `docs/DB_Schema_Spec.md`.
+route_manger is an all-Rust pipeline. It turns raw city ebus captures
+(Taichung 392, Taipei 406, Tainan 113 routes) into one versioned SQLite
+database per city. Each database contains OSM-aligned route geometry and
+station bearings. The pipeline implements `docs/Architecture_design_spec.md`
+and `docs/DB_Schema_Spec.md`.
 
-## 這個專案在做什麼
-公車路線資料處理管線。資料流：
- - 1. capture（爬蟲抓 JSON）→ ingest 進 SQLite（src_* 表 = 原始事實，不可改）
- - 2. identity → 發 route/stop/station 穩定 ID
- - 3. osm-match → 把原始路徑 polyline 對到 OSM 路網（Viterbi 演算法，全台北 812 方向跑一次 11 分鐘），產出 seg_match_way（每段路用哪些 OSM way）
- - 4. segments → 算每個站牌在路徑上的里程（chainage）
- - 5. registry → 算站牌方位角（bearing）
- - 6. publish → 發布版本
- - 7. rm-web → 網頁 QA 工具，看圖、改資料
+## The two problems
+
+A bus route changes in two dimensions. The pipeline is built around them.
+
+**Time.** What did route 1 look like last month? How does the current
+version differ? The pipeline keeps the raw captures immutable (the `src_*`
+tables), tags each import with a batch, and publishes versions. Stable IDs
+from `rm-identity` survive renames and moves across captures. Today this
+gives traceability on write. Time-travel queries across versions (re-import
+diffing, V2+ transitions) are future work — see Known limits.
+
+**Space.** A route is more than a graph of stops and lines. The system
+records the topological correspondence between each route and the base map:
+`seg_match_way` says which OSM ways each path segment *is*,
+`path_stop_projection` places each stop on the network by chainage, and the
+bearings give the direction of travel. The alignment is topological, not
+just geometric — the pipeline knows the road, not only a similar shape.
+
+## The pipeline
+
+The data flow has seven steps. It solves the two problems in order:
+
+1. **Capture** — a crawler records the raw JSON captures.
+2. **Ingest** — `rm-ingest` imports the JSON into SQLite. The `src_*` tables
+   hold the raw facts. Do not change these tables.
+3. **Identity** — `rm-identity` gives stable IDs to routes, stops, and
+   stations.
+4. **OSM match** — `rm-osm-match` aligns the raw path polylines to the OSM
+   road network with the Viterbi algorithm (all 812 Taipei directions run in
+   about 11 minutes). It writes `seg_match_way`: the OSM ways that each path
+   segment uses.
+5. **Segments** — `rm-segments` calculates the chainage of each stop on the
+   path.
+6. **Registry** — `rm-registry` calculates the stop and station bearings.
+7. **Publish** — `rm-publish` publishes the version. The `rm-web` tool then
+   shows the map and edits the data.
 
 ## Layout
 
@@ -28,7 +56,9 @@ crates/
 ├── rm-osm-prepare  PBF -> road graph tables
 ├── rm-osm-match    Viterbi way-run matcher (Newson-Krumm + A* gap repair)
 ├── rm-registry     stop/station bearings + dual-carriageway station split
-└── rm-verify       invariant checks, count cross-checks, QA exports
+├── rm-edit         manual-edit domain services (no SQL; rm-db persists)
+├── rm-verify       invariant checks, count cross-checks, QA exports
+└── rm-web          map-centric web UI (read-only; add --edit for edits)
 ```
 
 ## Run
@@ -65,27 +95,38 @@ cargo run -r -p rm-registry -- --stale  # rebuild bearings + split for marked-st
 cargo run -r -p rm-verify -- --preset taichung   # | taipei | tainan
 ```
 
-All bins accept `--db` (default `data/taichung.db`) and `--batch`
-(default: latest batch, any status; `rm-identity`: latest OPEN).
-`rm-verify` writes `qa/report.json`,
-`qa/outlier_stops.csv`, `qa/bearing_report.json`,
-`qa/match_dev_report.json`, `qa/pair_spread_report.json`, and
-`qa/grouping_report.json`.
+All bins accept these flags:
+
+- `--db` — the database path. Default: `data/taichung.db`.
+- `--batch` — the batch to process. Default: the latest batch of any status.
+  `rm-identity` uses the latest OPEN batch.
+
+`rm-verify` writes these QA files:
+
+- `qa/report.json`
+- `qa/outlier_stops.csv`
+- `qa/bearing_report.json`
+- `qa/match_dev_report.json`
+- `qa/pair_spread_report.json`
+- `qa/grouping_report.json`
 
 ## Bearings
 
 `stop_bearing` is the departure heading (degrees from north) of the bus at
-each stop: taken from the matched OSM way run when one covers the stop,
-else the route polyline tangent; the final stop of a direction reports its
-arrival heading. `station_bearing` is the mean travel **axis** of a
-station's member stops (headings 180° apart fold onto one axis — one pole
-legitimately serves both directions of a road) plus `max_spread_deg`, the
-largest deviation from that axis. A station whose members sit more than
-45° off its axis is flagged — warn-only (`report.json` warnings +
-`qa/bearing_report.json`), never failing the run.
+each stop. The pipeline takes it from the matched OSM way run when one way
+covers the stop. Otherwise it uses the route polyline tangent. The final
+stop of a direction reports its arrival heading.
 
-To browse the result in a map-centric web UI (read-only unless `--edit` —
-see `docs/web-edit-mode.md`; without it, safe alongside the pipeline):
+`station_bearing` is the mean travel **axis** of a station's member stops.
+Headings 180° apart fold onto one axis — one pole legitimately serves both
+directions of a road. `max_spread_deg` is the largest deviation from that
+axis. The pipeline flags a station when its members sit more than 45° off
+its axis. This flag is warn-only (`report.json` warnings +
+`qa/bearing_report.json`). It never fails the run.
+
+To browse the result, use the web UI. It is read-only unless you pass
+`--edit` (see `docs/web-edit-mode.md`). Without `--edit`, it is safe to run
+it next to the pipeline:
 
 ```sh
 cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
@@ -97,27 +138,29 @@ See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
 
 ## Data model notes
 
-- Station identity = API `node.id` (`station.ext_uid = tcg:node:{id}`);
-  stop identity = `(route, direction, sid)` (`tcg:{xno}:{dir}:{sid}`).
-- Stop-pair way lists: for any pair of consecutive stops, the ordered OSM
-  way list is the `seg_match_way` runs intersecting the
-  `path_stop_projection` chainage window `[chainage(from), chainage(to)]` —
-  derived per route, no registry needed. (The cross-route
+- Station identity is the API `node.id` (`station.ext_uid = tcg:node:{id}`).
+  Stop identity is `(route, direction, sid)` (`tcg:{xno}:{dir}:{sid}`).
+- Stop-pair way lists: for two consecutive stops, the ordered OSM way list
+  is the `seg_match_way` runs that intersect the `path_stop_projection`
+  chainage window `[chainage(from), chainage(to)]`. The pipeline derives
+  this list per route. It does not need the registry. (The cross-route
   `seg_segment`/`seg_segment_way`/`seg_traversal` registry was removed on
   2026-10-09, migration 0011 — see `docs/segment-handoff.md`.)
 
 ## Known limits (V1)
 
-- 17 of 784 directions have no drawn polyline in the source data at all, so
-  they match no way runs (surfaced as skipped pairs in `qa/report.json`
-  stats); every direction with a polyline matches on the
-  full-Taiwan extract (clipped to the routes' bbox + 10 km). 1 of the 767
-  matched directions (352延) still strays > 50 m p95 from its polyline —
-  warn-only, in `qa/match_dev_report.json` and the rm-web matchdev chip.
-- Timetables/TRIP, GTFS export, re-import diffing (V2+ transitions) and the
-  API server are out of scope; their tables exist but stay empty.
+- 17 of 784 directions have no drawn polyline in the source data. They
+  match no way runs (they appear as skipped pairs in `qa/report.json`
+  stats). Every direction with a polyline matches on the full-Taiwan
+  extract (clipped to the routes' bbox + 10 km). 1 of the 767 matched
+  directions (352延) still strays > 50 m p95 from its polyline. This is
+  warn-only; see `qa/match_dev_report.json` and the rm-web matchdev chip.
+- Timetables/TRIP, GTFS export, re-import diffing (V2+ transitions), and
+  the API server are out of scope. Their tables exist but stay empty.
 
 ## Tests
+
+Run all workspace tests:
 
 ```sh
 cargo test --workspace
