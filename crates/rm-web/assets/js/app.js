@@ -1,6 +1,6 @@
 // Bootstrap + selection flow: route → direction → stops → stop drill-down.
 import * as api from './api.js';
-import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, editLogPanel, pathPiecePanel, routeChips, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
+import { renderRouteList, renderStationList, filterRoutes, routeStopsPanel, highlightChainStop, stopPanel, stationPanel, stopPopupEl, stationPopupEl, outlierPanel, matchDevPanel, editLogPanel, pathPiecePanel, routeChips, setPaneChangeHook, pushPaneHistory, popPaneHistory, popPaneForward, closePane, setEditable, esc } from './panels.js';
 import { initLayers, layers, clearHighlight, drawRoute, highlightGroup, flashStop, drawRaw, clearRaw, drawStopsLayer, clearStopsLayer, setBearingsOn, setEffectiveOn, drawPieceHighlight, clearPieceHighlight } from './layers.js';
 import { startLineEdit, stopLineEdit, lineEditActive } from './lineEdit.js';
 import { I } from './icons.js';
@@ -301,6 +301,7 @@ async function openStopPopup(stopVersionId, marker) {
     const el = stopPopupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
+    highlightChainStop(stopVersionId); // lift + scroll the panel row when this stop is on the shown route
     stopPanel(d, { onPickRoute, onPickStation: selectStation, onEditStop });
   } catch (e) {
     status(`站牌載入失敗: ${e.message}`);

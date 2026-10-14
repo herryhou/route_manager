@@ -246,14 +246,23 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
   );
   pane.querySelectorAll('.view-stops .chain-stop').forEach((row) =>
     row.addEventListener('click', () => {
-      // Selection isolation: the clicked plate lifts (.sel), siblings recede
-      // (.has-sel on the chain) — 120ms, the world's one authored motion.
-      pane.querySelectorAll('.chain-stop.sel').forEach((x) => x.classList.remove('sel'));
-      pane.querySelector('.chain')?.classList.add('has-sel');
-      row.classList.add('sel');
+      highlightChainStop(Number(row.dataset.svid));
       onStopClick(Number(row.dataset.svid));
     })
   );
+}
+
+/// Lift the route-stop row (data-svid) in the context chain and scroll it
+/// into view — the selection-isolation ritual (row click and map-marker
+/// popup share it). No-op when no chain-stop carries that id (pane showing
+/// other content, or stop not on the displayed route).
+export function highlightChainStop(svid) {
+  const row = paneEl('context').querySelector(`.chain-stop[data-svid="${svid}"]`);
+  if (!row) return;
+  row.parentElement.querySelectorAll('.chain-stop.sel').forEach((x) => x.classList.remove('sel'));
+  row.closest('.chain')?.classList.add('has-sel');
+  row.classList.add('sel');
+  row.scrollIntoView({ block: 'nearest' });
 }
 
 /// SVG snap-distance profile: x = chainage, y = snap distance (capped at CAP_M;
