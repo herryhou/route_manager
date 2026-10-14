@@ -1,6 +1,6 @@
 # PRODUCT.md — rm-web
 
-Date: 2026-10-13 · 現況盤點（「The Stop Plate」視覺重設計後更新）。資料來源：`crates/rm-web/README.md`、`DESIGN.md`（視覺規格）、`docs/web-edit-mode.md`、`docs/refresh-button.md`、`assets/` 原始碼。
+Date: 2026-10-14 · 現況盤點（「The Stop Plate」視覺重設計後更新）。資料來源：`README.md`、`DESIGN.md`（視覺規格）、`../../docs/web-edit-mode.md`、`../../docs/refresh-button.md`、`assets/` 原始碼（路徑皆相對本檔所在 `crates/rm-web/`）。
 
 ---
 
@@ -59,7 +59,7 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 | 改名 | stop / station 面板 pencil → `prompt()` 輸入新名 |
 | Regroup | 把 stop 改歸另一個 station：arm one-shot place mode（十字游標）→ 點地圖目標 station → 距離 confirm |
 | 搬 station | 同 place mode 改 station 座標 |
-| 線編輯 | `lineEdit.js`：effective line 全線可編 — 拖頂點、dblclick 刪點、 midpoint 插入；存檔整條取代該方向 polyline；帶 `expected_updated_at` 樂觀鎖 |
+| 線編輯 | `lineEdit.js`：effective line 全線可編 — 拖頂點、dblclick 刪點、按 midpoint 插入（續按住即拖曳新頂點）；存檔整條取代該方向 polyline；帶 `expected_updated_at` 樂觀鎖 |
 | 歷史 + undo | 每實體 edit_log 面板，可 revert（undo of undo = 再編輯） |
 | Stale badge | 編輯使衍生資料過期 → 受影響面板 amber badge（`stale_mark` 表驅動） |
 | Apply updates | 頂欄「更新」band 按鈕（icon）：單一 flight 的 in-server refresh 鏈（match → segments → registry 的 `--stale`），顯示目前步驟與剩餘 mark 數 |
@@ -67,7 +67,7 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 
 ## 目前畫面元素
 
-2026-10 起套用「The Stop Plate」視覺系統（完整規格見 **`DESIGN.md`**：色票 token、字體、元件、命名規則）。enamel 藍帶 topbar、plate 白面板浮在 mineral 灰底上、墨色髮絲線做結構；QA 強度以「尺寸＋hatch＋色相」三重編碼；圖示一律出自 `js/icons.js`（`data-icon` slot 或 `I` import），不用 unicode 字元當圖示。
+2026-10 起套用「The Stop Plate」視覺系統（完整規格見同目錄 **`DESIGN.md`**：色票 token、字體、元件、命名規則）。enamel 藍帶 topbar、plate 白面板浮在 mineral 灰底上、墨色髮絲線做結構；QA 強度以「尺寸＋hatch＋色相」三重編碼；圖示一律出自 `js/icons.js`（`data-icon` slot 或 `I` import），不用 unicode 字元當圖示。
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -81,10 +81,9 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 │ 圖層      │   編輯 handle(編輯模式)            │ ┌point pane───┐│
 │ ☐站牌/站點│                                   │ │ ‹ › ✕ 標題  ││
 │ ☑方位    │                                   │ └─內容────────┘│
-│ 路徑來源▾ │                                   │               │
-│ ☐原始比對 │   [存線][✕] ← 線編輯浮動鈕(右下)    │               │
-│ ☑有效線  │                                   │               │
-│ 圖例     │                                   │               │
+│ 路徑來源▾ │   圖例 ← 地圖左下浮動              │               │
+│ ☐原始比對 │                                   │               │
+│ ☑有效線  │   [存線][✕] ← 線編輯浮動鈕(右下)    │               │
 ├──────────┴───────────────────────────────────┴───────────────┤
 │ statusbar  spinner·訊息          | 底圖圖資需網路提示           │
 └──────────────────────────────────────────────────────────────┘
@@ -93,7 +92,7 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 元素清單：
 
 - **topbar**（enamel 藍帶）：側欄收合鈕（icon）、brand glyph + `rm-web` 字標、4 顆統計 chip（路線/站牌/站點/比對）、2 顆可點 QA chip（離群/路徑偏離；非零反白＋橘環警示）、「編輯」toggle（`aria-pressed`）、「更新」按鈕（編輯模式）。
-- **sidebar**：搜尋框（路線與站名二合一，站名結果暫時取代路線列表）、路線列表（數字開頭優先；每方向一顆 QA 色點）、圖層區（站牌/站點、方位、路徑來源下拉（業者線/OSM 街道線）、原始比對、有效線＋靜態圖例 — app.js 由 world constants 填，新線型編碼須加圖例列）。
+- **sidebar**：搜尋框（路線與站名二合一，站名結果暫時取代路線列表）、路線列表（數字開頭優先；每方向一顆 QA 色點）、圖層區（站牌/站點、方位、路徑來源下拉（業者線/OSM 街道線）、原始比對、有效線）。圖例不在側欄 — 是浮在地圖左下的 plate（86dda09 起搬上地圖），app.js 由 world constants 填，新線型編碼須加圖例列。
 - **地圖**：Leaflet，全部圖層的畫布；basemap 調暗（tile opacity 0.75）讓資料圖層讀前。popup 兩種（stop：bearing dial + 經過路線 chips；station）。編輯模式的 handle（頂點橘點、midpoint 白點、十字游標 place）。
 - **detail**：兩塊 dpane plate 直疊（context 2/3 + point 1/3），各帶 rim 標題列（1.5px 墨線）＋ icon 化 ‹ › ✕ 導覽（disabled 以淡化而非隱藏）＋獨立捲動 body。
 - **statusbar**：busy spinner、狀態訊息、底圖網路提示。
@@ -112,7 +111,7 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 
 ### 資源限制
 
-6. **無 JS framework、無 build step、無 JS 測試**：vanilla ES modules，重設計時已拆 7 個模組、約 2,100 行 JS（app.js 928、panels.js 626、layers.js 249、lineEdit.js 135、api.js 59、colors.js 57、icons.js 23）＋ style.css 1,176 行。JS 驗證仍靠手動 + 瀏覽器檢查；要自帶測試策略。
+6. **無 JS framework、無 build step、無 JS 測試**：vanilla ES modules，重設計時已拆 7 個模組、約 2,100 行 JS（app.js 941、panels.js 626、layers.js 238、lineEdit.js 164、api.js 59、colors.js 57、icons.js 23）＋ style.css 1,194 行。JS 驗證仍靠手動 + 瀏覽器檢查；要自帶測試策略。
 7. **單人維護**：複雜度預算極低。伺服器目前開一個 port、無部署管線；`--db` 換檔即換城。
 8. **離線優先（basemap、webfonts 除外）**：basemap tiles 與 Google Fonts（Archivo / Noto Sans TC；離線退回 PingFang TC / system sans）需網路，其餘全部本地。statusbar 有固定提示文案。
 
@@ -125,8 +124,8 @@ Pipeline 的產出是資料庫列（rows），但使用者真正要問的問題�
 
 ### 已知痛點（下一輪改善的標的；2026-10 重設計後複核）
 
-- marker z-order 靠 `zIndexOffset` 魔術數字（1000/1001）撐住編輯 handle 不被重繪蓋掉 — `lineEdit.js:50,72`。
-- `app.js` 仍 928 行，選取、圖層、編輯 session、pane 歷史等狀態分散在模組頂層變數（視覺層已拆出 colors/icons/layers/panels，狀態層未動）。
+- marker z-order 靠 `zIndexOffset` 魔術數字（1000/1001）撐住編輯 handle 不被重繪蓋掉 — `lineEdit.js:52,75`。
+- `app.js` 仍 941 行，選取、圖層、編輯 session、pane 歷史等狀態分散在模組頂層變數（視覺層已拆出 colors/icons/layers/panels，狀態層未動）。
 - `prompt()`/`confirm()` 原生對話框與 Stop Plate 風格斷裂（改名、備註、confirm 全走原生，約 18 個呼叫點）。
 - 無任何 JS 測試；回歸靠手動瀏覽器檢查。
 - 編輯 arm/place 模式（十字游標 one-shot）可發現性低 — 新使用者難以知道目前處於「待點擊」狀態。

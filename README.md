@@ -91,6 +91,8 @@ see `docs/web-edit-mode.md`; without it, safe alongside the pipeline):
 cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
 ```
 
+![rm-web browsing a Taipei route — path, bearings, stop popup with 經過路線 chips, on-map legend](assets/screenshot.jpg)
+
 See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
 
 ## Data model notes
