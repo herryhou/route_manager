@@ -20,6 +20,21 @@ type MatchAgg = (
     Option<i64>,
 );
 
+/// Dataset bbox of current stops as [west, south, east, north] — the boot
+/// seed for the map's initial fitBounds. `None` when the db has no stops.
+pub fn bounds(conn: &Connection) -> Result<Option<[f64; 4]>> {
+    let (w, s, e, n): (Option<f64>, Option<f64>, Option<f64>, Option<f64>) = conn.query_row(
+        "SELECT MIN(longitude), MIN(latitude), MAX(longitude), MAX(latitude)
+         FROM stop_version WHERE valid_to IS NULL",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
+    Ok(match (w, s, e, n) {
+        (Some(w), Some(s), Some(e), Some(n)) => Some([w, s, e, n]),
+        _ => None,
+    })
+}
+
 /// Overview: counts, match summary, outlier count, latest batch.
 pub fn stats(conn: &Connection) -> Result<Value> {
     let (routes, stops, stations, groups, osm_ways, drafts) = conn.query_row(

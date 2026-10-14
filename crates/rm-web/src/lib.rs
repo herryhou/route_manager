@@ -24,11 +24,19 @@ pub async fn serve(
     tiles: Option<String>,
     edit_tokens: Option<HashMap<String, String>>,
 ) -> Result<()> {
-    let state = match edit_tokens {
+    let mut state = match edit_tokens {
         Some(tokens) => AppState::with_edit(db_path, tiles, tokens),
         None => AppState::with_tiles(db_path, tiles),
     };
     state.conn()?; // probe: friendly error before binding if DB missing/stale
+    // Seed the initial map view from the dataset bbox — one cheap aggregate
+    // at boot; the client falls back to its hardcoded box when absent.
+    {
+        let conn = state.conn()?;
+        if let Some(b) = crate::queries::qa::bounds(&conn)? {
+            state.set_bounds(b);
+        }
+    }
 
     let router = router_with(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;

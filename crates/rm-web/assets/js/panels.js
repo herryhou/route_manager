@@ -174,7 +174,7 @@ export function popPaneForward(kind, currentReopen) {
 
 export function kv(pairs) {
   const rows = pairs
-    .map(([k, v]) => `<tr><td>${k}</td><td>${v ?? '—'}</td></tr>`)
+    .map(([k, v]) => `<tr><td>${k}</td><td>${v == null || v === '' ? '—' : v}</td></tr>`)
     .join('');
   return `<table class="kv">${rows}</table>`;
 }
@@ -258,7 +258,7 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
 /// off-scale dots clamp to the top edge and carry the true value in <title>).
 const PROFILE_CAP_M = 150;
 export function profileSvg(stops) {
-  if (!stops.length) return '<p class="muted">no stops</p>';
+  if (!stops.length) return '<p class="muted">無站牌</p>';
   const W = 340;
   const H = 120;
   const PAD = { l: 34, r: 6, t: 8, b: 16 };

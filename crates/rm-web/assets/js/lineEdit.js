@@ -147,7 +147,7 @@ export function startLineEdit(routeId, dir, xno, raw, onSaved) {
 
 async function save(s) {
   if (s.pts.length < 2) return;
-  const note = prompt('line note:');
+  const note = prompt('線段備註:');
   if (note == null) return; // cancelled
   try {
     const out = await editPolylineLine(s.xno, s.dir, {

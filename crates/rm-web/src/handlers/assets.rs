@@ -23,7 +23,13 @@ pub async fn serve(State(state): State<AppState>, uri: Uri) -> Response {
     match uri.path() {
         "/" => {
             let tiles = state.tiles().unwrap_or(DEFAULT_TILES);
-            let body = include_str!("../../assets/index.html").replace("__TILES__", tiles);
+            let bounds = match state.bounds() {
+                Some(b) => format!("[{}]", b.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+                None => "null".to_string(),
+            };
+            let body = include_str!("../../assets/index.html")
+                .replace("__TILES__", tiles)
+                .replace("__BOUNDS__", &bounds);
             (
                 [(header::CACHE_CONTROL, "no-cache")],
                 [(header::CONTENT_TYPE, "text/html; charset=utf-8")],

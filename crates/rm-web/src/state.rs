@@ -44,6 +44,9 @@ pub enum RefreshState {
 pub struct AppState {
     db_path: Arc<PathBuf>,
     tiles: Option<Arc<String>>,
+    /// Current-stop bbox [w, s, e, n], computed once at boot — seeds the
+    /// client's initial map view (`None` for tests / empty dbs).
+    bounds: Option<Arc<[f64; 4]>>,
     edit_tokens: Option<Arc<HashMap<String, String>>>,
     write_lock: Arc<AsyncMutex<()>>,
     refresh: Arc<Mutex<RefreshState>>,
@@ -58,6 +61,7 @@ impl AppState {
         Self {
             db_path: Arc::new(db_path),
             tiles: tiles.map(Arc::new),
+            bounds: None,
             edit_tokens: None,
             write_lock: Arc::new(AsyncMutex::new(())),
             refresh: Arc::new(Mutex::new(RefreshState::Idle)),
@@ -78,6 +82,15 @@ impl AppState {
 
     pub fn tiles(&self) -> Option<&str> {
         self.tiles.as_ref().map(|s| s.as_str())
+    }
+
+    /// Boot-seeded dataset bbox ([w, s, e, n]); set once by `serve`.
+    pub fn bounds(&self) -> Option<[f64; 4]> {
+        self.bounds.as_ref().map(|b| **b)
+    }
+
+    pub fn set_bounds(&mut self, b: [f64; 4]) {
+        self.bounds = Some(Arc::new(b));
     }
 
     pub fn db_path(&self) -> &Path {

@@ -5,10 +5,19 @@ import { initLayers, layers, clearHighlight, drawRoute, highlightGroup, flashSto
 import { startLineEdit, stopLineEdit, lineEditActive } from './lineEdit.js';
 import { I } from './icons.js';
 
-export const map = L.map('map', { preferCanvas: true }).fitBounds([
-  [23.974, 120.498],
-  [24.447, 121.322],
-]);
+const seed = window.RM_BOUNDS; // [w, s, e, n] seeded by the server at boot
+export const map = L.map('map', { preferCanvas: true }).fitBounds(
+  seed
+    ? [
+        [seed[1], seed[0]],
+        [seed[3], seed[2]],
+      ]
+    : [
+        [23.974, 120.498],
+        [24.447, 121.322],
+      ],
+  { padding: [24, 24] },
+);
 
 L.tileLayer(window.RM_TILES, {
   maxZoom: 23,
@@ -172,11 +181,11 @@ async function fillPieceWays(el, routeId, dir, stops, p) {
       .sort((a, b) => a.cum_start_m - b.cum_start_m);
     el.innerHTML = covering.length
       ? `<table class="kv">${covering
-          .map(
-            (r) =>
-              `<tr><td>${esc(r.name ?? '—')} (#${r.osm_way_id})</td><td style="text-align:right">${fmt(r.overlap)}</td></tr>`
-          )
-          .join('')}</table>`
+        .map(
+          (r) =>
+            `<tr><td>${esc(r.name ?? '—')} (#${r.osm_way_id})</td><td style="text-align:right">${fmt(r.overlap)}</td></tr>`
+        )
+        .join('')}</table>`
       : '<p class="muted">無覆蓋的 OSM 街道</p>';
   } catch (e) {
     el.innerHTML = `<p class="muted">街道載入失敗: ${esc(e.message)}</p>`;
@@ -354,7 +363,7 @@ async function enableEditMode() {
   // yet, or marks created in a previous session).
   api.refreshStatus().then((v) => {
     setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 function disableEditMode() {
@@ -439,7 +448,7 @@ function onEditStop(act, stop, stationId) {
   if (act === 'log') {
     openEditLog(stop);
   } else if (act === 'rename') {
-    const name = prompt(`rename stop #${stop.stop_code}:`, stop.stop_name);
+    const name = prompt(`站牌 #${stop.stop_code} 改名:`, stop.stop_name);
     if (!name || name === stop.stop_name) return;
     const note = prompt('備註（必填）:', '') ?? '';
     if (!note) return;
@@ -538,7 +547,7 @@ function onEditStation(act, d) {
   if (act === 'log') {
     openStationEditLog(st);
   } else if (act === 'rename') {
-    const name = prompt(`rename station #${st.station_id}:`, st.station_name);
+    const name = prompt(`站點 #${st.station_id} 改名:`, st.station_name);
     if (!name || name === st.station_name) return;
     const stops = d.stops ?? [];
     const matches = stops.filter((s) => s.stop_name === st.station_name).length;
@@ -802,7 +811,6 @@ async function boot() {
     ['比對路徑（路線）', '#0857a2'],
     ['原始比對線', '#16150f', '2 7'],
     ['有效線（比對用）', '#d9531e'],
-    ['站點環', '#e8a013', 'ring'],
   ]
     .map(([label, c, enc]) => {
       const style =
@@ -810,9 +818,9 @@ async function boot() {
           ? `width:9px;height:9px;border:2px solid ${c};background:none;border-radius:50%`
           : enc
             ? (() => {
-                const [a, b] = enc.split(' ');
-                return `background:repeating-linear-gradient(90deg,${c} 0 ${a}px,transparent ${a}px ${+a + +b}px)`;
-              })()
+              const [a, b] = enc.split(' ');
+              return `background:repeating-linear-gradient(90deg,${c} 0 ${a}px,transparent ${a}px ${+a + +b}px)`;
+            })()
             : `background:${c}`;
       return `<div class="legend-row"><span class="legend-swatch" style="${style}"></span>${label}</div>`;
     })
@@ -838,7 +846,7 @@ async function boot() {
       // brick the button after new edits (spec deviation, flagged).
       api.refreshStatus().then((v) => {
         setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
-      }).catch(() => {});
+      }).catch(() => { });
       rbtn.addEventListener('click', async () => {
         if (refreshTimer) return; // a run is already in flight
         if (!confirm('套用更新？將對所有過期編輯重跑比對、投影與方位。')) return;
