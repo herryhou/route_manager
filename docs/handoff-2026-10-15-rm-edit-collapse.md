@@ -1,9 +1,9 @@
 # Handoff: route_manger — post rm-edit collapse
 
 Written 2026-10-15 after the collapse branch merged; updated 2026-10-16
-after candidate 3. Repo: `/Users/herry/project/rust/route_manger`, master
-at `fbbd5ec` (ahead of origin — push when convenient), clean tree, 335
-tests green, `cargo fmt --check` clean.
+after candidates 3 and 2. Repo: `/Users/herry/project/rust/route_manger`,
+master at `ed25484`, pushed, clean tree, 350 tests green
+(335 + 15 golden shape), `cargo fmt --check` clean.
 
 ## Just finished (do not redo)
 
@@ -20,13 +20,10 @@ HTTP-level tests in `crates/rm-web/tests/edit.rs` — same JSON keys, same
 
 ## Immediate loose ends (small)
 
-1. **Stale `rm-edit` references in living docs**: `docs/web-edit-mode.md`
-   and `docs/web-edit-mode-plan.md` still describe the rm-edit crate as the
-   edit domain home. Historical plan docs under `docs/superpowers/plans/`
-   also mention it — those are archives, leave them. Update the two living
-   docs to point at `rm_db::edit`.
-2. Pre-existing warning: `crates/rm-registry` test has `unused variable:
-   runs`. Untouched through the collapse; safe to fix standalone.
+1. ~~Stale `rm-edit` references~~ done 2026-10-16 (`d572e80`): living docs
+   point at `rm_db::edit`; archive plan docs left as-is.
+2. ~~`unused variable: runs`~~ done 2026-10-16 (`d2dfe94`): the test was
+   assertion-free; completed it.
 3. `docs/agents/` + `GLOSSARY.md` exist (agent-skills setup done earlier
    this session); issue tracker is GitHub via `gh`.
 
@@ -46,29 +43,29 @@ HTTP-level tests in `crates/rm-web/tests/edit.rs` — same JSON keys, same
   spike-first for perf, worktree finish flow = keep-exit → merge →
   rm -rf + `git worktree prune`.
 
-## Next work: architecture candidates 2–4
+## Next work: architecture candidate 4
 
 The survey report is archived at `docs/architecture-review-2026-10-15.html`
 (re-run `/mattpocock-skills:improve-codebase-architecture` only if you want
 a fresh survey rather than the queued candidates).
 Candidates 1 (collapse rm-edit), 5 (tagged undo outcome — master
-`a54c147`) and 3 (stale-mark owner — master `fbbd5ec`, 2026-10-16:
-`rm_db::stale` module owns StaleTable/mark/snapshot/clear_if_unchanged;
-edit writers, the three `run_stale` kernels, and rm-web's badge/count
-reads all route through it; 4 commits 78fd825→fbbd5ec; 335 tests green)
-are done; queued, in suggested order:
+`a54c147`), 3 (stale-mark owner — master `fbbd5ec`, 2026-10-16) and
+**2 (shape authority — master `ed25484`, 2026-10-16: serde struct per
+endpoint response in queries/{stops,routes,qa,pairs}.rs, rows fill by
+column name, wire bytes preserved — the station_nearest latitude/longitude
+drift kept and pinned; golden wire-shape contract in
+`crates/rm-web/tests/shape.rs` (15 tests, exact-key-set walker) written
+green pre-refactor; JSDoc typedefs in api.js mirror the structs;
+6 commits 0ef9a81→ed25484; 350 tests green)** are done; queued:
 
-- **Candidate 2**: one shape authority for query responses — serde struct
-  per endpoint in queries/{stops,routes,qa,pairs}.rs. Biggest leverage but
-  the heaviest grilling (design-it-twice territory); do before 4. Next.
 - **Candidate 4**: split app.js along its seams — candidate 5 already
   unified the undo fields, so the undo skeleton is now trivial; JS has no
   test infra, so verification is manual browser pass. Last.
 
 Process for the next pick: read the report card, then grill the user
 (`/mattpocock-skills:grilling`) to a design contract before touching code,
-same as candidate 1 did. Straight-to-code in a worktree was the agreed
-mode for candidate 1 (no spec/tickets); confirm per-candidate.
+same as candidates 1 and 2 did. Straight-to-code in a worktree is the
+agreed mode (no spec/tickets); confirm per-candidate.
 
 ## Suggested skills
 
