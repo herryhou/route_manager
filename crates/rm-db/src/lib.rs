@@ -12,6 +12,7 @@ mod allocator;
 mod batch;
 mod edit;
 mod migrate;
+pub mod stale;
 
 pub use allocator::mint;
 pub use batch::{create_batch, latest_batch, latest_open_batch, set_batch_status};
@@ -29,6 +30,7 @@ pub use edit::{
     StopEditOp, StopEditRow, StopEditUndoOp, StopRegroupOp, StopSnapshot, UndoOutcome,
 };
 pub use migrate::migrate;
+pub use stale::{StaleMark, StaleTable};
 
 /// RFC3339 UTC timestamp for created_at/valid_from columns.
 pub fn now_rfc3339() -> String {
