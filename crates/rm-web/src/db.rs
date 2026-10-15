@@ -25,10 +25,9 @@ pub fn ensure_schema(conn: &Connection) -> Result<()> {
         dev_col == 1,
         "seg_match_stat has no dev columns — re-run the pipeline (migration 0006+)"
     );
-    conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| {
-        r.get::<_, i64>(0)
-    })
-    .context("DB predates the edit tables — re-run the pipeline (or open once with a writable tool) to migrate (migration 0010+)")?;
+    rm_db::stale::pending_count(conn).context(
+        "DB predates the edit tables — re-run the pipeline (or open once with a writable tool) to migrate (migration 0010+)",
+    )?;
     Ok(())
 }
 

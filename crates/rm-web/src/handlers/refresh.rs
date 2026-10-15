@@ -26,11 +26,7 @@ pub async fn status(
     State(state): State<AppState>,
     Editor(_editor): Editor,
 ) -> Result<Json<Value>, ApiError> {
-    let pending: i64 = run_db(state.clone(), |conn| {
-        conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))
-            .map_err(Into::into)
-    })
-    .await?;
+    let pending: i64 = run_db(state.clone(), rm_db::stale::pending_count).await?;
     let mut v = match state.refresh_state() {
         RefreshState::Idle => json!({ "state": "idle" }),
         RefreshState::Running { step, started_at } => json!({

@@ -110,26 +110,8 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
     // staleness badges — position edits mark the projection routes + bearing
     // tables stale until the refresh pipeline re-derives them. route_stop_version
     // already points at the new version id, so the handler's id is the right key.
-    let stale_projections: Vec<i64> = {
-        let mut stmt = conn.prepare(
-            "SELECT CAST(key AS INTEGER) FROM stale_mark
-             WHERE table_name = 'path_stop_projection' AND key IN (
-                 SELECT DISTINCT CAST(rv.route_id AS TEXT)
-                 FROM route_stop_version rsv
-                 JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
-                 JOIN route_version rv ON rv.route_version_id = sv.route_version_id
-                 WHERE rsv.stop_version_id = ?1)
-             ORDER BY 1",
-        )?;
-        let it = stmt.query_map([stop_version_id], |r| r.get::<_, i64>(0))?;
-        it.collect::<Result<Vec<_>, _>>()?
-    };
-    let bearings_stale: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM stale_mark
-                       WHERE table_name IN ('stop_bearing','station_bearing'))",
-        [],
-        |r| r.get(0),
-    )?;
+    let stale_projections = rm_db::stale::projection_routes_for_stop(conn, stop_version_id)?;
+    let bearings_stale = rm_db::stale::bearings_stale(conn)?;
 
     let routes_by_stop =
         serving_routes_where(conn, "rsv.stop_version_id = ?1", &[&stop_version_id])?;
@@ -256,12 +238,7 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
     )?;
 
     // stations have no projections — only the bearing tables go stale
-    let bearings_stale: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM stale_mark
-                       WHERE table_name IN ('stop_bearing','station_bearing'))",
-        [],
-        |r| r.get(0),
-    )?;
+    let bearings_stale = rm_db::stale::bearings_stale(conn)?;
 
     Ok(Some(json!({
         "station": {
