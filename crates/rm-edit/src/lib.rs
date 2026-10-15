@@ -26,6 +26,8 @@ pub(crate) fn map_db_err(e: anyhow::Error) -> anyhow::Error {
         Some(rm_db::EditError::LineNotCurrent(x, d)) => {
             EditError::LineNotCurrent(x.clone(), *d).into()
         }
+        Some(rm_db::EditError::EmptyEdit) => EditError::EmptyEdit.into(),
+        Some(rm_db::EditError::NoOpEdit) => EditError::NoOpEdit.into(),
         _ => e,
     }
 }
@@ -53,19 +55,27 @@ mod tests {
     #[test]
     fn map_db_err_maps_all_four_variants_one_to_one() {
         assert_eq!(
-            variant(map_db_err(anyhow::Error::new(rm_db::EditError::NotCurrent(1)))),
+            variant(map_db_err(anyhow::Error::new(
+                rm_db::EditError::NotCurrent(1)
+            ))),
             Some("NotCurrent(1)".into())
         );
         assert_eq!(
-            variant(map_db_err(anyhow::Error::new(rm_db::EditError::StationNotCurrent(2)))),
+            variant(map_db_err(anyhow::Error::new(
+                rm_db::EditError::StationNotCurrent(2)
+            ))),
             Some("StationNotCurrent(2)".into())
         );
         assert_eq!(
-            variant(map_db_err(anyhow::Error::new(rm_db::EditError::UnknownStation(3)))),
+            variant(map_db_err(anyhow::Error::new(
+                rm_db::EditError::UnknownStation(3)
+            ))),
             Some("UnknownStation(3)".into())
         );
         assert_eq!(
-            variant(map_db_err(anyhow::Error::new(rm_db::EditError::NotUndoable(4)))),
+            variant(map_db_err(anyhow::Error::new(
+                rm_db::EditError::NotUndoable(4)
+            ))),
             Some("NotUndoable(4)".into())
         );
     }
@@ -80,7 +90,9 @@ mod tests {
     fn map_station_db_err_remaps_stale_pole_to_station_error() {
         // scenario-1 semantics: a stale pole surfaces as the station-level error
         assert_eq!(
-            variant(map_station_db_err(anyhow::Error::new(rm_db::EditError::NotCurrent(10)))),
+            variant(map_station_db_err(anyhow::Error::new(
+                rm_db::EditError::NotCurrent(10)
+            ))),
             Some("StationNotCurrent(10)".into())
         );
     }
@@ -94,7 +106,9 @@ mod tests {
             Some("StationNotCurrent(2)".into())
         );
         assert_eq!(
-            variant(map_station_db_err(anyhow::Error::new(rm_db::EditError::NotUndoable(4)))),
+            variant(map_station_db_err(anyhow::Error::new(
+                rm_db::EditError::NotUndoable(4)
+            ))),
             Some("NotUndoable(4)".into())
         );
     }
