@@ -2,10 +2,12 @@
 
 mod line;
 mod station_move;
+mod station_undo;
 mod stop;
 
 pub use line::{edit_polyline_line, undo_polyline_line, LineEditCmd};
 pub use station_move::{move_station, StationMove};
+pub use station_undo::undo_station;
 pub use stop::{edit_stop, regroup_stop, undo_stop, RegroupStop, StopEdit};
 
 use anyhow::Result;
