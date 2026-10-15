@@ -37,8 +37,8 @@ undo is a chain walk. Cost is FK repointing (below), accepted.
 
 ## Edit primitive
 
-One transactional helper (new `rm-edit` crate or a module in rm-db; decide at
-plan time) used by every edit endpoint:
+One transactional helper (`rm_db::edit` module — decided 2026-10-16, one
+module per edit kind) used by every edit endpoint:
 
 ```
 edit(conn, entity, stable_id, changes, editor, note, undo_of = None):
@@ -260,7 +260,6 @@ cleared means every amber badge is green again.
 
 ## Open details (resolve at plan time)
 
-- `rm-edit` crate vs module in rm-db.
 - Exact `stale_mark` key shapes per table (`route:<id>` vs raw id) — pick
   what the refresh CLI filters consume.
 - `ensure_schema` behavior on read-only viewer connections vs the new
