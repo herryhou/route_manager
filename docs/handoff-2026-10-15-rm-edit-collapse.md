@@ -1,8 +1,8 @@
 # Handoff: route_manger — post rm-edit collapse
 
 Written 2026-10-15 after the collapse branch merged. Repo:
-`/Users/herry/project/rust/route_manger`, master at `892b05b`, clean tree,
-321 tests green, `cargo fmt --check` clean.
+`/Users/herry/project/rust/route_manger`, master at `a54c147` (pushed to
+origin), clean tree, 324 tests green, `cargo fmt --check` clean.
 
 ## Just finished (do not redo)
 
@@ -45,19 +45,26 @@ HTTP-level tests in `crates/rm-web/tests/edit.rs` — same JSON keys, same
   spike-first for perf, worktree finish flow = keep-exit → merge →
   rm -rf + `git worktree prune`.
 
-## Next work: architecture candidates 2–5
+## Next work: architecture candidates 2–4
 
 The survey report is archived at `docs/architecture-review-2026-10-15.html`
 (re-run `/mattpocock-skills:improve-codebase-architecture` only if you want
 a fresh survey rather than the queued candidates).
-Candidate 1 (collapse rm-edit) is done; queued, in user-mentioned order:
+Candidates 1 (collapse rm-edit) and 5 (tagged undo outcome — master
+`a54c147`: `rm_db::undo_edit` dispatch + `UndoOutcome` tagged serde enum,
+handler pass-through, JS reads `restored_version_id`/`deleted`) are done;
+queued, in suggested order:
 
-- **Candidate 5**: tagged undo outcome — undo handlers currently branch on
-  `edit_entity` peek and return differently-shaped JSON per entity kind;
-  a tagged outcome would collapse that dispatch. Design detail in the
-  report card.
-- **Candidates 2/3/4**: re-read the report cards; they were not explored
-  with the user yet.
+- **Candidate 3**: give the stale mark one owner — rm_db stale-mark module
+  (mark / marks_for / clear_if_unchanged); the three pipeline `run_stale`
+  loops shrink to load→rebuild→clear; rm-web's two EXISTS copies die.
+  Self-contained, fully testable, no JS — recommended next.
+- **Candidate 2**: one shape authority for query responses — serde struct
+  per endpoint in queries/{stops,routes,qa,pairs}.rs. Biggest leverage but
+  the heaviest grilling (design-it-twice territory); do before 4.
+- **Candidate 4**: split app.js along its seams — candidate 5 already
+  unified the undo fields, so the undo skeleton is now trivial; JS has no
+  test infra, so verification is manual browser pass. Last.
 
 Process for the next pick: read the report card, then grill the user
 (`/mattpocock-skills:grilling`) to a design contract before touching code,
