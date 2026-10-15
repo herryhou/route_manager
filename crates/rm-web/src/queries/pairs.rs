@@ -5,13 +5,16 @@
 
 use anyhow::Result;
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::Value;
 
 /// Registry constants (docs/segment-corridor-split.md §2).
 const CORRIDOR_GAP_ABS_M: f64 = 100.0;
 const CORRIDOR_GAP_REL: f64 = 0.03;
 
-/// One route-direction traversal of a directed station pair.
+/// One route-direction traversal of a directed station pair. Field names
+/// are the wire keys (`GET /api/station-pair/{a}/{b}/routes`).
+#[derive(Serialize)]
 pub struct Traversal {
     pub route_id: i64,
     pub route_code: String,
@@ -21,6 +24,7 @@ pub struct Traversal {
 }
 
 /// One corridor: traversals whose cut lengths fall in the same cluster.
+#[derive(Serialize)]
 pub struct Corridor {
     /// Cluster median length quantized to 10 m (the registry's corridor_key).
     pub corridor_m: f64,
@@ -73,6 +77,12 @@ fn lower_median(sorted: &mut [f64]) -> f64 {
     }
 }
 
+/// Wire shape of `GET /api/station-pair/{a}/{b}/routes`.
+#[derive(Serialize)]
+struct PairRoutesResponse {
+    corridors: Vec<Corridor>,
+}
+
 /// `GET /api/station-pair/{a}/{b}/routes` — route directions traversing the
 /// directed station pair (A→B) as consecutive stops, with each traversal's
 /// cut length from seg_geometry_draft, clustered into corridors.
@@ -97,32 +107,17 @@ pub fn pair_routes(conn: &Connection, from_station: i64, to_station: i64) -> Res
     let cuts = stmt
         .query_map([from_station, to_station], |r| {
             Ok(Traversal {
-                route_id: r.get(0)?,
-                route_code: r.get(1)?,
-                subroute_name: r.get(2)?,
-                direction: r.get(3)?,
-                length_m: r.get(4)?,
+                route_id: r.get("route_id")?,
+                route_code: r.get("route_code")?,
+                subroute_name: r.get("subroute_name")?,
+                direction: r.get("direction")?,
+                length_m: r.get("length_m")?,
             })
         })?
         .collect::<Result<_, _>>()?;
-    let corridors = split_corridors(cuts)
-        .into_iter()
-        .map(|c| {
-            json!({
-                "corridor_m": c.corridor_m,
-                "min_m": c.min_m,
-                "max_m": c.max_m,
-                "routes": c.routes.iter().map(|t| json!({
-                    "route_id": t.route_id,
-                    "route_code": t.route_code,
-                    "subroute_name": t.subroute_name,
-                    "direction": t.direction,
-                    "length_m": t.length_m,
-                })).collect::<Vec<_>>(),
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(json!({ "corridors": corridors }))
+    Ok(serde_json::to_value(PairRoutesResponse {
+        corridors: split_corridors(cuts),
+    })?)
 }
 
 #[cfg(test)]
