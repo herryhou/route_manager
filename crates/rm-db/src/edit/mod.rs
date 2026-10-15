@@ -18,6 +18,8 @@ use serde::Serialize;
 use serde_json::json;
 use thiserror::Error;
 
+use crate::stale;
+
 #[derive(Debug, Error)]
 pub enum EditError {
     #[error("stop version {0} is not the current version (or does not exist)")]
@@ -60,60 +62,6 @@ pub struct EditLogRow {
     pub changes: String,
     pub note: Option<String>,
     pub undo_of: Option<i64>,
-}
-
-/// The edited/restored version's `stop_bearing` rows were deleted (every
-/// edit/undo does), so the whole table's derived data is stale until
-/// the bearing refresh re-runs. Re-marks replace: fresh rowid, freshest
-/// `cause_edit_id` wins.
-fn mark_bearings_stale(tx: &Connection, edit_id: i64, now: &str) -> Result<()> {
-    tx.execute(
-        "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
-         VALUES ('stop_bearing', '*', ?1, ?2)",
-        params![edit_id, now],
-    )?;
-    Ok(())
-}
-
-/// Mark the derived data that depends on a stop's position stale: one
-/// `path_stop_projection` row per route serving `stop_version_id` (whose
-/// `route_stop_version` rows must already point at it) plus the whole
-/// `station_bearing` table (`stop_bearing` is marked unconditionally —
-/// see `mark_bearings_stale`). Re-marks replace on the `(table_name, key)`
-/// primary key: fresh rowid, freshest `cause_edit_id` wins.
-fn mark_position_stale(
-    tx: &Connection,
-    stop_version_id: i64,
-    edit_id: i64,
-    now: &str,
-) -> Result<Vec<i64>> {
-    let mut stale_routes = Vec::new();
-    {
-        let mut stmt = tx.prepare(
-            "SELECT DISTINCT rv.route_id
-             FROM route_stop_version rsv
-             JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
-             JOIN route_version rv ON rv.route_version_id = sv.route_version_id
-             WHERE rsv.stop_version_id = ?1",
-        )?;
-        let rows = stmt.query_map([stop_version_id], |r| r.get::<_, i64>(0))?;
-        for rid in rows {
-            stale_routes.push(rid?);
-        }
-    }
-    for rid in &stale_routes {
-        tx.execute(
-            "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
-             VALUES ('path_stop_projection', ?1, ?2, ?3)",
-            params![rid.to_string(), edit_id, now],
-        )?;
-    }
-    tx.execute(
-        "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
-         VALUES ('station_bearing', '*', ?1, ?2)",
-        params![edit_id, now],
-    )?;
-    Ok(stale_routes)
 }
 
 /// Move a `stop_bearing` row from one version key to another, keeping the
@@ -240,8 +188,8 @@ pub fn apply_stop_edit(
 
     let mut stale_routes = Vec::new();
     if moves {
-        mark_bearings_stale(&tx, edit_id, &now)?;
-        stale_routes = mark_position_stale(&tx, new_id, edit_id, &now)?;
+        stale::mark_bearings_stale(&tx, edit_id, &now)?;
+        stale_routes = stale::mark_position_stale(&tx, new_id, edit_id, &now)?;
     }
     tx.commit()?;
     Ok(EditOutcome {
@@ -351,11 +299,7 @@ pub fn apply_stop_regroup(
     )?;
     let edit_id = tx.last_insert_rowid();
 
-    tx.execute(
-        "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
-         VALUES ('station_bearing', '*', ?1, ?2)",
-        params![edit_id, now],
-    )?;
+    stale::mark_station_bearings_stale(&tx, edit_id, &now)?;
     tx.commit()?;
     Ok(EditOutcome {
         edit_id,
@@ -463,15 +407,11 @@ pub fn apply_stop_undo(
 
     let mut stale_routes = Vec::new();
     if position_changed {
-        mark_bearings_stale(&tx, undo_edit_id, &now)?;
+        stale::mark_bearings_stale(&tx, undo_edit_id, &now)?;
         // rsv already points at `old_svi` (repointed above)
-        stale_routes = mark_position_stale(&tx, op.old_svi, undo_edit_id, &now)?;
+        stale_routes = stale::mark_position_stale(&tx, op.old_svi, undo_edit_id, &now)?;
     } else if regrouped {
-        tx.execute(
-            "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
-             VALUES ('station_bearing', '*', ?1, ?2)",
-            params![undo_edit_id, now],
-        )?;
+        stale::mark_station_bearings_stale(&tx, undo_edit_id, &now)?;
     }
     tx.commit()?;
     Ok(EditOutcome {
@@ -1193,32 +1133,6 @@ pub struct LineApplied {
     pub created: bool,
 }
 
-/// Mark every derived dataset that depends on the direction's polyline
-/// stale. Keys use route_id (stable across route versions); the match
-/// stale run resolves the current route_version at recompute time.
-/// Re-marks replace: fresh rowid, freshest `cause_edit_id` wins.
-fn mark_line_stale(
-    tx: &Connection,
-    route_id: i64,
-    direction: i64,
-    edit_id: i64,
-    now: &str,
-) -> Result<()> {
-    for (table, key) in [
-        ("seg_match", format!("{route_id}:{direction}")),
-        ("path_stop_projection", route_id.to_string()),
-        ("stop_bearing", "*".to_string()),
-        ("station_bearing", "*".to_string()),
-    ] {
-        tx.execute(
-            "INSERT OR REPLACE INTO stale_mark (table_name, key, cause_edit_id, marked_at)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![table, key, edit_id, now],
-        )?;
-    }
-    Ok(())
-}
-
 /// Apply a whole-line override edit in ONE transaction. Unversioned: the
 /// row IS current; `updated_at` doubles as the optimistic-concurrency
 /// token and the producing edit's ts. Currency guard runs before ANY
@@ -1300,7 +1214,7 @@ pub fn apply_line_edit(
     )?;
     let edit_id = tx.last_insert_rowid();
 
-    mark_line_stale(&tx, route_id, op.direction, edit_id, &now)?;
+    stale::mark_line_stale(&tx, route_id, op.direction, edit_id, &now)?;
 
     tx.commit()?;
     Ok(LineApplied {
@@ -1400,7 +1314,7 @@ pub fn apply_line_undo(
     )?;
     let edit_id = tx.last_insert_rowid();
 
-    mark_line_stale(&tx, op.route_id, op.direction, edit_id, &now)?;
+    stale::mark_line_stale(&tx, op.route_id, op.direction, edit_id, &now)?;
 
     tx.commit()?;
     Ok(LineUndone { edit_id, deleted })
