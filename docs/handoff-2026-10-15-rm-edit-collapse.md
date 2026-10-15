@@ -1,8 +1,8 @@
 # Handoff: route_manger — post rm-edit collapse
 
 Written 2026-10-15 after the collapse branch merged; updated 2026-10-16
-after candidates 3 and 2. Repo: `/Users/herry/project/rust/route_manger`,
-master at `ed25484`, pushed, clean tree, 350 tests green
+after candidates 3, 2 and 4. Repo: `/Users/herry/project/rust/route_manger`,
+master at `9144fb6`, pushed, clean tree, 350 tests green
 (335 + 15 golden shape), `cargo fmt --check` clean.
 
 ## Just finished (do not redo)
@@ -56,11 +56,16 @@ column name, wire bytes preserved — the station_nearest latitude/longitude
 drift kept and pinned; golden wire-shape contract in
 `crates/rm-web/tests/shape.rs` (15 tests, exact-key-set walker) written
 green pre-refactor; JSDoc typedefs in api.js mirror the structs;
-6 commits 0ef9a81→ed25484; 350 tests green)** are done; queued:
-
-- **Candidate 4**: split app.js along its seams — candidate 5 already
-  unified the undo fields, so the undo skeleton is now trivial; JS has no
-  test infra, so verification is manual browser pass. Last.
+6 commits 0ef9a81→ed25484; 350 tests green)** and **4 (app.js seam
+dedup — master `309783b`+`9144fb6`, 2026-10-16: grilling scoped it DOWN
+from the report's "split along seams" to in-place dedup — zero new JS
+files, zero Rust diffs; openEntityLog + undoEntityEdit replace the
+stop/station/line log+undo hand-copies, openMarkerPopup replaces the
+popup pair behind two 1-line entry points; 1007→985 ln; behavior
+preserved by contract, browser checklist pending human verification)** —
+all seven candidates' actionable ones are done. Remaining from the
+report: 6 (asset table) + 7 (publish QA thresholds) were marked
+Speculative/opportunistic — pick up only when one actually bites.
 
 Process for the next pick: read the report card, then grill the user
 (`/mattpocock-skills:grilling`) to a design contract before touching code,
