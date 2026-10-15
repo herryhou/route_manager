@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Architecture review for route_manger</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+</script>
+<style>
+  .seam { border-style: dashed !important; }
+  .modlabel { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; }
+  .deepbox { background: linear-gradient(135deg, #0f172a, #1e293b); }
+  .ghost { opacity: 0.45; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+<header class="space-y-3">
+  <h1 class="text-3xl font-serif">Architecture review — <span class="font-mono text-2xl">route_manger</span></h1>
+  <p class="text-sm text-slate-500">2026-10-15 · hot spots from 90-day commit frequency · vocabulary: <span class="font-mono">GLOSSARY.md</span> + codebase-design</p>
+  <div class="flex gap-4 text-xs text-slate-600 flex-wrap">
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-3 border-2 border-slate-400"></span> module</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block w-5 border-t-2 border-dashed border-slate-400"></span> seam</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block w-5 border-t-2 border-red-600"></span> leakage</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-3 deepbox rounded-sm"></span> deep module</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════ CANDIDATE 1 ═══════════════════════ -->
+<article id="c1" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif">1 · Collapse the rm-edit module into rm-db</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 font-mono">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-600">crates/rm-edit/src/{lib,rename,stop,line,station_move,undo}.rs (~1,106 ln) · crates/rm-db/src/edit.rs (2,793 ln) · sole consumer: handlers/edit.rs</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="modlabel text-slate-400 mb-3">Before — one edit, two crates, one seam too many</p>
+      <div class="space-y-2 text-xs">
+        <div class="border-2 border-slate-300 rounded p-2">
+          <p class="modlabel">handlers/edit.rs</p>
+          <p class="text-slate-500 font-mono">StationRename cmd</p>
+        </div>
+        <div class="text-center text-red-600">↓</div>
+        <div class="border-2 border-slate-300 rounded p-2">
+          <p class="modlabel">rm-edit · plan (shallow)</p>
+          <p class="text-slate-500 font-mono">plan_stop_edit = 22 ln · plan_station_move ≈ 20 ln</p>
+          <p class="text-slate-500 font-mono">StationRenamePlan → StationRenameOp (field copy)</p>
+        </div>
+        <div class="flex justify-center items-center gap-2 text-red-600">
+          <span>↓ leak</span><span class="border-t-2 border-red-600 w-16"></span><span>↑ leak</span>
+        </div>
+        <div class="border-2 border-slate-300 rounded p-2">
+          <p class="modlabel">rm-db · edit.rs (deep inside)</p>
+          <p class="text-slate-500 font-mono">load_* → apply_* · in-tx revalidation · carry_bearing · stale marks</p>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <div class="flex-1 border border-red-400 bg-red-50 rounded p-1.5 text-center">
+            <p class="modlabel text-red-700">rm_db::EditError</p>
+          </div>
+          <div class="flex-1 border border-red-400 bg-red-50 rounded p-1.5 text-center">
+            <p class="modlabel text-red-700">rm_edit::EditError (copy)</p>
+          </div>
+        </div>
+        <p class="text-center text-xs text-red-700">+ 2 mapping fns · ~10 structs per rename · tests assert the mapping maps</p>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="modlabel text-slate-400 mb-3">After — one deep edit module</p>
+      <div class="space-y-2 text-xs">
+        <div class="border-2 border-slate-300 rounded p-2">
+          <p class="modlabel">handlers/edit.rs</p>
+          <p class="text-slate-500 font-mono">StationRename cmd</p>
+        </div>
+        <div class="text-center text-slate-400">↓</div>
+        <div class="deepbox rounded p-3 text-white">
+          <p class="modlabel text-slate-300">rm-db · edit module</p>
+          <p class="font-mono text-xs text-slate-200">load + plan + apply in one place</p>
+          <p class="font-mono text-xs text-slate-300 mt-1 ghost">in-tx revalidation · carry_bearing · stale marks</p>
+        </div>
+        <div class="flex justify-center pt-1">
+          <div class="border border-slate-400 rounded p-1.5 text-center px-4">
+            <p class="modlabel">one EditError</p>
+          </div>
+        </div>
+        <p class="text-center text-xs text-slate-500">one command struct · one outcome struct · one seam</p>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-sm"><strong>Problem.</strong> rm-edit is shallow: plan functions are 20-line field-copies while the semantics that break (in-tx revalidation, bearing carry, stale marks) live in rm-db — the crate seam splits every edit primitive load→plan→apply with no locality.</p>
+  <p class="text-sm"><strong>Solution.</strong> Fold plan policy into rm-db beside its apply counterpart; each edit primitive becomes one module behind one interface. Handlers call rm-db directly.</p>
+  <ul class="text-sm grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>locality: edit lifecycle in one module</li>
+    <li>delete 1:1 error enum + 2 mappers</li>
+    <li>delete ~6 pass-through structs per rename</li>
+    <li>leverage: one interface, tests already DB-backed</li>
+  </ul>
+  <p class="text-xs text-slate-500">Deletion test: delete rm-edit → complexity concentrates in rm-db. Passes hardest of all seven.</p>
+</article>
+
+<!-- ═══════════════════════ CANDIDATE 2 ═══════════════════════ -->
+<article id="c2" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif">2 · One shape authority for query responses</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 font-mono">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-600">queries/{stops 478, routes 555, qa 223, pairs 209}.rs · consumers panels.js (643) + app.js (1,007)</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="modlabel text-slate-400 mb-3">Before — the shape lives in no module, three times</p>
+      <div class="space-y-2 text-xs">
+        <div class="border-2 border-slate-300 rounded p-2">
+          <p class="modlabel">SQL column order</p>
+          <p class="text-slate-500 font-mono">let (_, _, _, _, _, station_id, _, _, _, group_id, _, _…) = &amp;found;</p>
+          <p class="text-red-600">18-element tuple · reordering compiles clean</p>
+        </div>
+        <div class="text-center text-slate-400">↓ hand-map</div>
+        <div class="border-2 border-slate-300 rounded p-2">
+          <p class="modlabel">json!() string keys</p>
+          <p class="text-slate-500 font-mono">"lat" / "lon" … but one endpoint: "latitude" / "longitude"</p>
+          <p class="text-red-600">drift already happened, same module</p>
+        </div>
+        <div class="text-center text-slate-400">↓ fetch</div>
+        <div class="border-2 border-red-400 bg-red-50 rounded p-2">
+          <p class="modlabel text-red-700">JS property access (hand-declared)</p>
+          <p class="text-slate-500 font-mono">r.subroute_name · s.match.directions_with_stats · c.corridor_m</p>
+          <p class="text-red-600">rename = silent '—' in the UI</p>
+        </div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="modlabel text-slate-400 mb-3">After — one named struct owns the shape</p>
+      <div class="space-y-2 text-xs">
+        <div class="deepbox rounded p-3 text-white">
+          <p class="modlabel text-slate-300">serde struct per endpoint response</p>
+          <p class="font-mono text-xs text-slate-200">named fields · SQL fills by name · JSON = serialization</p>
+        </div>
+        <div class="flex justify-around pt-1">
+          <div class="text-center">
+            <div class="text-slate-400">↓</div>
+            <div class="border-2 border-slate-300 rounded p-1.5"><p class="modlabel">queries (typed rows)</p></div>
+          </div>
+          <div class="text-center">
+            <div class="text-slate-400">↓</div>
+            <div class="border-2 border-slate-300 rounded p-1.5"><p class="modlabel">handlers</p></div>
+          </div>
+          <div class="text-center">
+            <div class="text-slate-400">↓</div>
+            <div class="border-2 border-slate-300 rounded p-1.5"><p class="modlabel">JS reads</p><p class="text-slate-400 text-xs">one reference shape</p></div>
+          </div>
+        </div>
+        <p class="text-center text-xs text-slate-500 pt-1">column reorder = compile error, not a blank panel</p>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-sm"><strong>Problem.</strong> The response shape — the real interface between query code and the page — is declared by hand three times (SQL column order, json!() literals, JS property access), so the compiler guards none of it, and it has already drifted once inside queries/stops.rs.</p>
+  <p class="text-sm"><strong>Solution.</strong> Each endpoint response becomes a named serde struct in the query module: column order, JSON keys, and JS expectations get one definition.</p>
+  <ul class="text-sm grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>compiler guards the hottest seam in the repo</li>
+    <li>locality: shape change = one struct</li>
+    <li>kills 18-tuple positional destructuring</li>
+    <li>JS gains a reference shape to read against</li>
+  </ul>
+</article>
+
+<!-- ═══════════════════════ CANDIDATE 3 ═══════════════════════ -->
+<article id="c3" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif">3 · Give the stale mark one owner</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 font-mono">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-600">writers: rm-db/src/edit.rs · consumers: rm-segments, rm-registry, rm-osm-match (run_stale ×3) · read-side: rm-web queries/stops.rs (duplicate EXISTS ×2)</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-white p-3">
+      <p class="modlabel text-slate-400 mb-2">Before — the freshness rule, copy-pasted</p>
+      <pre class="mermaid text-xs">
+flowchart TD
+  E["edit.rs writes marks<br/>stop_bearing · station_bearing · path_stop_projection"]
+  E -.->|"magic strings"| S1["rm-segments run_stale<br/>SELECT + guarded DELETE"]
+  E -.-> S2["rm-registry run_stale<br/>same SELECT + DELETE"]
+  E -.-> S3["rm-osm-match run_stale<br/>same SELECT + DELETE"]
+  W["rm-web queries/stops.rs<br/>EXISTS query ×2 verbatim"] -.-> E
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class S1,S2,S3,W leak
+      </pre>
+      <p class="text-xs text-red-700 text-center">cause_edit_id freshness guard = triplicated SQL</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-3">
+      <p class="modlabel text-slate-400 mb-2">After — one module owns the protocol</p>
+      <pre class="mermaid text-xs">
+flowchart TD
+  M["rm-db · stale-mark module<br/>mark · marks_for · clear_if_unchanged"]
+  M --> S1["rm-segments<br/>load → rebuild → clear"]
+  M --> S2["rm-registry<br/>load → rebuild → clear"]
+  M --> S3["rm-osm-match<br/>load → rebuild → clear"]
+  W["rm-web badges read marks_for"] --> M
+  M2["edit.rs marks through one module"] --> M
+      </pre>
+    </div>
+  </div>
+
+  <p class="text-sm"><strong>Problem.</strong> The stale-mark protocol — the invariant behind “never green over stale data” — has no home: writers name tables by magic string, three pipeline crates each re-implement the SELECT / rebuild / guarded-DELETE loop, and the UI re-encodes the keying convention in ad-hoc SQL at the presentation layer.</p>
+  <p class="text-sm"><strong>Solution.</strong> One rm-db-owned stale-mark module (mark, marks_for, clear_if_unchanged); the three run_stale loops shrink to load marks → call the existing rebuild → clear.</p>
+  <ul class="text-sm grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>freshness rule enforced in one place</li>
+    <li>locality: protocol change lands once</li>
+    <li>delete 2 verbatim loops + 2 EXISTS copies</li>
+    <li>table names become constants, not strings</li>
+  </ul>
+</article>
+
+<!-- ═══════════════════════ CANDIDATE 4 ═══════════════════════ -->
+<article id="c4" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif">4 · Split app.js along its seams</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 font-mono">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-600">crates/rm-web/assets/js/app.js (1,007 ln, 59 commits/90d — the hottest file in the repo)</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="modlabel text-slate-400 mb-3">Before — three hand-copied skeletons ×3 entities</p>
+      <div class="space-y-1.5 text-xs">
+        <div class="flex gap-1.5">
+          <div class="flex-1 border-2 border-slate-300 rounded p-1.5 text-center"><p class="modlabel">openEditLog</p><p class="text-slate-400">busy → api → pane</p></div>
+          <div class="flex-1 border-2 border-slate-300 rounded p-1.5 text-center"><p class="modlabel">openStationEditLog</p><p class="text-slate-400">same skeleton</p></div>
+          <div class="flex-1 border-2 border-slate-300 rounded p-1.5 text-center"><p class="modlabel">openLineLog</p><p class="text-slate-400">same skeleton</p></div>
+        </div>
+        <div class="flex gap-1.5">
+          <div class="flex-1 border-2 border-slate-300 rounded p-1.5 text-center"><p class="modlabel">undoStopEdit</p><p class="text-slate-400">confirm → undo → refresh</p></div>
+          <div class="flex-1 border-2 border-slate-300 rounded p-1.5 text-center"><p class="modlabel">undoStationEdit</p><p class="text-slate-400">same skeleton</p></div>
+          <div class="flex-1 border-2 border-slate-300 rounded p-1.5 text-center"><p class="modlabel">undoLineEdit</p><p class="text-slate-400">same skeleton</p></div>
+        </div>
+        <div class="border-2 border-red-300 bg-red-50 rounded p-2 mt-2">
+          <p class="modlabel text-red-700">+ 9 more concerns in the same file</p>
+          <p class="text-slate-500">boot 200 ln · selection ×3 · edit toggle · place-arm · QA · hash · zoom gating</p>
+        </div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="modlabel text-slate-400 mb-3">After — each skeleton exists once</p>
+      <div class="space-y-2 text-xs">
+        <div class="deepbox rounded p-3 text-white">
+          <p class="modlabel text-slate-300">openEntityLog(entity, id, refresh)</p>
+          <p class="font-mono text-xs text-slate-200">one busy → api → pane flow</p>
+        </div>
+        <div class="deepbox rounded p-3 text-white">
+          <p class="modlabel text-slate-300">undoEdit(entity, id, refresh)</p>
+          <p class="font-mono text-xs text-slate-200">one confirm → undo → refresh flow</p>
+        </div>
+        <div class="deepbox rounded p-3 text-white">
+          <p class="modlabel text-slate-300">selection flow</p>
+          <p class="font-mono text-xs text-slate-200">one fetch → stale-guard → pane → pan</p>
+        </div>
+        <p class="text-center text-slate-500">stop / station / line become arguments, not copies</p>
+      </div>
+    </div>
+  </div>
+
+  <p class="text-sm"><strong>Problem.</strong> app.js is a god-module: ~12 concerns, and the entity-specific flows are hand-copies — the exact code the 59-commit churn keeps landing on, untestable by construction (include_str!-compiled, no JS test infra).</p>
+  <p class="text-sm"><strong>Solution.</strong> Extract the three duplicated skeletons (log, undo, select) so each exists once with the entity as an argument; then split remaining concerns along the seams the file already has.</p>
+  <ul class="text-sm grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>leverage: one skeleton, three entities</li>
+    <li>locality: undo fix lands once</li>
+    <li>hottest churn stops multiplying copies</li>
+    <li>seams become testable without a framework</li>
+  </ul>
+  <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">Constraint to weigh in grilling: no JS test infra exists — skeletons can be extracted, but verifying behavior stays manual unless the extraction itself adds a harness.</p>
+</article>
+
+<!-- ═══════════════════════ CANDIDATE 5 ═══════════════════════ -->
+<article id="c5" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif">5 · One tagged undo outcome</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 font-mono">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-sm text-slate-600">rm-db/src/edit.rs:437 · handlers/edit.rs:207–246 · app.js:592–606, 678–692, 713–731 — pairs with №4</p>
+
+  <div class="rounded-lg border border-slate-200 bg-white p-3">
+    <pre class="mermaid text-xs">
+sequenceDiagram
+  participant JS as app.js
+  participant H as handlers/edit.rs
+  participant DB as edit_entity
+  Note over DB: returns raw entity string
+  H->>H: branch polyline / station / stop
+  H-->>JS: {edit_id, restored: {deleted}}
+  H-->>JS: {edit_id, new_stop_version_id}
+  H-->>JS: (implicit station shape)
+  Note over JS: re-branches on shape it must already know<br/>comment documents the coupling verbatim
+    </pre>
+  </div>
+
+  <p class="text-sm"><strong>Problem.</strong> One undo endpoint returns a union of three response shapes whose discriminant the client must already know; unknown entities deliberately fall down the stop branch so their error surfaces as its 409 — even error-path semantics depend on the leak.</p>
+  <p class="text-sm"><strong>Solution.</strong> One tagged outcome ({edit_id, kind, restored_version_id, override_deleted?}) serialized uniformly; the handler branch and the JS per-entity response knowledge both delete.</p>
+  <ul class="text-sm grid md:grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>dispatch deletes at both ends of the seam</li>
+    <li>error paths stop depending on the leak</li>
+    <li>undo flows collapse onto №4's skeleton</li>
+  </ul>
+</article>
+
+<!-- ═══════════════════════ CANDIDATES 6+7 ═══════════════════════ -->
+<div class="grid md:grid-cols-2 gap-4">
+  <article id="c6" class="bg-white rounded-xl border border-slate-200 p-5 space-y-3 shadow-sm">
+    <div class="flex items-start justify-between gap-3">
+      <h2 class="text-lg font-serif">6 · One asset table drives both lists</h2>
+      <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700 shrink-0">Speculative</span>
+    </div>
+    <p class="font-mono text-xs text-slate-600">handlers/assets.rs:23–79 · handlers/mod.rs:18–28</p>
+    <div class="flex gap-2 text-xs">
+      <div class="flex-1 border-2 border-slate-300 rounded p-2 text-center">
+        <p class="modlabel text-red-700">before: two lists</p>
+        <p class="text-slate-500">include_str! match arm + .route() must agree; miss one = runtime 404, no build signal</p>
+      </div>
+      <div class="flex-1 border-2 border-slate-300 rounded p-2 text-center">
+        <p class="modlabel">after: one table</p>
+        <p class="text-slate-500">static const drives include_str! map and router</p>
+      </div>
+    </div>
+    <p class="text-sm"><strong>Problem.</strong> Two hand-maintained lists must agree; only fails at runtime.</p>
+    <p class="text-sm"><strong>Solution.</strong> One static asset table drives both. Real but low-frequency — opportunistic, not a priority.</p>
+  </article>
+
+  <article id="c7" class="bg-white rounded-xl border border-slate-200 p-5 space-y-3 shadow-sm">
+    <div class="flex items-start justify-between gap-3">
+      <h2 class="text-lg font-serif">7 · Publish QA thresholds, stop restating</h2>
+      <span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-200 text-slate-700 shrink-0">Speculative</span>
+    </div>
+    <p class="font-mono text-xs text-slate-600">rm-verify/lib.rs:537–584 · panels.js:440,466,487,282 · api.js:31–32 · refresh.rs:10</p>
+    <div class="flex gap-2 text-xs">
+      <div class="flex-1 border-2 border-slate-300 rounded p-2 text-center">
+        <p class="modlabel text-red-700">before: numbers typed 2–3×</p>
+        <p class="text-slate-500">45° spread · 50 m dev · corridor split — once per layer</p>
+      </div>
+      <div class="flex-1 border-2 border-slate-300 rounded p-2 text-center">
+        <p class="modlabel">after: server publishes</p>
+        <p class="text-slate-500">page receives thresholds like __TILES__ already does</p>
+      </div>
+    </div>
+    <p class="text-sm"><strong>Problem.</strong> Domain thresholds from the glossary (spread warn, matchdev, corridor split) are retyped independently per layer; a change is a grep.</p>
+    <p class="text-sm"><strong>Solution.</strong> Publish them to the client through the existing seed-data path. Awareness-level — list for the next time a threshold actually moves.</p>
+  </article>
+</div>
+
+<!-- ═══════════════════════ CHECKED, FINE ═══════════════════════ -->
+<section class="bg-white rounded-xl border border-slate-200 p-5">
+  <h2 class="text-sm modlabel text-slate-400 mb-2">Checked and fine — no deepening needed</h2>
+  <ul class="text-sm text-slate-600 space-y-1 list-disc list-inside">
+    <li><span class="font-mono">layers.js</span> — clean Leaflet module, real interface; only nit: <span class="font-mono">fmt</span> helper defined 4× (no shared util, not structural).</li>
+    <li><span class="font-mono">rm-db edit.rs</span> apply_* — deep: whole-transaction, in-tx revalidation, documented invariants. The crate around them is the problem (№1), not the implementation.</li>
+    <li><span class="font-mono">state.rs</span> + <span class="font-mono">refresh.rs</span> — Apply-updates single-flight is compact and correctly placed.</li>
+    <li><span class="font-mono">rm-edit</span> does <em>not</em> reach around rm-db — the friction is the ceremony of the interface (№1), not a violation.</li>
+    <li><span class="font-mono">rm-verify</span> single run() with inline SQL — right shape for a checklist verifier; the checklist is the interface.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════════════ TOP ═══════════════════════ -->
+<section id="top-recommendation" class="deepbox rounded-xl p-6 text-white space-y-2">
+  <p class="modlabel text-slate-300">Top recommendation</p>
+  <h2 class="text-2xl font-serif"><a href="#c1" class="underline decoration-slate-500 underline-offset-4">№1 — Collapse the rm-edit module into rm-db</a></h2>
+  <p class="text-sm text-slate-200 max-w-3xl">Deletion test passes hardest: a whole crate of pass-throughs, a duplicated error enum, and ~10 structs per rename all concentrate into rm-db's already-deep apply_* implementation. Existing DB-backed tests cross the same interface either way, so the net exists before you touch anything — and it shrinks the seam the edit-flow churn (handlers/edit.rs, 14 commits) keeps crossing. №2 is the bigger long-term leverage on the hottest area; it deserves the grilling loop and maybe design-it-twice before committing to a shape.</p>
+</section>
+
+<p class="text-xs text-slate-400 text-center pt-4">route_manger · generated 2026-10-15 · read-only survey, nothing written to the repo</p>
+</main>
+</body>
+</html>

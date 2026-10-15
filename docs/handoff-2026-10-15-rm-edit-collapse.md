@@ -1,0 +1,78 @@
+# Handoff: route_manger — post rm-edit collapse
+
+Written 2026-10-15 after the collapse branch merged. Repo:
+`/Users/herry/project/rust/route_manger`, master at `892b05b`, clean tree,
+321 tests green, `cargo fmt --check` clean.
+
+## Just finished (do not redo)
+
+The rm-edit crate is deleted; all edit primitives live in `rm_db::edit` —
+one module per kind (`stop.rs`, `line.rs`, `station_move.rs`,
+`station_rename.rs`, `station_undo.rs`), each with a private plan policy
+emitting apply ops directly and service entries re-exported at the crate
+root. 8 commits 220cd3c→06dd320 + fast-forward merge 892b05b. Full
+narrative, pattern notes, and the private-mod whitelist trap are in memory:
+`.claude/projects/-Users-herry-project-rust-route-manger/memory/collapse-rm-edit-merged.md`
+(see MEMORY.md index). HTTP contract was verified unchanged by the 17
+HTTP-level tests in `crates/rm-web/tests/edit.rs` — same JSON keys, same
+400/409 split via `edit_conflict` downcasting `rm_db::EditError`.
+
+## Immediate loose ends (small)
+
+1. **Stale `rm-edit` references in living docs**: `docs/web-edit-mode.md`
+   and `docs/web-edit-mode-plan.md` still describe the rm-edit crate as the
+   edit domain home. Historical plan docs under `docs/superpowers/plans/`
+   also mention it — those are archives, leave them. Update the two living
+   docs to point at `rm_db::edit`.
+2. Pre-existing warning: `crates/rm-registry` test has `unused variable:
+   runs`. Untouched through the collapse; safe to fix standalone.
+3. `docs/agents/` + `GLOSSARY.md` exist (agent-skills setup done earlier
+   this session); issue tracker is GitHub via `gh`.
+
+## Environment facts a fresh session needs
+
+- **fmt hook is live**: `core.hooksPath=.githooks` (local config — after a
+  re-clone, re-run `git config core.hooksPath .githooks`). Every commit
+  runs `cargo fmt --check` over the whole tree; bypass with `--no-verify`.
+  Established 2026-10-15 (commits 2812a09 sweep + acb1d4c hook).
+- **rtk CLI proxy** wraps shell commands (token-optimized output); see
+  `~/.claude/RTK.md`. `rtk proxy <cmd>` for raw output.
+- Project rules live in `CLAUDE.md` (release builds for pipeline binaries,
+  no programmatic zoom/pan whitelist in rm-web, byte-diff discipline for
+  numeric refactors, migrations-vs-readonly-viewer degradation, OSM
+  clip-never-delete). `crates/rm-web/DESIGN.md` gates any UI work.
+- User conventions: 每步 commit, explicit triggers before new work,
+  spike-first for perf, worktree finish flow = keep-exit → merge →
+  rm -rf + `git worktree prune`.
+
+## Next work: architecture candidates 2–5
+
+The survey report is archived at `docs/architecture-review-2026-10-15.html`
+(re-run `/mattpocock-skills:improve-codebase-architecture` only if you want
+a fresh survey rather than the queued candidates).
+Candidate 1 (collapse rm-edit) is done; queued, in user-mentioned order:
+
+- **Candidate 5**: tagged undo outcome — undo handlers currently branch on
+  `edit_entity` peek and return differently-shaped JSON per entity kind;
+  a tagged outcome would collapse that dispatch. Design detail in the
+  report card.
+- **Candidates 2/3/4**: re-read the report cards; they were not explored
+  with the user yet.
+
+Process for the next pick: read the report card, then grill the user
+(`/mattpocock-skills:grilling`) to a design contract before touching code,
+same as candidate 1 did. Straight-to-code in a worktree was the agreed
+mode for candidate 1 (no spec/tickets); confirm per-candidate.
+
+## Suggested skills
+
+- `mattpocock-skills:improve-codebase-architecture` — if the temp report
+  is gone, re-run the survey; otherwise just read the HTML.
+- `mattpocock-skills:grilling` — frontier interview before implementing any
+  candidate (candidate 1 ran Q1–Q8 + a design contract this way).
+- `mattpocock-skills:codebase-design` — the module/seam/depth vocabulary
+  the report and any refactor proposal speak.
+- `mattpocock-skills:ask-matt` — if the user asks "what next" at a flow
+  level rather than picking a candidate.
+
+No secrets or PII in this document.
