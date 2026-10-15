@@ -1,7 +1,9 @@
 //! Manual edit primitive: version-append edits + audit + staleness marks.
 
+mod line;
 mod stop;
 
+pub use line::{edit_polyline_line, undo_polyline_line, LineEditCmd};
 pub use stop::{edit_stop, regroup_stop, undo_stop, RegroupStop, StopEdit};
 
 use anyhow::Result;

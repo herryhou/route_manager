@@ -20,12 +20,12 @@ pub use edit::{
     apply_stop_edit, apply_stop_regroup, apply_stop_undo, edit_entity, edit_stop,
     effective_encoded, entity_history, load_polyline_edit, load_polyline_line, load_station_edit,
     load_station_snapshot, load_stop_edit, load_stop_snapshot, regroup_stop, station_is_current,
-    undo_stop, EditError, EditLogRow, EditOutcome, LineApplied, LineEditOp, LineSnapshot,
-    LineUndoOp, LineUndone, OverrideRow, PoleApplied, PoleOp, PoleSnapshot, PoleUndoOp,
-    PolylineEditRow, RegroupStop, StationEdit, StationMoveApplied, StationMoveOp,
-    StationMoveUndoOp, StationRenameApplied, StationRenameOp, StationRenameUndoOp, StationSnapshot,
-    StationUndoOp, StationUndone, StopEdit, StopEditOp, StopEditRow, StopEditUndoOp, StopRegroupOp,
-    StopSnapshot,
+    undo_stop, edit_polyline_line, undo_polyline_line, EditError, EditLogRow, EditOutcome,
+    LineApplied, LineEditCmd, LineEditOp, LineSnapshot, LineUndoOp, LineUndone, OverrideRow,
+    PoleApplied, PoleOp, PoleSnapshot, PoleUndoOp, PolylineEditRow, RegroupStop, StationEdit,
+    StationMoveApplied, StationMoveOp, StationMoveUndoOp, StationRenameApplied, StationRenameOp,
+    StationRenameUndoOp, StationSnapshot, StationUndoOp, StationUndone, StopEdit, StopEditOp,
+    StopEditRow, StopEditUndoOp, StopRegroupOp, StopSnapshot,
 };
 pub use migrate::migrate;
 
