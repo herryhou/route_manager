@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use rm_core::polyline;
 use rm_core::LatLng;
 use rusqlite::Connection;
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::geojson;
@@ -13,7 +14,19 @@ fn split_list(s: Option<String>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn direction_rows(conn: &Connection, route_ids: &[i64]) -> Result<Vec<Value>> {
+/// Wire row of the `directions` arrays in routes list/detail.
+#[derive(Serialize, Clone)]
+struct DirectionRow {
+    route_id: i64,
+    direction: i64,
+    stops: i64,
+    matched_ratio: Option<f64>,
+    snap_dist_p50_m: Option<f64>,
+    snap_dist_p95_m: Option<f64>,
+    outliers: Option<i64>,
+}
+
+fn direction_rows(conn: &Connection, route_ids: &[i64]) -> Result<Vec<DirectionRow>> {
     let mut out = Vec::new();
     if route_ids.is_empty() {
         return Ok(out);
@@ -53,28 +66,46 @@ fn direction_rows(conn: &Connection, route_ids: &[i64]) -> Result<Vec<Value>> {
             (Some(m), Some(p)) if p > 0.0 => Some(m / p),
             _ => None,
         };
-        out.push(json!({
-            "route_id": route_id,
-            "direction": direction,
-            "stops": stops,
-            "matched_ratio": ratio,
-            "snap_dist_p50_m": p50,
-            "snap_dist_p95_m": p95,
-            "outliers": outliers,
-        }));
+        out.push(DirectionRow {
+            route_id,
+            direction,
+            stops,
+            matched_ratio: ratio,
+            snap_dist_p50_m: p50,
+            snap_dist_p95_m: p95,
+            outliers,
+        });
     }
     Ok(out)
 }
 
 /// Fold the flat direction rows into per-route `directions` arrays.
-fn directions_by_route(rows: Vec<Value>) -> std::collections::HashMap<i64, Vec<Value>> {
+fn directions_by_route(
+    rows: Vec<DirectionRow>,
+) -> std::collections::HashMap<i64, Vec<DirectionRow>> {
     let mut map = std::collections::HashMap::new();
     for d in rows {
-        map.entry(d["route_id"].as_i64().unwrap())
-            .or_insert_with(Vec::new)
-            .push(d);
+        map.entry(d.route_id).or_insert_with(Vec::new).push(d);
     }
     map
+}
+
+/// Wire row of `GET /api/routes`.
+#[derive(Serialize)]
+struct RouteListRow {
+    route_id: i64,
+    route_code: String,
+    ext_uid: String,
+    subroute_name: Option<String>,
+    providers: Vec<String>,
+    side_routes: Vec<String>,
+    main_routes: Vec<String>,
+    directions: Vec<DirectionRow>,
+}
+
+#[derive(Serialize)]
+struct RoutesListResponse {
+    routes: Vec<RouteListRow>,
 }
 
 /// `GET /api/routes?q=&limit=` — one row per route with per-direction QA.
@@ -129,24 +160,49 @@ pub fn list(conn: &Connection, q: &str, limit: i64) -> Result<Value> {
     }
 
     let dirs = directions_by_route(direction_rows(conn, &ids)?);
-    let routes: Vec<Value> = routes
+    let routes: Vec<RouteListRow> = routes
         .into_iter()
         .map(
-            |(route_id, route_code, ext_uid, name, providers, side, main)| {
-                json!({
-                    "route_id": route_id,
-                    "route_code": route_code,
-                    "ext_uid": ext_uid,
-                    "subroute_name": name,
-                    "providers": providers,
-                    "side_routes": side,
-                    "main_routes": main,
-                    "directions": dirs.get(&route_id).cloned().unwrap_or_default(),
-                })
+            |(route_id, route_code, ext_uid, name, providers, side, main)| RouteListRow {
+                route_id,
+                route_code,
+                ext_uid,
+                subroute_name: name,
+                providers,
+                side_routes: side,
+                main_routes: main,
+                directions: dirs.get(&route_id).cloned().unwrap_or_default(),
             },
         )
         .collect();
-    Ok(json!({ "routes": routes }))
+    Ok(serde_json::to_value(RoutesListResponse { routes })?)
+}
+
+/// Wire row of the `subroutes` array in route detail.
+#[derive(Serialize)]
+struct SubrouteRow {
+    subroute_version_id: i64,
+    subroute_name: String,
+}
+
+/// Wire shape of `GET /api/routes/{id}`.
+#[derive(Serialize)]
+struct RouteDetailResponse {
+    route_id: i64,
+    route_code: String,
+    ext_uid: String,
+    /// ext_uid without the provider prefix (e.g. `tcg:1` → `1`)
+    xno: String,
+    revision: i64,
+    version_no: i64,
+    valid_from: String,
+    status: String,
+    subroute_name: Option<String>,
+    subroutes: Vec<SubrouteRow>,
+    providers: Vec<String>,
+    side_routes: Vec<String>,
+    main_routes: Vec<String>,
+    directions: Vec<DirectionRow>,
 }
 
 /// `GET /api/routes/{id}` — None when the id is unknown.
@@ -185,12 +241,12 @@ pub fn detail(conn: &Connection, route_id: i64) -> Result<Option<Value>> {
         "SELECT subroute_version_id, subroute_name
          FROM subroute_version WHERE route_version_id = ?1",
     )?;
-    let subroutes: Vec<Value> = stmt
+    let subroutes: Vec<SubrouteRow> = stmt
         .query_map([rv_id], |r| {
-            Ok(json!({
-                "subroute_version_id": r.get::<_, i64>(0)?,
-                "subroute_name": r.get::<_, String>(1)?,
-            }))
+            Ok(SubrouteRow {
+                subroute_version_id: r.get("subroute_version_id")?,
+                subroute_name: r.get("subroute_name")?,
+            })
         })?
         .collect::<Result<_, _>>()?;
 
@@ -216,22 +272,36 @@ pub fn detail(conn: &Connection, route_id: i64) -> Result<Option<Value>> {
         .remove(&route_id)
         .unwrap_or_default();
 
-    Ok(Some(json!({
-        "route_id": id,
-        "route_code": route_code,
-        "ext_uid": ext_uid,
-        "xno": ext_uid.strip_prefix("tcg:").unwrap_or(&ext_uid),
-        "revision": revision,
-        "version_no": version_no,
-        "valid_from": valid_from,
-        "status": status,
-        "subroute_name": subroutes.first().and_then(|s| s["subroute_name"].as_str()),
-        "subroutes": subroutes,
-        "providers": providers,
-        "side_routes": side,
-        "main_routes": main,
-        "directions": dirs,
-    })))
+    Ok(Some(serde_json::to_value(RouteDetailResponse {
+        route_id: id,
+        xno: ext_uid.strip_prefix("tcg:").unwrap_or(&ext_uid).to_string(),
+        subroute_name: subroutes.first().map(|s| s.subroute_name.clone()),
+        subroutes,
+        providers,
+        side_routes: side,
+        main_routes: main,
+        directions: dirs,
+        route_code,
+        ext_uid,
+        revision,
+        version_no,
+        valid_from,
+        status,
+    })?))
+}
+
+/// Wire properties of one path feature (`seg_geometry_draft` piece).
+#[derive(Serialize)]
+struct PathPieceProps {
+    ordinal: i64,
+    length_m: f64,
+    geometry_method: String,
+    from_seq: i64,
+    to_seq: i64,
+    from_station_id: i64,
+    from_station_name: String,
+    to_station_id: i64,
+    to_station_name: String,
 }
 
 /// `GET /api/routes/{id}/directions/{dir}/path` — canonical geometry
@@ -241,7 +311,8 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
     let mut stmt = conn.prepare(
         "SELECT gd.ordinal, gd.encoded_polyline, gd.length_m, gd.geometry_method,
                 gd.from_route_stop_version_id, gd.to_route_stop_version_id,
-                fst.station_id, fst.station_name, tst.station_id, tst.station_name
+                fst.station_id AS from_station_id, fst.station_name AS from_station_name,
+                tst.station_id AS to_station_id, tst.station_name AS to_station_name
          FROM seg_geometry_draft gd
          JOIN subroute_version sv ON sv.subroute_version_id = gd.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
@@ -258,16 +329,16 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
     )?;
     let it = stmt.query_map(rusqlite::params![route_id, direction], |r| {
         Ok((
-            r.get::<_, i64>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, f64>(2)?,
-            r.get::<_, String>(3)?,
-            r.get::<_, i64>(4)?,
-            r.get::<_, i64>(5)?,
-            r.get::<_, i64>(6)?,
-            r.get::<_, String>(7)?,
-            r.get::<_, i64>(8)?,
-            r.get::<_, String>(9)?,
+            r.get::<_, i64>("ordinal")?,
+            r.get::<_, String>("encoded_polyline")?,
+            r.get::<_, f64>("length_m")?,
+            r.get::<_, String>("geometry_method")?,
+            r.get::<_, i64>("from_route_stop_version_id")?,
+            r.get::<_, i64>("to_route_stop_version_id")?,
+            r.get::<_, i64>("from_station_id")?,
+            r.get::<_, String>("from_station_name")?,
+            r.get::<_, i64>("to_station_id")?,
+            r.get::<_, String>("to_station_name")?,
         ))
     })?;
 
@@ -292,17 +363,17 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
         let (from_seq, to_seq) = rsv_sequences(conn, from_rsv, to_rsv)?;
         features.push(geojson::feature(
             geojson::line_string(&pts),
-            json!({
-                "ordinal": ordinal,
-                "length_m": length_m,
-                "geometry_method": method,
-                "from_seq": from_seq,
-                "to_seq": to_seq,
-                "from_station_id": from_sid,
-                "from_station_name": from_sname,
-                "to_station_id": to_sid,
-                "to_station_name": to_sname,
-            }),
+            serde_json::to_value(PathPieceProps {
+                ordinal,
+                length_m,
+                geometry_method: method,
+                from_seq,
+                to_seq,
+                from_station_id: from_sid,
+                from_station_name: from_sname,
+                to_station_id: to_sid,
+                to_station_name: to_sname,
+            })?,
         ));
     }
     Ok(geojson::feature_collection(features))
@@ -317,6 +388,31 @@ fn rsv_sequences(conn: &Connection, from: i64, to: i64) -> Result<(i64, i64)> {
         [from, to],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?)
+}
+
+/// Wire row of `GET /api/routes/{id}/directions/{dir}/stops`.
+#[derive(Serialize)]
+struct RouteStopRow {
+    stop_sequence: i64,
+    source_order_no: Option<i64>,
+    stop_version_id: i64,
+    stop_code: String,
+    stop_name: String,
+    lat: f64,
+    lon: f64,
+    station_id: i64,
+    chainage_m: Option<f64>,
+    snap_dist_m: Option<f64>,
+    method: Option<String>,
+    monotonic_clamped: Option<i64>,
+    /// [lon, lat], null when not projected
+    projected: Option<[f64; 2]>,
+    bearing: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct RouteStopsResponse {
+    stops: Vec<RouteStopRow>,
 }
 
 /// `GET /api/routes/{id}/directions/{dir}/stops` — ordered stops + projection QA.
@@ -337,29 +433,58 @@ pub fn stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> 
          WHERE rv.route_id = ?1 AND rsv.direction = ?2
          ORDER BY rsv.stop_sequence",
     )?;
-    let it = stmt.query_map(rusqlite::params![route_id, direction], |r| {
-        Ok(json!({
-            "stop_sequence": r.get::<_, i64>(0)?,
-            "source_order_no": r.get::<_, Option<i64>>(1)?,
-            "stop_version_id": r.get::<_, i64>(2)?,
-            "stop_code": r.get::<_, String>(3)?,
-            "stop_name": r.get::<_, String>(4)?,
-            "lat": r.get::<_, f64>(5)?,
-            "lon": r.get::<_, f64>(6)?,
-            "station_id": r.get::<_, i64>(7)?,
-            "chainage_m": r.get::<_, Option<f64>>(8)?,
-            "snap_dist_m": r.get::<_, Option<f64>>(9)?,
-            "method": r.get::<_, Option<String>>(10)?,
-            "monotonic_clamped": r.get::<_, Option<i64>>(11)?,
-            "projected": match (r.get::<_, Option<f64>>(12)?, r.get::<_, Option<f64>>(13)?) {
-                (Some(lat), Some(lon)) => json!([lon, lat]),
-                _ => Value::Null,
-            },
-            "bearing": r.get::<_, Option<f64>>(14)?,
-        }))
-    })?;
-    let stops: Vec<Value> = it.collect::<Result<_, _>>()?;
-    Ok(json!({ "stops": stops }))
+    let stops = stmt
+        .query_map(rusqlite::params![route_id, direction], |r| {
+            Ok(RouteStopRow {
+                stop_sequence: r.get("stop_sequence")?,
+                source_order_no: r.get("source_order_no")?,
+                stop_version_id: r.get("stop_version_id")?,
+                stop_code: r.get("stop_code")?,
+                stop_name: r.get("stop_name")?,
+                lat: r.get("latitude")?,
+                lon: r.get("longitude")?,
+                station_id: r.get("station_id")?,
+                chainage_m: r.get("chainage_m")?,
+                snap_dist_m: r.get("snap_dist_m")?,
+                method: r.get("method")?,
+                monotonic_clamped: r.get("monotonic_clamped")?,
+                projected: match (
+                    r.get::<_, Option<f64>>("projected_lat")?,
+                    r.get::<_, Option<f64>>("projected_lon")?,
+                ) {
+                    (Some(lat), Some(lon)) => Some([lon, lat]),
+                    _ => None,
+                },
+                bearing: r.get("bearing_deg")?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(serde_json::to_value(RouteStopsResponse { stops })?)
+}
+
+/// One matched way run row (`seg_match_way` × way name).
+struct WayRun {
+    ordinal: i64,
+    osm_way_id: i64,
+    entry_node_id: i64,
+    exit_node_id: i64,
+    cum_start_m: f64,
+    cum_end_m: f64,
+    name: Option<String>,
+}
+
+/// Wire properties of one ways feature.
+#[derive(Serialize)]
+struct WayProps {
+    ordinal: i64,
+    osm_way_id: i64,
+    name: Option<String>,
+    entry_node_id: i64,
+    exit_node_id: i64,
+    entry_coords: [f64; 2],
+    exit_coords: [f64; 2],
+    cum_start_m: f64,
+    cum_end_m: f64,
 }
 
 /// `GET /api/routes/{id}/directions/{dir}/ways` — matched OSM way runs,
@@ -375,24 +500,22 @@ pub fn ways(conn: &Connection, route_id: i64, dir: i64) -> Result<Value> {
          WHERE rv.route_id = ?1 AND mw.direction = ?2
          ORDER BY mw.ordinal",
     )?;
-    /// (ordinal, way_id, entry, exit, cum_start, cum_end, name)
-    type WayRun = (i64, i64, i64, i64, f64, f64, Option<String>);
     let runs: Vec<WayRun> = stmt
         .query_map(rusqlite::params![route_id, dir], |r| {
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-                r.get(5)?,
-                r.get(6)?,
-            ))
+            Ok(WayRun {
+                ordinal: r.get("ordinal")?,
+                osm_way_id: r.get("osm_way_id")?,
+                entry_node_id: r.get("entry_node_id")?,
+                exit_node_id: r.get("exit_node_id")?,
+                cum_start_m: r.get("cum_start_m")?,
+                cum_end_m: r.get("cum_end_m")?,
+                name: r.get("name")?,
+            })
         })?
         .collect::<Result<_, _>>()?;
 
     let mut features = Vec::new();
-    for (ordinal, way_id, entry, exit, cum_start, cum_end, name) in runs {
+    for run in runs {
         // ordered node run for the way
         let mut nstmt = conn.prepare(
             "SELECT n.osm_node_id, n.lat, n.lon
@@ -401,12 +524,12 @@ pub fn ways(conn: &Connection, route_id: i64, dir: i64) -> Result<Value> {
              ORDER BY wn.ordinal",
         )?;
         let nodes: Vec<(i64, f64, f64)> = nstmt
-            .query_map([way_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .query_map([run.osm_way_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<Result<_, _>>()?;
 
         let (lo, hi) = match (
-            nodes.iter().position(|(id, _, _)| *id == entry),
-            nodes.iter().position(|(id, _, _)| *id == exit),
+            nodes.iter().position(|(id, _, _)| *id == run.entry_node_id),
+            nodes.iter().position(|(id, _, _)| *id == run.exit_node_id),
         ) {
             (Some(a), Some(b)) => (a.min(b), a.max(b)),
             _ => (0, nodes.len().saturating_sub(1)), // fall back to full run
@@ -423,20 +546,50 @@ pub fn ways(conn: &Connection, route_id: i64, dir: i64) -> Result<Value> {
         }
         features.push(geojson::feature(
             geojson::line_string(&pts),
-            json!({
-                "ordinal": ordinal,
-                "osm_way_id": way_id,
-                "name": name,
-                "entry_node_id": entry,
-                "exit_node_id": exit,
-                "entry_coords": [pts.first().unwrap().lon, pts.first().unwrap().lat],
-                "exit_coords": [pts.last().unwrap().lon, pts.last().unwrap().lat],
-                "cum_start_m": cum_start,
-                "cum_end_m": cum_end,
-            }),
+            serde_json::to_value(WayProps {
+                ordinal: run.ordinal,
+                osm_way_id: run.osm_way_id,
+                name: run.name,
+                entry_node_id: run.entry_node_id,
+                exit_node_id: run.exit_node_id,
+                entry_coords: [pts.first().unwrap().lon, pts.first().unwrap().lat],
+                exit_coords: [pts.last().unwrap().lon, pts.last().unwrap().lat],
+                cum_start_m: run.cum_start_m,
+                cum_end_m: run.cum_end_m,
+            })?,
         ));
     }
     Ok(json!({ "type": "FeatureCollection", "features": features }))
+}
+
+/// Wire row of the staging `stops` array in raw.
+#[derive(Serialize)]
+struct RawStopRow {
+    source_order_no: i64,
+    ivr_no: Option<i64>,
+    sid: Option<i64>,
+    node_id: String,
+    station_name: String,
+    lat: f64,
+    lon: f64,
+}
+
+/// The effective polyline the downstream pipeline consumes: the override
+/// when one exists, else the src staging line.
+#[derive(Serialize)]
+struct EffectiveLine {
+    points: Vec<[f64; 2]>,
+    source: String,
+    updated_at: Option<String>,
+}
+
+/// Wire shape of `GET /api/routes/{id}/directions/{dir}/raw`.
+#[derive(Serialize)]
+struct RawResponse {
+    batch_id: i64,
+    path: Option<Value>,
+    stops: Vec<RawStopRow>,
+    effective: EffectiveLine,
 }
 
 /// `GET /api/routes/{id}/directions/{dir}/raw` — latest-batch staging rows
@@ -489,17 +642,17 @@ pub fn raw(conn: &Connection, route_id: i64, dir: i64) -> Result<Option<Value>> 
          WHERE batch_id = ?1 AND xno = ?2 AND direction = ?3
          ORDER BY source_order_no",
     )?;
-    let stops: Vec<Value> = stmt
+    let stops: Vec<RawStopRow> = stmt
         .query_map(rusqlite::params![batch_id, xno, dir], |r| {
-            Ok(json!({
-                "source_order_no": r.get::<_, i64>(0)?,
-                "ivr_no": r.get::<_, Option<i64>>(1)?,
-                "sid": r.get::<_, Option<i64>>(2)?,
-                "node_id": r.get::<_, String>(3)?,
-                "station_name": r.get::<_, String>(4)?,
-                "lat": r.get::<_, f64>(5)?,
-                "lon": r.get::<_, f64>(6)?,
-            }))
+            Ok(RawStopRow {
+                source_order_no: r.get("source_order_no")?,
+                ivr_no: r.get("ivr_no")?,
+                sid: r.get("sid")?,
+                node_id: r.get("node_id")?,
+                station_name: r.get("station_name")?,
+                lat: r.get("lat")?,
+                lon: r.get("lon")?,
+            })
         })?
         .collect::<Result<_, _>>()?;
 
@@ -538,18 +691,18 @@ pub fn raw(conn: &Connection, route_id: i64, dir: i64) -> Result<Option<Value>> 
         } else {
             (encoded.clone().unwrap_or_default(), "src", None)
         };
-    let eff_points: Vec<Vec<f64>> = polyline::decode(&eff_encoded)
-        .map(|pts| pts.iter().map(|p| vec![p.lat, p.lon]).collect())
+    let eff_points: Vec<[f64; 2]> = polyline::decode(&eff_encoded)
+        .map(|pts| pts.iter().map(|p| [p.lat, p.lon]).collect())
         .unwrap_or_default();
 
-    Ok(Some(json!({
-        "batch_id": batch_id,
-        "path": path,
-        "stops": stops,
-        "effective": {
-            "points": eff_points,
-            "source": source,
-            "updated_at": eff_updated_at,
+    Ok(Some(serde_json::to_value(RawResponse {
+        batch_id,
+        path,
+        stops,
+        effective: EffectiveLine {
+            points: eff_points,
+            source: source.to_string(),
+            updated_at: eff_updated_at,
         },
-    })))
+    })?))
 }
