@@ -17,15 +17,15 @@ pub use allocator::mint;
 pub use batch::{create_batch, latest_batch, latest_open_batch, set_batch_status};
 pub use edit::{
     apply_line_edit, apply_line_undo, apply_station_move, apply_station_rename, apply_station_undo,
-    apply_stop_edit, apply_stop_regroup, apply_stop_undo, edit_entity, edit_stop,
-    effective_encoded, entity_history, load_polyline_edit, load_polyline_line, load_station_edit,
-    load_station_snapshot, load_stop_edit, load_stop_snapshot, regroup_stop, station_is_current,
-    undo_stop, edit_polyline_line, undo_polyline_line, EditError, EditLogRow, EditOutcome,
-    LineApplied, LineEditCmd, LineEditOp, LineSnapshot, LineUndoOp, LineUndone, OverrideRow,
-    PoleApplied, PoleOp, PoleSnapshot, PoleUndoOp, PolylineEditRow, RegroupStop, StationEdit,
-    StationMoveApplied, StationMoveOp, StationMoveUndoOp, StationRenameApplied, StationRenameOp,
-    StationRenameUndoOp, StationSnapshot, StationUndoOp, StationUndone, StopEdit, StopEditOp,
-    StopEditRow, StopEditUndoOp, StopRegroupOp, StopSnapshot,
+    apply_stop_edit, apply_stop_regroup, apply_stop_undo, edit_entity, edit_polyline_line,
+    edit_stop, effective_encoded, entity_history, load_polyline_edit, load_polyline_line,
+    load_station_edit, load_station_snapshot, load_stop_edit, load_stop_snapshot, move_station,
+    regroup_stop, station_is_current, undo_polyline_line, undo_stop, EditError, EditLogRow,
+    EditOutcome, LineApplied, LineEditCmd, LineEditOp, LineSnapshot, LineUndoOp, LineUndone,
+    OverrideRow, PoleApplied, PoleOp, PoleSnapshot, PoleUndoOp, PolylineEditRow, RegroupStop,
+    StationEdit, StationMove, StationMoveApplied, StationMoveOp, StationMoveUndoOp,
+    StationRenameApplied, StationRenameOp, StationRenameUndoOp, StationSnapshot, StationUndoOp,
+    StationUndone, StopEdit, StopEditOp, StopEditRow, StopEditUndoOp, StopRegroupOp, StopSnapshot,
 };
 pub use migrate::migrate;
 
