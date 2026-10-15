@@ -386,6 +386,8 @@ mod tests {
     #[test]
     fn pick_run_beyond_gap_returns_none() {
         let runs = [run(0.0, 100.0), run(5000.0, 6000.0)];
+        // past the gap tolerance from the last run -> a different road
+        assert!(pick_run(&runs, 6250.0).unwrap().is_none());
     }
 
     #[test]
