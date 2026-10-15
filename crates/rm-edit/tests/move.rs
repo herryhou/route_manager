@@ -39,7 +39,11 @@ fn fixture(conn: &rusqlite::Connection) -> i64 {
 }
 
 fn cmd(svi: i64) -> StationMove {
-    StationMove { station_version_id: svi, latitude: 24.5, longitude: 120.5 }
+    StationMove {
+        station_version_id: svi,
+        latitude: 24.5,
+        longitude: 120.5,
+    }
 }
 
 #[test]
@@ -56,11 +60,22 @@ fn move_station_moves_end_to_end() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .unwrap();
-    assert_eq!((lat, lon, name.as_str(), src.as_str()), (24.5, 120.5, "S", "manual"));
+    assert_eq!(
+        (lat, lon, name.as_str(), src.as_str()),
+        (24.5, 120.5, "S", "manual")
+    );
     // zero stale marks, poles untouched (no manual stop versions minted)
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(n, 0);
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM stop_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(n, 0);
     let _ = EditError::StationNotCurrent(0); // variant is public
 }

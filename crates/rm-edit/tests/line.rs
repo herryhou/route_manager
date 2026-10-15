@@ -133,7 +133,10 @@ fn create_changes() -> serde_json::Value {
 fn plan_parses_create_into_delete() {
     let plan = plan_line_undo(&line_row("create", create_changes())).unwrap();
     assert_eq!(plan.restored.is_none(), true, "create undo deletes");
-    assert_eq!((plan.xno.as_str(), plan.direction, plan.route_id), ("1", 1, 1));
+    assert_eq!(
+        (plan.xno.as_str(), plan.direction, plan.route_id),
+        ("1", 1, 1)
+    );
     assert_eq!(plan.undone_ts, "2026-01-02T00:00:00Z");
 }
 
@@ -189,7 +192,8 @@ fn line_undo_end_to_end_create_then_undo_deletes() {
     let out = undo_polyline_line(&conn, first.edit_id, "h", "rev").unwrap();
     assert!(out.deleted);
     assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM polyline_override", [], |r| r.get::<_, i64>(0))
+        conn.query_row("SELECT COUNT(*) FROM polyline_override", [], |r| r
+            .get::<_, i64>(0))
             .unwrap(),
         0
     );

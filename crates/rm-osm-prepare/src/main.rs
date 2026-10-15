@@ -9,7 +9,10 @@ struct Args {
     #[arg(long, default_value = "data/taichung.db")]
     db: PathBuf,
     /// Local OSM PBF extract (Taichung-scoped)
-    #[arg(long, default_value = "assets/Taichung/data/TW-TXG-202610020300.osm.pbf")]
+    #[arg(
+        long,
+        default_value = "assets/Taichung/data/TW-TXG-202610020300.osm.pbf"
+    )]
     pbf: PathBuf,
     /// Keep only ways touching this bbox: "south,west,north,east" degrees.
     /// Keeps each surviving way whole, so edge connectivity survives.
@@ -23,10 +26,9 @@ fn main() -> anyhow::Result<()> {
         .init();
     let args = Args::parse();
     let clip = match &args.clip {
-        Some(s) => Some(
-            rm_osm_prepare::clip::Bbox::parse(s)
-                .ok_or_else(|| anyhow::anyhow!("--clip expects south,west,north,east degrees, got {s:?}"))?,
-        ),
+        Some(s) => Some(rm_osm_prepare::clip::Bbox::parse(s).ok_or_else(|| {
+            anyhow::anyhow!("--clip expects south,west,north,east degrees, got {s:?}")
+        })?),
         None => None,
     };
     let conn = rm_db::open(&args.db)?;

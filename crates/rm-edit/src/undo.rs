@@ -89,7 +89,11 @@ fn plan_rename_undo_parts(
         ) else {
             return Err(EditError::NotUndoable(edit_id));
         };
-        poles.push(PoleUndo { stop_id, old_svi, new_svi });
+        poles.push(PoleUndo {
+            stop_id,
+            old_svi,
+            new_svi,
+        });
     }
     Ok(RenameUndoOp {
         edit_id,
@@ -109,7 +113,12 @@ pub struct UndoOutcome {
 /// Application service: load the logged station edit → plan (pure) → apply
 /// the inverse in one tx. Zero SQL here. Handles both station kinds
 /// (rename, move) via the kind-dispatched plan.
-pub fn undo_station(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result<UndoOutcome> {
+pub fn undo_station(
+    conn: &Connection,
+    edit_id: i64,
+    editor: &str,
+    note: &str,
+) -> Result<UndoOutcome> {
     let edit = rm_db::load_station_edit(conn, edit_id)?.ok_or(EditError::NotUndoable(edit_id))?;
     let db_op = match plan_station_undo(&edit)? {
         StationUndoOp::Rename(p) => rm_db::StationUndoOp::Rename(rm_db::StationRenameUndoOp {
@@ -134,7 +143,8 @@ pub fn undo_station(conn: &Connection, edit_id: i64, editor: &str, note: &str) -
             new_station_version_id: p.new_station_version_id,
         }),
     };
-    let undone = rm_db::apply_station_undo(conn, &db_op, editor, note).map_err(crate::map_db_err)?;
+    let undone =
+        rm_db::apply_station_undo(conn, &db_op, editor, note).map_err(crate::map_db_err)?;
     Ok(UndoOutcome {
         edit_id: undone.edit_id,
         restored_station_version_id: undone.restored_station_version_id,
@@ -182,13 +192,22 @@ mod tests {
     #[test]
     fn plan_parses_recorded_shape() {
         let op = plan_station_undo(&edit("update", rename_changes())).unwrap();
-        let StationUndoOp::Rename(op) = op else { panic!("expected rename arm") };
+        let StationUndoOp::Rename(op) = op else {
+            panic!("expected rename arm")
+        };
         assert_eq!(op.edit_id, 7);
         assert_eq!(op.station_id, 1);
         assert_eq!(op.old_station_version_id, 20);
         assert_eq!(op.new_station_version_id, 21);
         assert_eq!(op.poles.len(), 2);
-        assert_eq!((op.poles[0].stop_id, op.poles[0].old_svi, op.poles[0].new_svi), (1, 10, 12));
+        assert_eq!(
+            (
+                op.poles[0].stop_id,
+                op.poles[0].old_svi,
+                op.poles[0].new_svi
+            ),
+            (1, 10, 12)
+        );
     }
 
     #[test]
@@ -196,7 +215,9 @@ mod tests {
         let mut c = rename_changes();
         c["stops"] = json!([]);
         let op = plan_station_undo(&edit("update", c)).unwrap();
-        let StationUndoOp::Rename(op) = op else { panic!("expected rename arm") };
+        let StationUndoOp::Rename(op) = op else {
+            panic!("expected rename arm")
+        };
         assert!(op.poles.is_empty());
     }
 
@@ -210,26 +231,47 @@ mod tests {
     fn plan_rejects_unknown_or_missing_kind() {
         let mut c = rename_changes();
         c["kind"] = json!("stop_move");
-        assert!(matches!(plan_station_undo(&edit("update", c)), Err(EditError::NotUndoable(7))));
+        assert!(matches!(
+            plan_station_undo(&edit("update", c)),
+            Err(EditError::NotUndoable(7))
+        ));
         let mut c = rename_changes();
         c.as_object_mut().unwrap().remove("kind");
-        assert!(matches!(plan_station_undo(&edit("update", c)), Err(EditError::NotUndoable(7))));
+        assert!(matches!(
+            plan_station_undo(&edit("update", c)),
+            Err(EditError::NotUndoable(7))
+        ));
     }
 
     #[test]
     fn plan_rejects_malformed_stops_and_missing_versions() {
         let mut c = rename_changes();
         c["stops"] = json!("not-an-array");
-        assert!(matches!(plan_station_undo(&edit("update", c)), Err(EditError::NotUndoable(7))));
+        assert!(matches!(
+            plan_station_undo(&edit("update", c)),
+            Err(EditError::NotUndoable(7))
+        ));
         let mut c = rename_changes();
         c["stops"][0].as_object_mut().unwrap().remove("new_svi");
-        assert!(matches!(plan_station_undo(&edit("update", c)), Err(EditError::NotUndoable(7))));
+        assert!(matches!(
+            plan_station_undo(&edit("update", c)),
+            Err(EditError::NotUndoable(7))
+        ));
         let mut c = rename_changes();
         c.as_object_mut().unwrap().remove("stops");
-        assert!(matches!(plan_station_undo(&edit("update", c)), Err(EditError::NotUndoable(7))));
+        assert!(matches!(
+            plan_station_undo(&edit("update", c)),
+            Err(EditError::NotUndoable(7))
+        ));
         let e = edit("update", rename_changes());
-        let e = StationEdit { new_station_version_id: None, ..e };
-        assert!(matches!(plan_station_undo(&e), Err(EditError::NotUndoable(7))));
+        let e = StationEdit {
+            new_station_version_id: None,
+            ..e
+        };
+        assert!(matches!(
+            plan_station_undo(&e),
+            Err(EditError::NotUndoable(7))
+        ));
     }
 
     #[test]

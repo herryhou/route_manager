@@ -28,13 +28,19 @@ fn fixture(conn: &Connection) {
     }
     conn.execute(
         "INSERT INTO route (route_id, route_code, ext_uid, created_at, updated_at)
-         VALUES (1, '1', 'tcg:1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')", []).unwrap();
+         VALUES (1, '1', 'tcg:1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
     conn.execute(
         "INSERT INTO route_version (route_version_id, route_id, version_no, valid_from, status, created_at)
          VALUES (1, 1, 1, '2026-01-01T00:00:00Z', 'PUBLISHED', '2026-01-01T00:00:00Z')", []).unwrap();
     conn.execute(
         "INSERT INTO subroute (subroute_id, route_id, subroute_code, created_at)
-         VALUES (1, 1, '1-0', '2026-01-01T00:00:00Z')", []).unwrap();
+         VALUES (1, 1, '1-0', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
     conn.execute(
         "INSERT INTO subroute_version (subroute_version_id, route_version_id, subroute_id, subroute_name, created_at)
          VALUES (1, 1, 1, '1', '2026-01-01T00:00:00Z')", []).unwrap();
@@ -43,33 +49,70 @@ fn fixture(conn: &Connection) {
          VALUES (1, 1, 10, 0, 1, '2026-01-01T00:00:00Z')", []).unwrap();
     conn.execute(
         "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
-         VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')", []).unwrap();
-    conn.execute("INSERT INTO id_sequence (table_name, next_value) VALUES ('station_version', 21)", []).unwrap();
-    conn.execute("INSERT INTO id_sequence (table_name, next_value) VALUES ('stop_version', 12)", []).unwrap();
+         VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO id_sequence (table_name, next_value) VALUES ('station_version', 21)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO id_sequence (table_name, next_value) VALUES ('stop_version', 12)",
+        [],
+    )
+    .unwrap();
 }
 
 fn cmd(new_name: &str, level: RenameLevel) -> StationRename {
-    StationRename { station_version_id: 20, new_name: new_name.into(), level }
+    StationRename {
+        station_version_id: 20,
+        new_name: new_name.into(),
+        level,
+    }
 }
 
 #[test]
 fn undo_station_rename_restores_names() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
-    let renamed = rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "cjk").unwrap();
+    let renamed = rename_station(
+        &conn,
+        cmd("台北車站", RenameLevel::AllPoles),
+        "herry",
+        "cjk",
+    )
+    .unwrap();
     let out = undo_station(&conn, renamed.edit_id, "herry", "revert").unwrap();
     assert_eq!(out.restored_station_version_id, 20);
-    let name: String = conn.query_row(
-        "SELECT station_name FROM station_version WHERE valid_to IS NULL", [], |r| r.get(0)).unwrap();
+    let name: String = conn
+        .query_row(
+            "SELECT station_name FROM station_version WHERE valid_to IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(name, "S");
-    let mut stmt = conn.prepare(
-        "SELECT stop_name FROM stop_version WHERE valid_to IS NULL ORDER BY stop_version_id").unwrap();
-    let names: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap()
-        .collect::<Result<_, _>>().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT stop_name FROM stop_version WHERE valid_to IS NULL ORDER BY stop_version_id",
+        )
+        .unwrap();
+    let names: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
     assert_eq!(names, vec!["S".to_string(), "S 往".to_string()]);
     // bearing back on the original pole version
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = 10", [], |r| r.get(0)).unwrap();
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = 10",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(n, 1);
 }
 
@@ -77,7 +120,8 @@ fn undo_station_rename_restores_names() {
 fn undo_station_rename_refuses_undo_of_undo() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
-    let renamed = rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "").unwrap();
+    let renamed =
+        rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "").unwrap();
     let u = undo_station(&conn, renamed.edit_id, "herry", "").unwrap();
     let err = undo_station(&conn, u.edit_id, "herry", "").unwrap_err();
     assert!(err.to_string().contains("cannot be undone"), "{err}");
@@ -96,9 +140,19 @@ fn undo_station_rename_unknown_edit_id() {
 fn undo_station_rename_refuses_when_pole_edited_after_rename() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
-    let renamed = rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "").unwrap();
-    rm_edit::edit_stop(&conn, renamed.poles[0].new_svi,
-        rm_edit::StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+    let renamed =
+        rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "").unwrap();
+    rm_edit::edit_stop(
+        &conn,
+        renamed.poles[0].new_svi,
+        rm_edit::StopEdit {
+            stop_name: Some("shadowed".into()),
+            ..Default::default()
+        },
+        "h",
+        "n",
+    )
+    .unwrap();
     let err = undo_station(&conn, renamed.edit_id, "herry", "").unwrap_err();
     assert!(err.to_string().contains("cannot be undone"), "{err}");
 }
@@ -108,9 +162,17 @@ fn undo_station_rename_refuses_stop_edit_row() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
     // a plain stop-edit row: entity='stop', no station_rename kind
-    let out = rm_edit::edit_stop(&conn, 10, rm_edit::StopEdit {
-        stop_name: Some("N".into()), ..Default::default()
-    }, "h", "n").unwrap();
+    let out = rm_edit::edit_stop(
+        &conn,
+        10,
+        rm_edit::StopEdit {
+            stop_name: Some("N".into()),
+            ..Default::default()
+        },
+        "h",
+        "n",
+    )
+    .unwrap();
     let err = undo_station(&conn, out.edit_id, "herry", "").unwrap_err();
     assert!(err.to_string().contains("cannot be undone"), "{err}");
 }
@@ -121,7 +183,11 @@ fn undo_station_moves_back() {
     fixture(&conn);
     let m = move_station(
         &conn,
-        StationMove { station_version_id: 20, latitude: 24.5, longitude: 120.5 },
+        StationMove {
+            station_version_id: 20,
+            latitude: 24.5,
+            longitude: 120.5,
+        },
         "herry",
         "fix",
     )
@@ -138,7 +204,9 @@ fn undo_station_moves_back() {
         .unwrap();
     assert_eq!((lat, lon), (24.0, 120.0));
     // undo mints nothing
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get(0)).unwrap();
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(n, 2);
 }
 
@@ -148,14 +216,22 @@ fn undo_station_refuses_move_after_move() {
     fixture(&conn);
     let first = move_station(
         &conn,
-        StationMove { station_version_id: 20, latitude: 24.5, longitude: 120.5 },
+        StationMove {
+            station_version_id: 20,
+            latitude: 24.5,
+            longitude: 120.5,
+        },
         "herry",
         "a",
     )
     .unwrap();
     move_station(
         &conn,
-        StationMove { station_version_id: first.new_station_version_id, latitude: 24.6, longitude: 120.6 },
+        StationMove {
+            station_version_id: first.new_station_version_id,
+            latitude: 24.6,
+            longitude: 120.6,
+        },
         "herry",
         "b",
     )
@@ -163,7 +239,13 @@ fn undo_station_refuses_move_after_move() {
     let err = undo_station(&conn, first.edit_id, "herry", "revert").unwrap_err();
     assert!(err.to_string().contains("not the current version"), "{err}");
     // no undo row written
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log WHERE action = 'undo'", [], |r| r.get(0)).unwrap();
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM edit_log WHERE action = 'undo'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(n, 0);
 }
 
@@ -173,7 +255,11 @@ fn undo_station_refuses_undo_of_undo() {
     fixture(&conn);
     let m = move_station(
         &conn,
-        StationMove { station_version_id: 20, latitude: 24.5, longitude: 120.5 },
+        StationMove {
+            station_version_id: 20,
+            latitude: 24.5,
+            longitude: 120.5,
+        },
         "herry",
         "fix",
     )

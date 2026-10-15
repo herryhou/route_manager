@@ -15,7 +15,11 @@ fn identity_consumes_open_batch_then_refuses_reuse() {
     assert!(first.stops > 0);
 
     let status: String = conn
-        .query_row("SELECT status FROM import_batch WHERE batch_id = ?1", [batch], |r| r.get(0))
+        .query_row(
+            "SELECT status FROM import_batch WHERE batch_id = ?1",
+            [batch],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(status, "CLOSED");
 

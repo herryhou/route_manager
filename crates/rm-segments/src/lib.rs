@@ -54,11 +54,7 @@ pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> 
 /// a different cause and survives, and a mark inserted after the snapshot
 /// survives because its rowid was never seen. Unknown route ids /
 /// unparseable keys: warn, keep.
-pub fn run_stale(
-    conn: &Connection,
-    batch_id: i64,
-    outlier_m: f64,
-) -> Result<Option<StaleOutcome>> {
+pub fn run_stale(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Option<StaleOutcome>> {
     let snapshot: Vec<(i64, i64, String)> = {
         let mut stmt = conn.prepare(
             "SELECT rowid, cause_edit_id, key FROM stale_mark
@@ -100,7 +96,11 @@ pub fn run_stale(
         }
     }
     let summary = run_inner(conn, batch_id, outlier_m, Some(&only), &clear)?;
-    Ok(Some(StaleOutcome { summary, cleared: clear.len(), kept }))
+    Ok(Some(StaleOutcome {
+        summary,
+        cleared: clear.len(),
+        kept,
+    }))
 }
 
 fn run_inner(
@@ -161,8 +161,7 @@ fn run_inner(
         // polylines for this route, by direction (effective = override ?? src)
         let mut encoded: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
         {
-            let dirs: std::collections::BTreeSet<i64> =
-                stops.iter().map(|s| s.direction).collect();
+            let dirs: std::collections::BTreeSet<i64> = stops.iter().map(|s| s.direction).collect();
             for dir in dirs {
                 encoded.insert(dir, rm_db::effective_encoded(&tx, batch_id, xno, dir)?);
             }

@@ -732,7 +732,11 @@ fn write_pair_spread_report(conn: &Connection, qa_dir: &Path) -> anyhow::Result<
     ids.sort_unstable();
     ids.dedup();
     if !ids.is_empty() {
-        let list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+        let list = ids
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         let mut stmt = conn.prepare(&format!(
             "SELECT station_id, station_name FROM station_version
              WHERE valid_to IS NULL AND station_id IN ({list})"

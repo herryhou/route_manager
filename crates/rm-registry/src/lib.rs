@@ -16,10 +16,7 @@ pub struct StaleRun {
     pub split: split::Summary,
 }
 
-pub fn run_stale(
-    conn: &rusqlite::Connection,
-    batch_id: i64,
-) -> anyhow::Result<Option<StaleRun>> {
+pub fn run_stale(conn: &rusqlite::Connection, batch_id: i64) -> anyhow::Result<Option<StaleRun>> {
     let snapshot: Vec<(i64, i64)> = {
         let mut stmt = conn.prepare(
             "SELECT rowid, cause_edit_id FROM stale_mark
@@ -47,5 +44,8 @@ pub fn run_stale(
         }
     }
     tx.commit()?;
-    Ok(Some(StaleRun { bearings: b, split: sp }))
+    Ok(Some(StaleRun {
+        bearings: b,
+        split: sp,
+    }))
 }

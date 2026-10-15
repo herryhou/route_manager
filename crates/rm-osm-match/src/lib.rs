@@ -79,18 +79,21 @@ struct Outcome {
 
 fn match_jobs(graph: &Arc<RoadGraph>, jobs: Vec<Job>) -> Vec<Outcome> {
     jobs.into_par_iter()
-        .map_init(|| viterbi::Ctx::new(graph), |ctx, job| {
-            let result = (|| {
-                let pts = rm_core::polyline::decode(&job.encoded)?;
-                Ok(viterbi::match_path(
-                    ctx,
-                    &pts,
-                    &NewsonKrummEmission::default(),
-                    &BasicTransition::default(),
-                ))
-            })();
-            Outcome { job, result }
-        })
+        .map_init(
+            || viterbi::Ctx::new(graph),
+            |ctx, job| {
+                let result = (|| {
+                    let pts = rm_core::polyline::decode(&job.encoded)?;
+                    Ok(viterbi::match_path(
+                        ctx,
+                        &pts,
+                        &NewsonKrummEmission::default(),
+                        &BasicTransition::default(),
+                    ))
+                })();
+                Outcome { job, result }
+            },
+        )
         .collect()
 }
 
@@ -288,9 +291,10 @@ pub fn run_stale(conn: &Connection, batch_id: i64) -> anyhow::Result<Option<Stal
     let mut clear: Vec<(i64, i64)> = Vec::new();
     let mut kept = 0usize;
     for (rowid, cause, key) in snapshot {
-        let Some((rid, dir)) = key.split_once(':').and_then(|(r, d)| {
-            Some((r.parse::<i64>().ok()?, d.parse::<i64>().ok()?))
-        }) else {
+        let Some((rid, dir)) = key
+            .split_once(':')
+            .and_then(|(r, d)| Some((r.parse::<i64>().ok()?, d.parse::<i64>().ok()?)))
+        else {
             tracing::warn!(key = %key, "unparseable seg_match key; keeping mark");
             kept += 1;
             continue;
@@ -311,8 +315,11 @@ pub fn run_stale(conn: &Connection, batch_id: i64) -> anyhow::Result<Option<Stal
         if mark_jobs.is_empty() {
             // latest batch dropped this direction's staging row: nothing to
             // recompute — keep the mark (a later ingest may restore it)
-            tracing::warn!(route = rid, direction = dir,
-                "no staging row for stale direction; keeping mark");
+            tracing::warn!(
+                route = rid,
+                direction = dir,
+                "no staging row for stale direction; keeping mark"
+            );
             kept += 1;
             continue;
         }
@@ -341,4 +348,3 @@ pub fn run_stale(conn: &Connection, batch_id: i64) -> anyhow::Result<Option<Stal
         kept,
     }))
 }
-

@@ -118,10 +118,7 @@ mod tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        assert_eq!(
-            cols,
-            vec!["xno", "direction", "encoded", "updated_at"]
-        );
+        assert_eq!(cols, vec!["xno", "direction", "encoded", "updated_at"]);
         let n: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master

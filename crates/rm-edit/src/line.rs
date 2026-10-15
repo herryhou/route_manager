@@ -151,7 +151,7 @@ pub fn plan_line_undo(edit: &rm_db::PolylineEditRow) -> Result<LineUndoPlan, Edi
     let new = encoded.get("new").and_then(|v| v.as_str());
     let restored = match (old, new) {
         // every undoable row has a `new` (the state it put in place)
-        (None, Some(_)) => None,                             // create → undo deletes the override
+        (None, Some(_)) => None, // create → undo deletes the override
         (Some(encoded), Some(_)) => Some(encoded.to_string()), // update → restore prior
         _ => return Err(EditError::NotUndoable(edit.edit_id)),
     };

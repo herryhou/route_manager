@@ -1,7 +1,7 @@
 //! Integration: rename_station end-to-end on an in-memory DB.
 
-use rm_edit::{rename_station, EditError, RenameLevel, StationRename};
 use rm_db::open_in_memory;
+use rm_edit::{rename_station, EditError, RenameLevel, StationRename};
 use rusqlite::Connection;
 
 /// Same shape as rm-db's edit tests fixture: station 'S' (sv 20) + poles
@@ -26,13 +26,19 @@ fn fixture(conn: &Connection) {
     }
     conn.execute(
         "INSERT INTO route (route_id, route_code, ext_uid, created_at, updated_at)
-         VALUES (1, '1', 'tcg:1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')", []).unwrap();
+         VALUES (1, '1', 'tcg:1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
     conn.execute(
         "INSERT INTO route_version (route_version_id, route_id, version_no, valid_from, status, created_at)
          VALUES (1, 1, 1, '2026-01-01T00:00:00Z', 'PUBLISHED', '2026-01-01T00:00:00Z')", []).unwrap();
     conn.execute(
         "INSERT INTO subroute (subroute_id, route_id, subroute_code, created_at)
-         VALUES (1, 1, '1-0', '2026-01-01T00:00:00Z')", []).unwrap();
+         VALUES (1, 1, '1-0', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
     conn.execute(
         "INSERT INTO subroute_version (subroute_version_id, route_version_id, subroute_id, subroute_name, created_at)
          VALUES (1, 1, 1, '1', '2026-01-01T00:00:00Z')", []).unwrap();
@@ -41,24 +47,50 @@ fn fixture(conn: &Connection) {
          VALUES (1, 1, 10, 0, 1, '2026-01-01T00:00:00Z')", []).unwrap();
     conn.execute(
         "INSERT INTO stop_bearing (stop_version_id, bearing_deg, source, computed_at)
-         VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')", []).unwrap();
-    conn.execute("INSERT INTO id_sequence (table_name, next_value) VALUES ('station_version', 21)", []).unwrap();
-    conn.execute("INSERT INTO id_sequence (table_name, next_value) VALUES ('stop_version', 12)", []).unwrap();
+         VALUES (10, 123.5, 'OSM', '2026-01-02T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO id_sequence (table_name, next_value) VALUES ('station_version', 21)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO id_sequence (table_name, next_value) VALUES ('stop_version', 12)",
+        [],
+    )
+    .unwrap();
 }
 
 fn cmd(new_name: &str, level: RenameLevel) -> StationRename {
-    StationRename { station_version_id: 20, new_name: new_name.into(), level }
+    StationRename {
+        station_version_id: 20,
+        new_name: new_name.into(),
+        level,
+    }
 }
 
 #[test]
 fn rename_all_poles_end_to_end() {
     let conn = open_in_memory().unwrap();
     fixture(&conn);
-    let out = rename_station(&conn, cmd("台北車站", RenameLevel::AllPoles), "herry", "cjk").unwrap();
+    let out = rename_station(
+        &conn,
+        cmd("台北車站", RenameLevel::AllPoles),
+        "herry",
+        "cjk",
+    )
+    .unwrap();
     assert_eq!(out.poles.len(), 2);
     // station renamed
-    let name: String = conn.query_row(
-        "SELECT station_name FROM station_version WHERE valid_to IS NULL", [], |r| r.get(0)).unwrap();
+    let name: String = conn
+        .query_row(
+            "SELECT station_name FROM station_version WHERE valid_to IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(name, "台北車站");
     // matching pole followed, non-matching also followed (AllPoles), bearing carried
     let n: i64 = conn.query_row(
@@ -66,7 +98,9 @@ fn rename_all_poles_end_to_end() {
          WHERE sv.stop_name = '台北車站'", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 1);
     // no stale marks anywhere
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(n, 0);
 }
 
@@ -76,10 +110,14 @@ fn rename_matching_poles_follows_only_exact_name() {
     fixture(&conn);
     rename_station(&conn, cmd("N", RenameLevel::MatchingPoles), "herry", "").unwrap();
     // pole named 'S' followed; 'S 往' untouched
-    let mut stmt = conn.prepare(
-        "SELECT stop_name FROM stop_version WHERE valid_to IS NULL ORDER BY stop_id").unwrap();
-    let names: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap()
-        .collect::<Result<_, _>>().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT stop_name FROM stop_version WHERE valid_to IS NULL ORDER BY stop_id")
+        .unwrap();
+    let names: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
     assert_eq!(names, vec!["N".to_string(), "S 往".to_string()]);
 }
 
@@ -89,8 +127,13 @@ fn rename_station_only_touches_no_poles() {
     fixture(&conn);
     let out = rename_station(&conn, cmd("N", RenameLevel::StationOnly), "herry", "").unwrap();
     assert!(out.poles.is_empty());
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(n, 0, "no pole churned");
 }
 
@@ -100,7 +143,8 @@ fn rename_rejects_stale_station_version() {
     fixture(&conn);
     rename_station(&conn, cmd("N", RenameLevel::AllPoles), "herry", "first").unwrap();
     // double-submit: 20 is no longer current
-    let err = rename_station(&conn, cmd("M", RenameLevel::AllPoles), "herry", "second").unwrap_err();
+    let err =
+        rename_station(&conn, cmd("M", RenameLevel::AllPoles), "herry", "second").unwrap_err();
     assert!(err.to_string().contains("not the current version"), "{err}");
     let _ = EditError::StationNotCurrent(0); // variant exists and is public
 }

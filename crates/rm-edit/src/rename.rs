@@ -1,8 +1,8 @@
 //! Scenario 1: station rename — domain model and pure planning policy.
 
 use anyhow::Result;
-use rm_db::{apply_station_rename, load_station_snapshot, PoleOp, StationRenameOp};
 use rm_db::StationSnapshot;
+use rm_db::{apply_station_rename, load_station_snapshot, PoleOp, StationRenameOp};
 use rusqlite::Connection;
 
 /// How aggressively poles follow a station rename. A parameter, not a
@@ -167,7 +167,11 @@ pub fn rename_station(
         poles: applied
             .poles
             .into_iter()
-            .map(|p| PoleRenamed { stop_id: p.stop_id, old_svi: p.old_svi, new_svi: p.new_svi })
+            .map(|p| PoleRenamed {
+                stop_id: p.stop_id,
+                old_svi: p.old_svi,
+                new_svi: p.new_svi,
+            })
             .collect(),
     })
 }
@@ -185,22 +189,42 @@ mod tests {
             latitude: 24.0,
             longitude: 120.0,
             poles: vec![
-                PoleSnapshot { stop_id: 1, stop_version_id: 10, stop_name: "S".into() },
-                PoleSnapshot { stop_id: 2, stop_version_id: 11, stop_name: "S 往".into() },
-                PoleSnapshot { stop_id: 3, stop_version_id: 12, stop_name: "X".into() },
+                PoleSnapshot {
+                    stop_id: 1,
+                    stop_version_id: 10,
+                    stop_name: "S".into(),
+                },
+                PoleSnapshot {
+                    stop_id: 2,
+                    stop_version_id: 11,
+                    stop_name: "S 往".into(),
+                },
+                PoleSnapshot {
+                    stop_id: 3,
+                    stop_version_id: 12,
+                    stop_name: "X".into(),
+                },
             ],
         }
     }
 
     fn cmd(new_name: &str, level: RenameLevel) -> StationRename {
-        StationRename { station_version_id: 70, new_name: new_name.into(), level }
+        StationRename {
+            station_version_id: 70,
+            new_name: new_name.into(),
+            level,
+        }
     }
 
     #[test]
     fn station_only_churns_no_poles() {
-        let plan = plan_station_rename(&snapshot(), cmd("台北車站", RenameLevel::StationOnly)).unwrap();
+        let plan =
+            plan_station_rename(&snapshot(), cmd("台北車站", RenameLevel::StationOnly)).unwrap();
         assert_eq!(plan.poles, vec![]);
-        assert_eq!((plan.old_name.as_str(), plan.new_name.as_str()), ("S", "台北車站"));
+        assert_eq!(
+            (plan.old_name.as_str(), plan.new_name.as_str()),
+            ("S", "台北車站")
+        );
         assert_eq!(plan.level, RenameLevel::StationOnly);
     }
 
@@ -208,9 +232,14 @@ mod tests {
     fn matching_poles_is_exact_match() {
         let plan = plan_station_rename(&snapshot(), cmd("N", RenameLevel::MatchingPoles)).unwrap();
         // "S 往" and "X" are not byte-equal to "S" — only pole 1 follows
-        assert_eq!(plan.poles, vec![PoleChange {
-            stop_id: 1, old_stop_version_id: 10, new_stop_name: "N".into(),
-        }]);
+        assert_eq!(
+            plan.poles,
+            vec![PoleChange {
+                stop_id: 1,
+                old_stop_version_id: 10,
+                new_stop_name: "N".into(),
+            }]
+        );
     }
 
     #[test]
@@ -233,9 +262,14 @@ mod tests {
     fn all_poles_churn_every_pole() {
         let plan = plan_station_rename(&snapshot(), cmd("N", RenameLevel::AllPoles)).unwrap();
         assert_eq!(plan.poles.len(), 3);
-        assert_eq!(plan.poles[2], PoleChange {
-            stop_id: 3, old_stop_version_id: 12, new_stop_name: "N".into(),
-        });
+        assert_eq!(
+            plan.poles[2],
+            PoleChange {
+                stop_id: 3,
+                old_stop_version_id: 12,
+                new_stop_name: "N".into(),
+            }
+        );
     }
 
     #[test]

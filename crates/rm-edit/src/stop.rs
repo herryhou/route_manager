@@ -4,8 +4,8 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-use crate::EditError;
 use crate::map_db_err;
+use crate::EditError;
 
 #[derive(Debug, Default, Clone)]
 pub struct StopEdit {
@@ -36,7 +36,10 @@ pub fn plan_stop_edit(
     }
     let no_op = cmd.lat.is_none_or(|v| v == snapshot.latitude)
         && cmd.lon.is_none_or(|v| v == snapshot.longitude)
-        && cmd.stop_name.as_ref().is_none_or(|v| *v == snapshot.stop_name);
+        && cmd
+            .stop_name
+            .as_ref()
+            .is_none_or(|v| *v == snapshot.stop_name);
     if no_op {
         return Err(EditError::NoOpEdit);
     }
@@ -156,24 +159,24 @@ pub fn plan_stop_undo(edit: &rm_db::StopEditRow) -> Result<StopUndoOp, EditError
     if edit.entity != "stop" || edit.action == "undo" {
         return Err(EditError::NotUndoable(edit.edit_id));
     }
-    let (Some(old_svi), Some(cur_svi)) = (edit.old_stop_version_id, edit.new_stop_version_id) else {
+    let (Some(old_svi), Some(cur_svi)) = (edit.old_stop_version_id, edit.new_stop_version_id)
+    else {
         return Err(EditError::NotUndoable(edit.edit_id));
     };
     if old_svi == cur_svi {
         return Err(EditError::NotUndoable(edit.edit_id));
     }
-    Ok(StopUndoOp { edit_id: edit.edit_id, stop_id: edit.stop_id, old_svi, cur_svi })
+    Ok(StopUndoOp {
+        edit_id: edit.edit_id,
+        stop_id: edit.stop_id,
+        old_svi,
+        cur_svi,
+    })
 }
 
 /// Application service: load → plan (pure) → apply (one tx).
-pub fn undo_stop(
-    conn: &Connection,
-    edit_id: i64,
-    editor: &str,
-    note: &str,
-) -> Result<StopOutcome> {
-    let row = rm_db::load_stop_edit(conn, edit_id)?
-        .ok_or(EditError::NotUndoable(edit_id))?;
+pub fn undo_stop(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result<StopOutcome> {
+    let row = rm_db::load_stop_edit(conn, edit_id)?.ok_or(EditError::NotUndoable(edit_id))?;
     let plan = plan_stop_undo(&row)?;
     let op = rm_db::StopEditUndoOp {
         edit_id: plan.edit_id,

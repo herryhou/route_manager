@@ -87,7 +87,11 @@ mod tests {
         };
         let plan = plan_station_move(
             &snap,
-            StationMove { station_version_id: 70, latitude: 25.0, longitude: 121.0 },
+            StationMove {
+                station_version_id: 70,
+                latitude: 25.0,
+                longitude: 121.0,
+            },
         )
         .unwrap();
         assert_eq!(plan.station_id, 7);

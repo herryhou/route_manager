@@ -207,7 +207,10 @@ fn full_run_consumes_override_over_src() {
     )
     .unwrap();
     let s = rm_osm_match::run(&conn, batch).unwrap();
-    assert_eq!(s.matched, 1, "override matched where empty src would not: {s:?}");
+    assert_eq!(
+        s.matched, 1,
+        "override matched where empty src would not: {s:?}"
+    );
 }
 
 fn route2_rid(conn: &rusqlite::Connection) -> i64 {
@@ -274,7 +277,11 @@ fn stale_run_recomputes_marked_direction_and_clears() {
     assert_eq!(out.cleared, 1);
     assert_eq!(out.kept, 0);
     assert_eq!(out.summary.directions, 1, "{:?}", out.summary);
-    assert_eq!(out.summary.failed, 1, "garbage polyline fails decode: {:?}", out.summary);
+    assert_eq!(
+        out.summary.failed, 1,
+        "garbage polyline fails decode: {:?}",
+        out.summary
+    );
     // route2's rows are gone (deleted, not replaced), nothing else touched
     let ways_after: i64 = conn
         .query_row("SELECT COUNT(*) FROM seg_match_way", [], |r| r.get(0))
@@ -284,7 +291,11 @@ fn stale_run_recomputes_marked_direction_and_clears() {
         .unwrap();
     assert_eq!((ways_after, stats_after), (0, 0));
     let marks: i64 = conn
-        .query_row("SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(marks, 0, "cleared");
 }
@@ -308,7 +319,11 @@ fn stale_run_keeps_unknown_and_unmatched_marks() {
     assert_eq!((out.cleared, out.kept), (0, 2), "{out:?}");
     assert_eq!(out.summary.directions, 0);
     let marks: i64 = conn
-        .query_row("SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(marks, 2, "kept");
     // REVIEW-FOCUS pin: unknown marks never delete matched rows
@@ -335,7 +350,11 @@ fn stale_run_keeps_mark_for_direction_without_staging_row() {
     assert_eq!((out.cleared, out.kept), (0, 1), "{out:?}");
     assert_eq!(out.summary.directions, 0);
     let marks: i64 = conn
-        .query_row("SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM stale_mark WHERE table_name = 'seg_match'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(marks, 1, "mark kept for a later ingest to restore");
     // REVIEW-FOCUS pin: kept mark never deletes matched rows

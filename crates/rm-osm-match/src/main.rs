@@ -34,7 +34,11 @@ fn main() -> anyhow::Result<()> {
         match rm_osm_match::run_stale(&conn, batch)? {
             Some(out) => println!(
                 "stale: {} directions, {} matched, {} failed, {} marks cleared, {} kept",
-                out.summary.directions, out.summary.matched, out.summary.failed, out.cleared, out.kept
+                out.summary.directions,
+                out.summary.matched,
+                out.summary.failed,
+                out.cleared,
+                out.kept
             ),
             None => println!("nothing stale"),
         }

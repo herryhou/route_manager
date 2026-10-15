@@ -85,8 +85,7 @@ pub fn stitch_busway_ends(ways: &[Way], node_pos: &HashMap<i64, LatLng>) -> Vec<
                     }
                 }
             }
-            let mut targets: Vec<(f64, i64)> =
-                best_per_way.values().copied().collect::<Vec<_>>();
+            let mut targets: Vec<(f64, i64)> = best_per_way.values().copied().collect::<Vec<_>>();
             targets.sort_by(|a, b| a.0.total_cmp(&b.0));
             for (_, target) in targets {
                 if seen_pairs.insert((*end, target)) {

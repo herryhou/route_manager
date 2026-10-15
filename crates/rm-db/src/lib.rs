@@ -16,21 +16,15 @@ mod migrate;
 pub use allocator::mint;
 pub use batch::{create_batch, latest_batch, latest_open_batch, set_batch_status};
 pub use edit::{
-    edit_entity, entity_history, EditError, EditLogRow, EditOutcome,
-    StopEditOp, apply_stop_edit, StopRegroupOp, apply_stop_regroup,
-    StopEditRow, load_stop_edit, StopEditUndoOp, apply_stop_undo,
-    StationSnapshot, PoleSnapshot, load_station_snapshot, StopSnapshot, load_stop_snapshot,
-    station_is_current,
-    StationRenameOp, PoleOp, StationRenameApplied, PoleApplied, apply_station_rename,
-    StationEdit, load_station_edit,
-    StationMoveOp, apply_station_move, StationMoveApplied,
-    StationRenameUndoOp, PoleUndoOp, StationMoveUndoOp, StationUndoOp, StationUndone,
-    apply_station_undo,
-    PolylineEditRow, load_polyline_edit,
-    OverrideRow, LineSnapshot, load_polyline_line,
-    LineEditOp, LineApplied, apply_line_edit,
-    LineUndoOp, LineUndone, apply_line_undo,
-    effective_encoded,
+    apply_line_edit, apply_line_undo, apply_station_move, apply_station_rename, apply_station_undo,
+    apply_stop_edit, apply_stop_regroup, apply_stop_undo, edit_entity, effective_encoded,
+    entity_history, load_polyline_edit, load_polyline_line, load_station_edit,
+    load_station_snapshot, load_stop_edit, load_stop_snapshot, station_is_current, EditError,
+    EditLogRow, EditOutcome, LineApplied, LineEditOp, LineSnapshot, LineUndoOp, LineUndone,
+    OverrideRow, PoleApplied, PoleOp, PoleSnapshot, PoleUndoOp, PolylineEditRow, StationEdit,
+    StationMoveApplied, StationMoveOp, StationMoveUndoOp, StationRenameApplied, StationRenameOp,
+    StationRenameUndoOp, StationSnapshot, StationUndoOp, StationUndone, StopEditOp, StopEditRow,
+    StopEditUndoOp, StopRegroupOp, StopSnapshot,
 };
 pub use migrate::migrate;
 
@@ -248,7 +242,9 @@ mod tests {
         assert_eq!(name, "新名");
 
         let n: i64 = conn
-            .query_row("SELECT COUNT(*) FROM station_group_current", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM station_group_current", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(n, 1);
 

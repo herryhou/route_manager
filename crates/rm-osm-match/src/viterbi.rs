@@ -453,9 +453,7 @@ pub fn match_path(
         // non-negative, so once base + e2 is at or above row[k], no later
         // j can win either — break instead of paying evaluate (and its A*)
         let mut order: Vec<u32> = (0..prev.len() as u32).collect();
-        order.sort_by(|&a, &b| {
-            dp[w - 1][a as usize].total_cmp(&dp[w - 1][b as usize])
-        });
+        order.sort_by(|&a, &b| dp[w - 1][a as usize].total_cmp(&dp[w - 1][b as usize]));
         for (k, s2) in cur.iter().enumerate() {
             let e2 = em.emission_cost(s2.dist_m);
             for &j in &order {
