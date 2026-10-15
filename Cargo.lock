@@ -993,18 +993,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rm-edit"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rm-core",
- "rm-db",
- "rusqlite",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "rm-identity"
 version = "0.1.0"
 dependencies = [
@@ -1152,7 +1140,6 @@ dependencies = [
  "clap",
  "rm-core",
  "rm-db",
- "rm-edit",
  "rm-identity",
  "rm-ingest",
  "rm-osm-match",

@@ -7,7 +7,6 @@ version.workspace = true
 [dependencies]
 rm-core.workspace = true
 rm-db.workspace = true
-rm-edit.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

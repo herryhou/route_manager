@@ -247,18 +247,33 @@ mod tests {
     }
 
     fn e2e_cmd(new_name: &str, level: RenameLevel) -> StationRename {
-        StationRename { station_version_id: 20, new_name: new_name.into(), level }
+        StationRename {
+            station_version_id: 20,
+            new_name: new_name.into(),
+            level,
+        }
     }
 
     #[test]
     fn rename_all_poles_end_to_end() {
         let conn = crate::open_in_memory().unwrap();
         fixture(&conn);
-        let out = rename_station(&conn, e2e_cmd("台北車站", RenameLevel::AllPoles), "herry", "cjk").unwrap();
+        let out = rename_station(
+            &conn,
+            e2e_cmd("台北車站", RenameLevel::AllPoles),
+            "herry",
+            "cjk",
+        )
+        .unwrap();
         assert_eq!(out.poles.len(), 2);
         // station renamed
-        let name: String = conn.query_row(
-            "SELECT station_name FROM station_version WHERE valid_to IS NULL", [], |r| r.get(0)).unwrap();
+        let name: String = conn
+            .query_row(
+                "SELECT station_name FROM station_version WHERE valid_to IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(name, "台北車站");
         // matching pole followed, non-matching also followed (AllPoles), bearing carried
         let n: i64 = conn.query_row(
@@ -266,7 +281,9 @@ mod tests {
              WHERE sv.stop_name = '台北車站'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
         // no stale marks anywhere
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
     }
 
@@ -276,10 +293,14 @@ mod tests {
         fixture(&conn);
         rename_station(&conn, e2e_cmd("N", RenameLevel::MatchingPoles), "herry", "").unwrap();
         // pole named 'S' followed; 'S 往' untouched
-        let mut stmt = conn.prepare(
-            "SELECT stop_name FROM stop_version WHERE valid_to IS NULL ORDER BY stop_id").unwrap();
-        let names: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap()
-            .collect::<Result<_, _>>().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT stop_name FROM stop_version WHERE valid_to IS NULL ORDER BY stop_id")
+            .unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
         assert_eq!(names, vec!["N".to_string(), "S 往".to_string()]);
     }
 
@@ -287,10 +308,16 @@ mod tests {
     fn rename_station_only_touches_no_poles() {
         let conn = crate::open_in_memory().unwrap();
         fixture(&conn);
-        let out = rename_station(&conn, e2e_cmd("N", RenameLevel::StationOnly), "herry", "").unwrap();
+        let out =
+            rename_station(&conn, e2e_cmd("N", RenameLevel::StationOnly), "herry", "").unwrap();
         assert!(out.poles.is_empty());
-        let n: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(n, 0, "no pole churned");
     }
 
@@ -300,7 +327,13 @@ mod tests {
         fixture(&conn);
         rename_station(&conn, e2e_cmd("N", RenameLevel::AllPoles), "herry", "first").unwrap();
         // double-submit: 20 is no longer current
-        let err = rename_station(&conn, e2e_cmd("M", RenameLevel::AllPoles), "herry", "second").unwrap_err();
+        let err = rename_station(
+            &conn,
+            e2e_cmd("M", RenameLevel::AllPoles),
+            "herry",
+            "second",
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");
     }
 
@@ -308,9 +341,11 @@ mod tests {
     fn rename_rejects_no_op_and_empty() {
         let conn = crate::open_in_memory().unwrap();
         fixture(&conn);
-        let err = rename_station(&conn, e2e_cmd("S", RenameLevel::AllPoles), "herry", "").unwrap_err();
+        let err =
+            rename_station(&conn, e2e_cmd("S", RenameLevel::AllPoles), "herry", "").unwrap_err();
         assert!(err.to_string().contains("equals the current name"), "{err}");
-        let err = rename_station(&conn, e2e_cmd("  ", RenameLevel::AllPoles), "herry", "").unwrap_err();
+        let err =
+            rename_station(&conn, e2e_cmd("  ", RenameLevel::AllPoles), "herry", "").unwrap_err();
         assert!(err.to_string().contains("empty"), "{err}");
     }
 }

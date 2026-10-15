@@ -112,7 +112,11 @@ mod tests {
         let old = fixture(&conn);
         let out = move_station(
             &conn,
-            StationMove { station_version_id: old, latitude: 24.5, longitude: 120.5 },
+            StationMove {
+                station_version_id: old,
+                latitude: 24.5,
+                longitude: 120.5,
+            },
             "herry",
             "fix",
         )
@@ -126,12 +130,21 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .unwrap();
-        assert_eq!((lat, lon, name.as_str(), src.as_str()), (24.5, 120.5, "S", "manual"));
+        assert_eq!(
+            (lat, lon, name.as_str(), src.as_str()),
+            (24.5, 120.5, "S", "manual")
+        );
         // zero stale marks, poles untouched (no manual stop versions minted)
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
         let n: i64 = conn
-            .query_row("SELECT COUNT(*) FROM stop_version WHERE source = 'manual'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM stop_version WHERE source = 'manual'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 0);
     }
@@ -142,7 +155,11 @@ mod tests {
         let old = fixture(&conn);
         move_station(
             &conn,
-            StationMove { station_version_id: old, latitude: 24.5, longitude: 120.5 },
+            StationMove {
+                station_version_id: old,
+                latitude: 24.5,
+                longitude: 120.5,
+            },
             "herry",
             "first",
         )
@@ -150,7 +167,11 @@ mod tests {
         // double-submit: 20 is no longer current
         let err = move_station(
             &conn,
-            StationMove { station_version_id: old, latitude: 24.5, longitude: 120.5 },
+            StationMove {
+                station_version_id: old,
+                latitude: 24.5,
+                longitude: 120.5,
+            },
             "herry",
             "second",
         )
@@ -164,7 +185,11 @@ mod tests {
         fixture(&conn);
         let err = move_station(
             &conn,
-            StationMove { station_version_id: 999, latitude: 24.5, longitude: 120.5 },
+            StationMove {
+                station_version_id: 999,
+                latitude: 24.5,
+                longitude: 120.5,
+            },
             "herry",
             "",
         )

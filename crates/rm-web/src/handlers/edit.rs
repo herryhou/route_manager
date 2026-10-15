@@ -70,24 +70,24 @@ pub struct StopEditBody {
     note: Option<String>,
 }
 
-/// `rm_edit::EditError` splits into request problems (400: empty/no-op
+/// `rm_db::EditError` splits into request problems (400: empty/no-op
 /// edit, invalid line override, unknown route) and races / bad targets
 /// (409: version no longer current, un-undoable edit, unknown regroup
 /// target).
 fn edit_conflict(err: ApiError) -> ApiError {
-    if let Some(e) = err.downcast_ref::<rm_edit::EditError>() {
+    if let Some(e) = err.downcast_ref::<rm_db::EditError>() {
         return match e {
-            rm_edit::EditError::EmptyEdit
-            | rm_edit::EditError::NoOpEdit
-            | rm_edit::EditError::EmptyNewName
-            | rm_edit::EditError::NoOpRename
-            | rm_edit::EditError::InvalidLine(_)
-            | rm_edit::EditError::UnknownRoute(_) => ApiError::bad_request(&e.to_string()),
-            rm_edit::EditError::NotCurrent(_)
-            | rm_edit::EditError::StationNotCurrent(_)
-            | rm_edit::EditError::NotUndoable(_)
-            | rm_edit::EditError::UnknownStation(_)
-            | rm_edit::EditError::LineNotCurrent(_, _) => ApiError::conflict(&e.to_string()),
+            rm_db::EditError::EmptyEdit
+            | rm_db::EditError::NoOpEdit
+            | rm_db::EditError::EmptyNewName
+            | rm_db::EditError::NoOpRename
+            | rm_db::EditError::InvalidLine(_)
+            | rm_db::EditError::UnknownRoute(_) => ApiError::bad_request(&e.to_string()),
+            rm_db::EditError::NotCurrent(_)
+            | rm_db::EditError::StationNotCurrent(_)
+            | rm_db::EditError::NotUndoable(_)
+            | rm_db::EditError::UnknownStation(_)
+            | rm_db::EditError::LineNotCurrent(_, _) => ApiError::conflict(&e.to_string()),
         };
     }
     err
@@ -121,10 +121,10 @@ pub async fn edit_stop(
     }
     let note = note.unwrap_or_default();
     let out = run_db_write(state, move |conn| {
-        rm_edit::edit_stop(
+        rm_db::edit_stop(
             conn,
             stop_version_id,
-            rm_edit::StopEdit {
+            rm_db::StopEdit {
                 lat,
                 lon,
                 stop_name,
@@ -137,7 +137,7 @@ pub async fn edit_stop(
     .map_err(edit_conflict)?;
     Ok(Json(json!({
         "edit_id": out.edit_id,
-        "new_stop_version_id": out.new_stop_version_id,
+        "new_stop_version_id": out.new_version_id,
         "stale_routes": out.stale_routes,
     })))
 }
@@ -168,9 +168,9 @@ pub async fn regroup(
     ApiJson(b): ApiJson<RegroupBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let out = run_db_write(state, move |conn| {
-        rm_edit::regroup_stop(
+        rm_db::regroup_stop(
             conn,
-            rm_edit::RegroupStop {
+            rm_db::RegroupStop {
                 stop_version_id,
                 new_station_id: b.new_station_id,
             },
@@ -182,7 +182,7 @@ pub async fn regroup(
     .map_err(edit_conflict)?;
     Ok(Json(json!({
         "edit_id": out.edit_id,
-        "new_stop_version_id": out.new_stop_version_id,
+        "new_stop_version_id": out.new_version_id,
     })))
 }
 
@@ -215,14 +215,14 @@ pub async fn undo(
     let is_station = entity.as_deref() == Some("station");
     let out = run_db_write(state, move |conn| {
         if is_polyline {
-            rm_edit::undo_polyline_line(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
+            rm_db::undo_polyline_line(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
                 .map(|o| (o.edit_id, json!({ "deleted": o.deleted })))
         } else if is_station {
-            rm_edit::undo_station(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
+            rm_db::undo_station(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
                 .map(|o| (o.edit_id, json!(o.restored_station_version_id)))
         } else {
-            rm_edit::undo_stop(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
-                .map(|o| (o.edit_id, json!(o.new_stop_version_id)))
+            rm_db::undo_stop(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
+                .map(|o| (o.edit_id, json!(o.new_version_id)))
         }
     })
     .await
@@ -261,15 +261,15 @@ pub async fn rename_station(
     ApiJson(b): ApiJson<StationRenameBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let level = match b.level.as_str() {
-        "station" => rm_edit::RenameLevel::StationOnly,
-        "matching" => rm_edit::RenameLevel::MatchingPoles,
-        "all" => rm_edit::RenameLevel::AllPoles,
+        "station" => rm_db::RenameLevel::StationOnly,
+        "matching" => rm_db::RenameLevel::MatchingPoles,
+        "all" => rm_db::RenameLevel::AllPoles,
         other => return Err(ApiError::bad_request(&format!("unknown level {other:?}"))),
     };
     let out = run_db_write(state, move |conn| {
-        rm_edit::rename_station(
+        rm_db::rename_station(
             conn,
-            rm_edit::StationRename {
+            rm_db::StationRename {
                 station_version_id,
                 new_name: b.new_name,
                 level,
@@ -309,9 +309,9 @@ pub async fn move_station(
         return Err(ApiError::bad_request("lon out of range"));
     }
     let out = run_db_write(state, move |conn| {
-        rm_edit::move_station(
+        rm_db::move_station(
             conn,
-            rm_edit::StationMove {
+            rm_db::StationMove {
                 station_version_id,
                 latitude: b.lat,
                 longitude: b.lon,
@@ -352,9 +352,9 @@ pub async fn edit_polyline_line(
         return Err(ApiError::bad_request("coordinate out of range"));
     }
     let out = run_db_write(state, move |conn| {
-        rm_edit::edit_polyline_line(
+        rm_db::edit_polyline_line(
             conn,
-            rm_edit::LineEditCmd {
+            rm_db::LineEditCmd {
                 xno,
                 direction,
                 points: b.points,

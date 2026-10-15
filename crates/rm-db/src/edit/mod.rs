@@ -517,8 +517,8 @@ pub fn entity_history(conn: &Connection, entity: &str, entity_id: i64) -> Result
     Ok(out)
 }
 
-/// Read-side snapshot for station-level edits (rm-edit::rename_station /
-/// rm-edit::move_station): the current station version plus its poles'
+/// Read-side snapshot for station-level edits (rename_station /
+/// move_station): the current station version plus its poles'
 /// current stop versions.
 #[derive(Debug)]
 pub struct StationSnapshot {
@@ -632,7 +632,7 @@ pub fn station_is_current(conn: &Connection, station_id: i64) -> Result<bool> {
 }
 
 /// Read-side DTO for the logged station edit (rename or move — consumed
-/// by rm-edit::plan_station_undo). edit_log is append-only, so a plan
+/// by plan_station_undo). edit_log is append-only, so a plan
 /// parsed from this row is immutable; apply re-validates currency in its tx.
 #[derive(Debug)]
 pub struct StationEdit {
@@ -718,8 +718,8 @@ pub fn load_stop_edit(conn: &Connection, edit_id: i64) -> Result<Option<StopEdit
     }))
 }
 
-/// Write-side op for the station rename (rm-edit maps a StationRenamePlan
-/// into this; rm-db knows nothing about the domain types).
+/// Write-side op for the station rename, emitted by
+/// plan_station_rename.
 #[derive(Debug)]
 pub struct StationRenameOp {
     pub station_id: i64,
@@ -895,8 +895,7 @@ pub fn apply_station_rename(
     })
 }
 
-/// Write-side op for the station move (rm-edit maps a StationMovePlan into
-/// this; rm-db knows nothing about the domain types).
+/// Write-side op for the station move, emitted by plan_station_move.
 #[derive(Debug)]
 pub struct StationMoveOp {
     pub station_id: i64,
@@ -1129,8 +1128,8 @@ pub fn effective_encoded(
     Ok(enc)
 }
 
-/// Write-side op for a whole-line override edit (rm-edit maps a
-/// LineEditPlan into this; rm-db knows nothing about domain geometry).
+/// Write-side op for a whole-line override edit, emitted by
+/// plan_line_edit.
 #[derive(Debug)]
 pub struct LineEditOp {
     pub xno: String,
@@ -1359,8 +1358,8 @@ pub fn apply_line_undo(
     Ok(LineUndone { edit_id, deleted })
 }
 
-/// Write-side op for the station-rename undo (rm-edit maps a
-/// RenameUndoOp into this; the rows come from the append-only log).
+/// Write-side op for the station-rename undo, emitted by
+/// plan_station_undo; the rows come from the append-only log.
 #[derive(Debug)]
 pub struct StationRenameUndoOp {
     pub edit_id: i64,

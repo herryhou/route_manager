@@ -282,24 +282,41 @@ mod tests {
         fixture(&conn);
         let renamed = rename_station(
             &conn,
-            crate::StationRename { station_version_id: 20, new_name: "台北車站".into(), level: crate::RenameLevel::AllPoles },
+            crate::StationRename {
+                station_version_id: 20,
+                new_name: "台北車站".into(),
+                level: crate::RenameLevel::AllPoles,
+            },
             "herry",
             "cjk",
         )
         .unwrap();
         let out = undo_station(&conn, renamed.edit_id, "herry", "revert").unwrap();
         assert_eq!(out.restored_station_version_id, 20);
-        let name: String = conn.query_row(
-            "SELECT station_name FROM station_version WHERE valid_to IS NULL", [], |r| r.get(0)).unwrap();
+        let name: String = conn
+            .query_row(
+                "SELECT station_name FROM station_version WHERE valid_to IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(name, "S");
         let mut stmt = conn.prepare(
             "SELECT stop_name FROM stop_version WHERE valid_to IS NULL ORDER BY stop_version_id").unwrap();
-        let names: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap()
-            .collect::<Result<_, _>>().unwrap();
+        let names: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
         assert_eq!(names, vec!["S".to_string(), "S 往".to_string()]);
         // bearing back on the original pole version
-        let n: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = 10", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM stop_bearing WHERE stop_version_id = 10",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(n, 1);
     }
 
@@ -309,7 +326,11 @@ mod tests {
         fixture(&conn);
         let renamed = rename_station(
             &conn,
-            crate::StationRename { station_version_id: 20, new_name: "台北車站".into(), level: crate::RenameLevel::AllPoles },
+            crate::StationRename {
+                station_version_id: 20,
+                new_name: "台北車站".into(),
+                level: crate::RenameLevel::AllPoles,
+            },
             "herry",
             "",
         )
@@ -333,13 +354,26 @@ mod tests {
         fixture(&conn);
         let renamed = rename_station(
             &conn,
-            crate::StationRename { station_version_id: 20, new_name: "台北車站".into(), level: crate::RenameLevel::AllPoles },
+            crate::StationRename {
+                station_version_id: 20,
+                new_name: "台北車站".into(),
+                level: crate::RenameLevel::AllPoles,
+            },
             "herry",
             "",
         )
         .unwrap();
-        crate::edit_stop(&conn, renamed.poles[0].new_svi,
-            crate::StopEdit { stop_name: Some("shadowed".into()), ..Default::default() }, "h", "n").unwrap();
+        crate::edit_stop(
+            &conn,
+            renamed.poles[0].new_svi,
+            crate::StopEdit {
+                stop_name: Some("shadowed".into()),
+                ..Default::default()
+            },
+            "h",
+            "n",
+        )
+        .unwrap();
         let err = undo_station(&conn, renamed.edit_id, "herry", "").unwrap_err();
         assert!(err.to_string().contains("cannot be undone"), "{err}");
     }
@@ -349,9 +383,17 @@ mod tests {
         let conn = crate::open_in_memory().unwrap();
         fixture(&conn);
         // a plain stop-edit row: entity='stop', no station_rename kind
-        let out = crate::edit_stop(&conn, 10, crate::StopEdit {
-            stop_name: Some("N".into()), ..Default::default()
-        }, "h", "n").unwrap();
+        let out = crate::edit_stop(
+            &conn,
+            10,
+            crate::StopEdit {
+                stop_name: Some("N".into()),
+                ..Default::default()
+            },
+            "h",
+            "n",
+        )
+        .unwrap();
         let err = undo_station(&conn, out.edit_id, "herry", "").unwrap_err();
         assert!(err.to_string().contains("cannot be undone"), "{err}");
     }
@@ -362,7 +404,11 @@ mod tests {
         fixture(&conn);
         let m = move_station(
             &conn,
-            crate::StationMove { station_version_id: 20, latitude: 24.5, longitude: 120.5 },
+            crate::StationMove {
+                station_version_id: 20,
+                latitude: 24.5,
+                longitude: 120.5,
+            },
             "herry",
             "fix",
         )
@@ -379,7 +425,9 @@ mod tests {
             .unwrap();
         assert_eq!((lat, lon), (24.0, 120.0));
         // undo mints nothing
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM station_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 2);
     }
 
@@ -389,14 +437,22 @@ mod tests {
         fixture(&conn);
         let first = move_station(
             &conn,
-            crate::StationMove { station_version_id: 20, latitude: 24.5, longitude: 120.5 },
+            crate::StationMove {
+                station_version_id: 20,
+                latitude: 24.5,
+                longitude: 120.5,
+            },
             "herry",
             "a",
         )
         .unwrap();
         move_station(
             &conn,
-            crate::StationMove { station_version_id: first.new_station_version_id, latitude: 24.6, longitude: 120.6 },
+            crate::StationMove {
+                station_version_id: first.new_station_version_id,
+                latitude: 24.6,
+                longitude: 120.6,
+            },
             "herry",
             "b",
         )
@@ -404,7 +460,13 @@ mod tests {
         let err = undo_station(&conn, first.edit_id, "herry", "revert").unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");
         // no undo row written
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM edit_log WHERE action = 'undo'", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM edit_log WHERE action = 'undo'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(n, 0);
     }
 
@@ -414,7 +476,11 @@ mod tests {
         fixture(&conn);
         let m = move_station(
             &conn,
-            crate::StationMove { station_version_id: 20, latitude: 24.5, longitude: 120.5 },
+            crate::StationMove {
+                station_version_id: 20,
+                latitude: 24.5,
+                longitude: 120.5,
+            },
             "herry",
             "fix",
         )
