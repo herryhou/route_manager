@@ -17,15 +17,14 @@ pub struct StaleRun {
 }
 
 pub fn run_stale(conn: &rusqlite::Connection, batch_id: i64) -> anyhow::Result<Option<StaleRun>> {
-    let snapshot: Vec<(i64, i64)> = {
-        let mut stmt = conn.prepare(
-            "SELECT rowid, cause_edit_id FROM stale_mark
-             WHERE table_name IN ('stop_bearing', 'station_bearing')",
-        )?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
-    if snapshot.is_empty() {
+    let marks = rm_db::stale::snapshot(
+        conn,
+        &[
+            rm_db::stale::StaleTable::StopBearing,
+            rm_db::stale::StaleTable::StationBearing,
+        ],
+    )?;
+    if marks.is_empty() {
         return Ok(None);
     }
 
@@ -36,13 +35,8 @@ pub fn run_stale(conn: &rusqlite::Connection, batch_id: i64) -> anyhow::Result<O
     }
 
     let tx = conn.unchecked_transaction()?;
-    {
-        let mut del =
-            tx.prepare("DELETE FROM stale_mark WHERE rowid = ?1 AND cause_edit_id = ?2")?;
-        for (rowid, cause) in &snapshot {
-            del.execute([rowid, cause])?;
-        }
-    }
+    let tokens: Vec<(i64, i64)> = marks.iter().map(|m| (m.rowid, m.cause_edit_id)).collect();
+    rm_db::stale::clear_all_if_unchanged(&tx, &tokens)?;
     tx.commit()?;
     Ok(Some(StaleRun {
         bearings: b,

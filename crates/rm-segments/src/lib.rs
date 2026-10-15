@@ -55,21 +55,15 @@ pub fn run(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Summary> 
 /// survives because its rowid was never seen. Unknown route ids /
 /// unparseable keys: warn, keep.
 pub fn run_stale(conn: &Connection, batch_id: i64, outlier_m: f64) -> Result<Option<StaleOutcome>> {
-    let snapshot: Vec<(i64, i64, String)> = {
-        let mut stmt = conn.prepare(
-            "SELECT rowid, cause_edit_id, key FROM stale_mark
-             WHERE table_name = 'path_stop_projection'",
-        )?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-        rows.collect::<Result<_, _>>()?
-    };
-    if snapshot.is_empty() {
+    let marks = rm_db::stale::snapshot(conn, &[rm_db::stale::StaleTable::PathStopProjection])?;
+    if marks.is_empty() {
         return Ok(None);
     }
     let mut only = std::collections::HashSet::new();
     let mut clear = Vec::new();
     let mut kept = 0usize;
-    for (rowid, cause, key) in snapshot {
+    for m in &marks {
+        let (rowid, cause, key) = (m.rowid, m.cause_edit_id, m.key.as_str());
         match key.parse::<i64>() {
             Ok(rid) => {
                 let published = conn
@@ -313,13 +307,7 @@ fn run_inner(
             }
         }
     }
-    if !clear.is_empty() {
-        let mut del =
-            tx.prepare("DELETE FROM stale_mark WHERE rowid = ?1 AND cause_edit_id = ?2")?;
-        for (rowid, cause) in clear {
-            del.execute([rowid, cause])?;
-        }
-    }
+    rm_db::stale::clear_all_if_unchanged(&tx, clear)?;
     tx.commit()?;
     Ok(summary)
 }

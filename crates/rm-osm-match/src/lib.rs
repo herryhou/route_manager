@@ -273,15 +273,8 @@ fn stale_jobs(
 /// row the latest batch dropped: warn, keep — never delete rows that were
 /// not recomputed.
 pub fn run_stale(conn: &Connection, batch_id: i64) -> anyhow::Result<Option<StaleOutcome>> {
-    let snapshot: Vec<(i64, i64, String)> = {
-        let mut stmt = conn.prepare(
-            "SELECT rowid, cause_edit_id, key FROM stale_mark
-             WHERE table_name = 'seg_match'",
-        )?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-        rows.collect::<Result<_, _>>()?
-    };
-    if snapshot.is_empty() {
+    let marks = rm_db::stale::snapshot(conn, &[rm_db::stale::StaleTable::SegMatch])?;
+    if marks.is_empty() {
         return Ok(None);
     }
     let graph = Arc::new(RoadGraph::from_conn(conn)?);
@@ -290,11 +283,9 @@ pub fn run_stale(conn: &Connection, batch_id: i64) -> anyhow::Result<Option<Stal
     let mut scope: Vec<(i64, i64)> = Vec::new();
     let mut clear: Vec<(i64, i64)> = Vec::new();
     let mut kept = 0usize;
-    for (rowid, cause, key) in snapshot {
-        let Some((rid, dir)) = key
-            .split_once(':')
-            .and_then(|(r, d)| Some((r.parse::<i64>().ok()?, d.parse::<i64>().ok()?)))
-        else {
+    for m in &marks {
+        let (rowid, cause, key) = (m.rowid, m.cause_edit_id, m.key.as_str());
+        let Some((rid, dir)) = rm_db::stale::parse_seg_match_key(key) else {
             tracing::warn!(key = %key, "unparseable seg_match key; keeping mark");
             kept += 1;
             continue;
@@ -334,12 +325,7 @@ pub fn run_stale(conn: &Connection, batch_id: i64) -> anyhow::Result<Option<Stal
     // clear exactly the snapshot (rowid, cause) pairs that were processed —
     // a mark re-written since the snapshot (fresh rowid or cause) survives
     let tx = conn.unchecked_transaction()?;
-    for (rowid, cause) in &clear {
-        tx.execute(
-            "DELETE FROM stale_mark WHERE rowid = ?1 AND cause_edit_id = ?2",
-            rusqlite::params![rowid, cause],
-        )?;
-    }
+    rm_db::stale::clear_all_if_unchanged(&tx, &clear)?;
     tx.commit()?;
 
     Ok(Some(StaleOutcome {
