@@ -195,7 +195,7 @@ export function routeChips(routes, onPick) {
 }
 
 /// Route detail panel: header with direction toggle + ordered stop list.
-export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFlashStop }) {
+export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFlashStop, onFitAll }) {
   const dirBtns = (d.directions ?? [])
     .map(
       (x) =>
@@ -228,6 +228,7 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
     <div class="tabs view-tabs">
       <button data-view="stops" class="active">站序 (${(stops.stops ?? []).length})</button>
       <button data-view="qa">QA 剖析</button>
+      <button class="fit-all" title="縮放至路徑全覽">${I.fit}全覽</button>
     </div>
     <div class="chain view-stops">${rows}</div>
     <div class="view-qa" hidden>${profileSvg(stops.stops ?? [])}</div>
@@ -236,14 +237,15 @@ export function routeStopsPanel(d, dir, stops, { onDirection, onStopClick, onFla
   pane.querySelectorAll('.tabs:not(.view-tabs) button').forEach((b) =>
     b.addEventListener('click', () => onDirection(Number(b.dataset.dir)))
   );
-  pane.querySelectorAll('.view-tabs button').forEach((b) =>
+  pane.querySelectorAll('.view-tabs button[data-view]').forEach((b) =>
     b.addEventListener('click', () => {
-      pane.querySelectorAll('.view-tabs button').forEach((x) => x.classList.remove('active'));
+      pane.querySelectorAll('.view-tabs button[data-view]').forEach((x) => x.classList.remove('active'));
       b.classList.add('active');
       pane.querySelector('.view-stops').hidden = b.dataset.view !== 'stops';
       pane.querySelector('.view-qa').hidden = b.dataset.view !== 'qa';
     })
   );
+  pane.querySelector('.view-tabs .fit-all')?.addEventListener('click', () => onFitAll?.());
   pane.querySelectorAll('.view-stops .chain-stop').forEach((row) =>
     row.addEventListener('click', () => {
       highlightChainStop(Number(row.dataset.svid));

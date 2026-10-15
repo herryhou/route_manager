@@ -270,6 +270,7 @@ async function selectRoute(r, dir = 0) {
     routeStopsPanel(d, dir, s, {
       onDirection: (nd) => selectRoute(r, nd),
       onStopClick: (svid) => popupStop(svid),
+      onFitAll: fitRoutePath,
     });
     if ((p.features ?? []).length === 0) status('此方向無路徑資料');
     location.hash = `#route=${route_id}&dir=${dir}`;
@@ -278,6 +279,25 @@ async function selectRoute(r, dir = 0) {
   } finally {
     busy(false);
   }
+}
+
+/// Route-panel 全覽 button: fit the viewport to the drawn path — whitelist
+/// zoom flow #5 (CLAUDE.md "no programmatic zoom or pan"). Reads the already
+/// fetched GeoJSON from lastRouteDraw; no-op + status when the direction has
+/// no path.
+function fitRoutePath() {
+  const ll = [];
+  for (const f of lastRouteDraw?.p?.features ?? []) {
+    const g = f.geometry;
+    if (!g) continue;
+    if (g.type === 'LineString') for (const c of g.coordinates) ll.push([c[1], c[0]]);
+    else if (g.type === 'MultiLineString') for (const line of g.coordinates) for (const c of line) ll.push([c[1], c[0]]);
+  }
+  if (!ll.length) {
+    status('此方向無路徑資料');
+    return;
+  }
+  map.fitBounds(L.latLngBounds(ll), { padding: [24, 24] });
 }
 
 async function loadRaw(routeId, dir) {

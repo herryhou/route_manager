@@ -624,6 +624,15 @@ body {
   font-weight: 700;
 }
 
+/* 全覽 in the route view-tabs: a momentary action among tabs — pushed to the
+   row's far end and iconed so it never reads as a third tab. */
+.view-tabs .fit-all {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 /* ---------- 站序鏈: the ordered stop chain ---------- */
 
 /* Each row is a plate on the printed line: seq numeral, QA node on the

@@ -25,12 +25,13 @@ To diagnose a slow run: `ps aux | grep rm-` — the binary path shows
 
 ## rm-web: no programmatic zoom or pan (whitelist only)
 
-Application code must not change the map zoom. Single exception: the
-initial view at map creation (`L.map(...).fitBounds(...)` in
-`assets/js/app.js`). Never call `setZoom`, `setView` with a zoom argument,
-`flyTo`, `fitBounds`, or `zoomIn`/`zoomOut` from app logic. User-driven
-zoom (scroll wheel, +/- controls) stays fully allowed — the ban is on the
-program moving the zoom, not on the user.
+Application code must not change the map zoom. Exceptions: the initial view
+at map creation (`L.map(...).fitBounds(...)` in `assets/js/app.js`) and the
+route panel 全覽 button (`fitRoutePath` — `fitBounds` to the selected
+direction's drawn path). Never call `setZoom`, `setView` with a zoom
+argument, `flyTo`, `fitBounds`, or `zoomIn`/`zoomOut` from app logic outside
+those. User-driven zoom (scroll wheel, +/- controls) stays fully allowed —
+the ban is on the program moving the zoom, not on the user.
 
 Pan is allowed only in these four flows (2026-10-13 decision — all other
 selection is display-only: markers, popups, panels, hash, layers change;
@@ -43,6 +44,11 @@ the viewport never moves):
    `#station=` restore, search list, popup/panel chips, edit flows).
 4. QA outlier panel pick (`openOutliers` `onPick`) — pans to the outlier
    (edit workflow needs to locate off-map stops).
+
+The 全覽 zoom flow (2026-10-15 decision): the route panel's 全覽 button
+(`fitRoutePath`) fits the viewport to the selected direction's drawn path.
+It is user-triggered, direction-scoped, and reads already-fetched geometry —
+do not widen it to route selection, dataset-wide fits, or refetches.
 
 Route selection (`selectRoute`/`selectRouteById`) never pans — no `center`
 option exists; do not reintroduce one.

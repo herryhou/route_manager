@@ -254,6 +254,7 @@ Zero inline SVG in `index.html`; static chrome marks slots with `data-icon="name
 - **Do** honour `prefers-reduced-motion`: strip state transitions; the busy spinner stays but slows to 1.5s (it is functional feedback).
 - **Do** keep data-changing actions explicit and user-triggered (the Apply-updates button model) — never implicit auto-refresh of edited data.
 - **Do** propagate a proven interaction pattern to its sibling elements (highlight, arm/confirm) — map interactions stay consistent across stop/station/segment.
+- **Do** keep programmatic viewport moves inside the whitelist (CLAUDE.md "no programmatic zoom or pan"): boot `fitBounds`, the four pan flows, and the route-panel 全覽 button (`fitRoutePath`) — nothing else.
 
 ### Don't:
 - **Don't** use alert orange (`#D9531E`) decoratively — it is alarms and live edit sessions only (The One Shout Rule).
