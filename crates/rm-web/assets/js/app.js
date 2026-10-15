@@ -598,7 +598,7 @@ async function undoStopEdit(stop, editId) {
     const r = await api.undoEdit(editId, note);
     status('已復原');
     await refreshAfterEdit();
-    await selectStop(r.new_stop_version_id);
+    await selectStop(r.restored_version_id); // tagged outcome: kind "stop"
     await openEditLog(stop); // fresh rows — the undo row is now newest
   } catch (e) {
     editFail('undo', e);
@@ -710,11 +710,11 @@ async function openLineLog(routeId) {
   }
 }
 
-/// Undo one logged line edit. The polyline branch of /api/edit/undo replies
-/// {edit_id, restored: {deleted}} — deleted means the override's create was
-/// reverted (the row is gone, back to pure src), otherwise the prior line
-/// is back. Refresh = raw re-fetch (the effective line may have moved),
-/// then the log for the fresh rows.
+/// Undo one logged line edit. /api/edit/undo replies the tagged outcome —
+/// for kind "polyline" {edit_id, kind, deleted}: deleted means the
+/// override's create was reverted (the row is gone, back to pure src),
+/// otherwise the prior line is back. Refresh = raw re-fetch (the effective
+/// line may have moved), then the log for the fresh rows.
 async function undoLineEdit(routeId, editId) {
   if (!editMode) return;
   if (!confirm(`復原路線 #${routeId} 的線段編輯 #${editId}？`)) return;
@@ -722,7 +722,7 @@ async function undoLineEdit(routeId, editId) {
   if (!note) return;
   try {
     const r = await api.undoEdit(editId, note);
-    status(r.restored?.deleted ? '已刪除線段覆寫（回到原始線）' : '已還原線段覆寫');
+    status(r.deleted ? '已刪除線段覆寫（回到原始線）' : '已還原線段覆寫');
     if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
     await openLineLog(routeId); // fresh rows — the undo row is now newest
   } catch (e) {
