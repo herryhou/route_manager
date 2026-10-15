@@ -320,35 +320,43 @@ async function loadRaw(routeId, dir) {
 }
 
 /// Compact popup on the clicked marker; point pane mirrors the detail.
-async function openStopPopup(stopVersionId, marker) {
+/// Entity differences live in the per-entity entry points below; `extra`
+/// runs after the popup opens, before the panel renders.
+async function openMarkerPopup(id, marker, o) {
   try {
-    const d = await api.stopDetail(stopVersionId);
+    const d = await o.fetch(id);
     const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
-    paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
-    const el = stopPopupEl(d, { onPickRoute });
+    paneOpen('point', `${o.pane}:${id}`, () => o.reopen(id));
+    const el = o.popupEl(d, { onPickRoute });
     marker.unbindPopup();
     marker.bindPopup(el, { maxWidth: 300 }).openPopup();
-    highlightChainStop(stopVersionId); // lift + scroll the panel row when this stop is on the shown route
-    stopPanel(d, { onPickRoute, onPickStation: selectStation, onEditStop });
+    o.extra?.(id);
+    o.panel(d, { onPickRoute, onPickStation: selectStation });
   } catch (e) {
-    status(`站牌載入失敗: ${e.message}`);
+    status(`${o.err}載入失敗: ${e.message}`);
   }
 }
 
-/// Compact popup on a viewport station marker; point pane mirrors the detail.
-async function openStationPopup(stationId, marker) {
-  try {
-    const d = await api.stationDetail(stationId);
-    const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
-    paneOpen('point', `station:${stationId}`, () => selectStation(stationId));
-    const el = stationPopupEl(d, { onPickRoute });
-    marker.unbindPopup();
-    marker.bindPopup(el, { maxWidth: 300 }).openPopup();
-    stationPanel(d, { onPickRoute, onPickStation: selectStation, onEditStation });
-  } catch (e) {
-    status(`站點載入失敗: ${e.message}`);
-  }
-}
+/// Stop popup (marker on a drawn route or in the viewport stops layer).
+const openStopPopup = (stopVersionId, marker) => openMarkerPopup(stopVersionId, marker, {
+  fetch: api.stopDetail,
+  pane: 'stop',
+  reopen: selectStop,
+  popupEl: stopPopupEl,
+  extra: highlightChainStop, // lift + scroll the panel row when this stop is on the shown route
+  panel: (d, cb) => stopPanel(d, { ...cb, onEditStop }),
+  err: '站牌',
+});
+
+/// Station popup (viewport station marker).
+const openStationPopup = (stationId, marker) => openMarkerPopup(stationId, marker, {
+  fetch: api.stationDetail,
+  pane: 'station',
+  reopen: selectStation,
+  popupEl: stationPopupEl,
+  panel: (d, cb) => stationPanel(d, { ...cb, onEditStation }),
+  err: '站點',
+});
 
 /// Search-driven station selection: pan + ring marker + popup; popup close removes it.
 async function selectStation(stationId) {
