@@ -108,7 +108,9 @@ pub fn run(conn: &rusqlite::Connection) -> Result<Summary> {
     let tx = conn.unchecked_transaction()?;
     for station_id in order {
         let row = &stations[&station_id];
-        let Some(ms) = members.get(&station_id) else { continue };
+        let Some(ms) = members.get(&station_id) else {
+            continue;
+        };
         let headed: Vec<(i64, f64)> = ms
             .iter()
             .filter_map(|(svid, b)| b.map(|b| (*svid, b)))
@@ -120,7 +122,8 @@ pub fn run(conn: &rusqlite::Connection) -> Result<Summary> {
         // parent keeps the largest cluster; ties keep the smaller heading,
         // children follow in ascending heading order
         clusters.sort_by(|a, b| {
-            b.len().cmp(&a.len())
+            b.len()
+                .cmp(&a.len())
                 .then_with(|| cluster_mean(a).partial_cmp(&cluster_mean(b)).unwrap())
         });
 
@@ -152,8 +155,14 @@ pub fn run(conn: &rusqlite::Connection) -> Result<Summary> {
                              station_name, latitude, longitude, valid_from, created_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                         rusqlite::params![
-                            sv_id, id, row.group_id, row.name, clat, clon,
-                            row.valid_from, now
+                            sv_id,
+                            id,
+                            row.group_id,
+                            row.name,
+                            clat,
+                            clon,
+                            row.valid_from,
+                            now
                         ],
                     )?;
                     created_here += 1;
@@ -227,13 +236,7 @@ fn bearing_clusters(headings: &[(i64, f64)]) -> Vec<Vec<(i64, f64)>> {
     let mut hs = headings.to_vec();
     hs.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
     let gap = |i: usize| (hs[(i + 1) % n].1 - hs[i].1 + 360.0) % 360.0;
-    let widest = (0..n).fold(0usize, |best, i| {
-        if gap(i) > gap(best) {
-            i
-        } else {
-            best
-        }
-    });
+    let widest = (0..n).fold(0usize, |best, i| if gap(i) > gap(best) { i } else { best });
     if gap(widest) <= SPLIT_GAP_DEG {
         return vec![hs];
     }
@@ -298,7 +301,7 @@ mod tests {
     #[test]
     fn gap_of_exactly_90_does_not_split() {
         let v = vec![m(1, 10.0), m(2, 100.0), m(3, 190.0)]; // gaps 90/90/180
-        // widest gap 180 cuts; then 90/90 are not cuts -> single cluster
+                                                            // widest gap 180 cuts; then 90/90 are not cuts -> single cluster
         assert_eq!(clusters(&v), vec![vec![1, 2, 3]]);
     }
 

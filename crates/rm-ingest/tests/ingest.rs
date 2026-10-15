@@ -168,9 +168,7 @@ fn station_name_trimmed_into_staging() {
                  ORDER BY sid",
             )
             .unwrap();
-        let it = stmt
-            .query_map([], |r| r.get(0))
-            .unwrap();
+        let it = stmt.query_map([], |r| r.get(0)).unwrap();
         it.collect::<Result<_, _>>().unwrap()
     };
     assert_eq!(names.len(), 3);

@@ -128,11 +128,7 @@ pub fn project_candidates(
         if dists[i] > thresh {
             continue;
         }
-        let left = if i == 0 {
-            f64::INFINITY
-        } else {
-            dists[i - 1]
-        };
+        let left = if i == 0 { f64::INFINITY } else { dists[i - 1] };
         let right = if i + 1 == n {
             f64::INFINITY
         } else {
@@ -179,10 +175,7 @@ pub fn select_sequence(cands: &[Vec<Projection>]) -> Vec<Projection> {
     }
     // candidates are chainage-sorted; the last stop's last candidate is
     // the furthest reach of the path it can see
-    let total = cands[n - 1]
-        .last()
-        .map(|c| c.chainage_m)
-        .unwrap_or(0.0);
+    let total = cands[n - 1].last().map(|c| c.chainage_m).unwrap_or(0.0);
     let mut cost: Vec<SelCost> = cands[0]
         .iter()
         .map(|c| (0, SNAP_WEIGHT * c.snap_dist_m + c.chainage_m))
@@ -217,11 +210,7 @@ pub fn select_sequence(cands: &[Vec<Projection>]) -> Vec<Projection> {
     let mut k = cost
         .iter()
         .enumerate()
-        .min_by(|a, b| {
-            a.1 .0
-                .cmp(&b.1 .0)
-                .then_with(|| a.1 .1.total_cmp(&b.1 .1))
-        })
+        .min_by(|a, b| a.1 .0.cmp(&b.1 .0).then_with(|| a.1 .1.total_cmp(&b.1 .1)))
         .map(|(i, _)| i)
         .unwrap_or(0);
     let mut out = vec![cands[n - 1][k]];
@@ -384,10 +373,10 @@ mod tests {
         // collapse. Stop order must keep it at chainage ~0 and put the
         // revisit (stop 4, same pole) on the end side instead.
         let path = vec![
-            LatLng::new(24.1400, 120.6857),  // A start
-            LatLng::new(24.1400, 120.6867),  // B east
-            LatLng::new(24.1410, 120.6867),  // C north
-            LatLng::new(24.1410, 120.6857),  // D west
+            LatLng::new(24.1400, 120.6857),   // A start
+            LatLng::new(24.1400, 120.6867),   // B east
+            LatLng::new(24.1410, 120.6867),   // C north
+            LatLng::new(24.1410, 120.6857),   // D west
             LatLng::new(24.14009, 120.68571), // A' near closure
         ];
         let cum = cumulative_m(&path);
@@ -396,10 +385,10 @@ mod tests {
         let start_pole = LatLng::new(24.14006, 120.685715);
         let stops = [
             start_pole,
-            LatLng::new(24.1400, 120.6862),   // mid A-B
-            LatLng::new(24.1405, 120.6867),   // mid B-C
-            start_pole,                        // revisit at closure
-            path[4],                           // A' itself
+            LatLng::new(24.1400, 120.6862), // mid A-B
+            LatLng::new(24.1405, 120.6867), // mid B-C
+            start_pole,                     // revisit at closure
+            path[4],                        // A' itself
         ];
         let cands: Vec<Vec<Projection>> = stops
             .iter()
@@ -520,15 +509,25 @@ mod tests {
     fn sequence_selection_penalizes_distant_snap() {
         // candidate 25 m off the pole but zero chainage jump must lose to
         // the 2 m snap 200 m ahead: snap term outweighs the jump
-        let cands = vec![vec![proj(100.0, 2.0)], vec![proj(100.0, 25.0), proj(300.0, 2.0)]];
+        let cands = vec![
+            vec![proj(100.0, 2.0)],
+            vec![proj(100.0, 25.0), proj(300.0, 2.0)],
+        ];
         let sel = select_sequence(&cands);
         assert!((sel[1].chainage_m - 300.0).abs() < 1e-9);
     }
 
     #[test]
     fn single_candidate_per_stop_passes_through() {
-        let cands = vec![vec![proj(0.0, 1.0)], vec![proj(100.0, 2.0)], vec![proj(250.0, 1.5)]];
+        let cands = vec![
+            vec![proj(0.0, 1.0)],
+            vec![proj(100.0, 2.0)],
+            vec![proj(250.0, 1.5)],
+        ];
         let sel = select_sequence(&cands);
-        assert_eq!(sel.iter().map(|p| p.chainage_m as i64).collect::<Vec<_>>(), vec![0, 100, 250]);
+        assert_eq!(
+            sel.iter().map(|p| p.chainage_m as i64).collect::<Vec<_>>(),
+            vec![0, 100, 250]
+        );
     }
 }

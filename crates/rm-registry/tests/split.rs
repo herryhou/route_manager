@@ -86,9 +86,11 @@ fn antipodal_members_split_into_two_stations() {
 
     // child station: suffixed ext_uid + copied current station_version
     let (uid,): (String,) = conn
-        .query_row("SELECT ext_uid FROM station WHERE station_id = ?1", [child], |r| {
-            Ok((r.get(0)?,))
-        })
+        .query_row(
+            "SELECT ext_uid FROM station WHERE station_id = ?1",
+            [child],
+            |r| Ok((r.get(0)?,)),
+        )
         .unwrap();
     assert_eq!(uid, "tcg:node:1:190");
     let (name, group, lat, lon, vto): (String, i64, f64, f64, Option<String>) = conn
@@ -121,9 +123,7 @@ fn split_then_bearing_rebuild_is_signed_per_side() {
             )
             .unwrap();
         let it = stmt
-            .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-            })
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
             .unwrap();
         it.collect::<Result<_, _>>().unwrap()
     };
@@ -158,7 +158,10 @@ fn aligned_headings_do_not_split() {
     let conn = setup();
     bearings(&conn, &[(1, 10.0), (2, 40.0), (3, 350.0)]); // chained ≤ 90° gaps
     let s = rm_registry::split::run(&conn).unwrap();
-    assert_eq!((s.stations_split, s.stations_created, s.stops_moved), (0, 0, 0));
+    assert_eq!(
+        (s.stations_split, s.stations_created, s.stops_moved),
+        (0, 0, 0)
+    );
     assert_eq!(station_of(&conn, 1), 1);
     assert_eq!(station_of(&conn, 2), 1);
     assert_eq!(station_of(&conn, 3), 1);

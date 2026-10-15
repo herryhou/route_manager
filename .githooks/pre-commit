@@ -1,0 +1,9 @@
+#!/bin/sh
+# pre-commit: block commits with unformatted Rust code.
+# Fix: cargo fmt && git add -u, then retry. Bypass: git commit --no-verify
+if ! cargo fmt --check >/dev/null 2>&1; then
+    echo "pre-commit: cargo fmt --check failed. Files needing format:" >&2
+    cargo fmt --check 2>&1 | grep '^Diff in' | cut -d: -f1 | sort -u >&2
+    echo "Fix: cargo fmt && git add -u, then retry (or --no-verify to bypass)." >&2
+    exit 1
+fi

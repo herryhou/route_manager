@@ -98,7 +98,9 @@ fn stale_rebuilds_and_clears_marks() {
     )
     .unwrap();
 
-    let run = run_stale(&conn, 1).unwrap().expect("bearing mark present -> refresh ran");
+    let run = run_stale(&conn, 1)
+        .unwrap()
+        .expect("bearing mark present -> refresh ran");
     assert!(
         run.bearings.stops_osm >= 2,
         "both stops re-bearied via OSM, got {:?}",
@@ -106,7 +108,8 @@ fn stale_rebuilds_and_clears_marks() {
     );
     assert_eq!(run.split.stops_moved, 0, "one heading cluster -> no split");
     assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get::<_, i64>(0))
+        conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r
+            .get::<_, i64>(0))
             .unwrap(),
         0,
         "snapshot rows cleared"
@@ -138,7 +141,8 @@ fn rebuild_failure_leaves_marks_present() {
 
     assert!(run_stale(&conn, 1).is_err(), "rebuild failure propagates");
     assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get::<_, i64>(0))
+        conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r
+            .get::<_, i64>(0))
             .unwrap(),
         1,
         "snapshot delete never ran; badge stays amber over unrefreshed data"
@@ -217,7 +221,8 @@ fn station_bearing_mark_alone_triggers_rebuild_split_and_rebear() {
     assert_eq!(child_members, 1, "post-split re-bear missing (gate broken)");
 
     assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get::<_, i64>(0))
+        conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r
+            .get::<_, i64>(0))
             .unwrap(),
         0,
         "snapshot rows cleared"
@@ -229,7 +234,8 @@ fn stale_with_no_marks_is_false_and_touches_nothing() {
     let conn = setup();
     assert!(run_stale(&conn, 1).unwrap().is_none());
     assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM stop_bearing", [], |r| r.get::<_, i64>(0))
+        conn.query_row("SELECT COUNT(*) FROM stop_bearing", [], |r| r
+            .get::<_, i64>(0))
             .unwrap(),
         0,
         "no rebuild happened"

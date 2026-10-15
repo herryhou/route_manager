@@ -231,7 +231,10 @@ fn stale_reprojects_only_marked_routes_and_clears_their_marks() {
     assert_eq!(out.kept, 0);
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM stale_mark"), 0);
     // route 2 untouched: its projection rows are the same ones (deleted+rewritten only for route 1)
-    assert_eq!(count(&conn, "SELECT COUNT(*) FROM path_stop_projection"), before);
+    assert_eq!(
+        count(&conn, "SELECT COUNT(*) FROM path_stop_projection"),
+        before
+    );
 }
 
 #[test]
@@ -261,7 +264,10 @@ fn stale_keeps_marks_for_unpublished_routes() {
 
     let out = run_stale(&conn, batch, 50.0).unwrap().expect("some marks");
     assert_eq!(out.cleared, 0);
-    assert_eq!(out.kept, 1, "NULL current_route_version_id is not published");
+    assert_eq!(
+        out.kept, 1,
+        "NULL current_route_version_id is not published"
+    );
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM stale_mark"), 1);
 }
 
