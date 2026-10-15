@@ -274,7 +274,8 @@ async fn log_and_undo_roundtrip() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let v = body_json(res).await;
-    assert_eq!(v["new_stop_version_id"].as_i64().unwrap(), 10);
+    assert_eq!(v["kind"], "stop");
+    assert_eq!(v["restored_version_id"].as_i64().unwrap(), 10);
 }
 
 #[tokio::test]
@@ -765,7 +766,8 @@ async fn undo_route_dispatches_station_rename_rows() {
     let res = undo_edit(&state, edit_id).await;
     assert_eq!(res.status(), StatusCode::OK);
     let v = body_json(res).await;
-    assert_eq!(v["restored_station_version_id"].as_i64(), Some(1), "{v}");
+    assert_eq!(v["kind"], "station", "{v}");
+    assert_eq!(v["restored_version_id"].as_i64(), Some(1), "{v}");
     // readback: station 1 current again named S, pole 10 current named Old
     let conn = rm_db::open_readonly(&dir.path().join("t.db")).unwrap();
     let (name, cur): (String, i64) = conn
@@ -959,7 +961,8 @@ async fn line_undo_via_log_deletes_override() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let v = body_json(res).await;
-    assert_eq!(v["restored"]["deleted"], serde_json::json!(true));
+    assert_eq!(v["kind"], "polyline");
+    assert_eq!(v["deleted"], serde_json::json!(true));
     // row gone, raw back to src
     let conn = rm_db::open_readonly(&dir.path().join("t.db")).unwrap();
     let n: i64 = conn

@@ -200,49 +200,22 @@ pub async fn log(
 }
 
 /// POST /api/edit/undo/{edit_id} — revert an edit by restoring the version
-/// that preceded it. Stop rows restore the stop version; station rows
-/// (rename/move) restore the station version; polyline rows restore or
-/// delete the line override. Unknown ids route down the stop path and
-/// surface as its 409 NotUndoable, as before.
+/// that preceded it. rm_db's dispatcher picks the kind's undo service and
+/// returns one tagged outcome (`kind`: stop/station/polyline) either way;
+/// unknown ids route down the stop arm and surface as its 409 NotUndoable,
+/// as before.
 pub async fn undo(
     Path(edit_id): Path<i64>,
     State(state): State<AppState>,
     Editor(editor): Editor,
     ApiJson(b): ApiJson<UndoBody>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let entity = run_db(state.clone(), move |conn| rm_db::edit_entity(conn, edit_id)).await?;
-    let is_polyline = entity.as_deref() == Some("polyline");
-    let is_station = entity.as_deref() == Some("station");
+) -> Result<Json<rm_db::UndoOutcome>, ApiError> {
     let out = run_db_write(state, move |conn| {
-        if is_polyline {
-            rm_db::undo_polyline_line(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
-                .map(|o| (o.edit_id, json!({ "deleted": o.deleted })))
-        } else if is_station {
-            rm_db::undo_station(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
-                .map(|o| (o.edit_id, json!(o.restored_station_version_id)))
-        } else {
-            rm_db::undo_stop(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
-                .map(|o| (o.edit_id, json!(o.new_version_id)))
-        }
+        rm_db::undo_edit(conn, edit_id, &editor, b.note.as_deref().unwrap_or(""))
     })
     .await
     .map_err(edit_conflict)?;
-    if is_polyline {
-        Ok(Json(json!({
-            "edit_id": out.0,
-            "restored": out.1,
-        })))
-    } else if is_station {
-        Ok(Json(json!({
-            "edit_id": out.0,
-            "restored_station_version_id": out.1,
-        })))
-    } else {
-        Ok(Json(json!({
-            "edit_id": out.0,
-            "new_stop_version_id": out.1,
-        })))
-    }
+    Ok(Json(out))
 }
 
 #[derive(Deserialize)]
