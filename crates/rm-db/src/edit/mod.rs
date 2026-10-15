@@ -482,7 +482,7 @@ pub fn apply_stop_undo(
 }
 
 /// Which entity an edit_log row belongs to (`"stop"`, `"station"`); `None`
-/// for unknown ids. The undo route's dispatcher peek.
+/// for unknown ids. The undo dispatcher's peek.
 pub fn edit_entity(conn: &Connection, edit_id: i64) -> Result<Option<String>> {
     conn.query_row(
         "SELECT entity FROM edit_log WHERE edit_id = ?1",
@@ -491,6 +491,54 @@ pub fn edit_entity(conn: &Connection, edit_id: i64) -> Result<Option<String>> {
     )
     .optional()
     .map_err(Into::into)
+}
+
+/// One tagged outcome for every undo kind; the `kind` tag mirrors the
+/// `edit_log.entity` value. `edit_id` is the newly written undo row's id
+/// (not the undone edit's) — same field the undo endpoint always returned.
+/// Serialized uniformly so neither the handler nor the client re-branches
+/// on shape — the server's dispatch knowledge travels with the payload.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UndoOutcome {
+    Stop {
+        edit_id: i64,
+        restored_version_id: i64,
+    },
+    Station {
+        edit_id: i64,
+        restored_version_id: i64,
+    },
+    Polyline {
+        edit_id: i64,
+        deleted: bool,
+    },
+}
+
+/// Undo any edit by id: peek the entity and dispatch to that kind's undo
+/// service. Unknown ids run down the stop arm and surface as its 409
+/// `NotUndoable` — the same behavior the handler's old branch had.
+pub fn undo_edit(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> Result<UndoOutcome> {
+    match edit_entity(conn, edit_id)?.as_deref() {
+        Some("polyline") => {
+            undo_polyline_line(conn, edit_id, editor, note).map(|o| UndoOutcome::Polyline {
+                edit_id: o.edit_id,
+                deleted: o.deleted,
+            })
+        }
+        Some("station") => {
+            undo_station(conn, edit_id, editor, note).map(|o| UndoOutcome::Station {
+                edit_id: o.edit_id,
+                restored_version_id: o.restored_station_version_id,
+            })
+        }
+        // "stop" and any unknown id alike — the stop service's plan guard
+        // refuses foreign rows and missing rows with `NotUndoable`.
+        _ => undo_stop(conn, edit_id, editor, note).map(|o| UndoOutcome::Stop {
+            edit_id: o.edit_id,
+            restored_version_id: o.new_version_id,
+        }),
+    }
 }
 
 pub fn entity_history(conn: &Connection, entity: &str, entity_id: i64) -> Result<Vec<EditLogRow>> {
@@ -3578,5 +3626,60 @@ mod tests {
         assert!(load_polyline_edit(&conn, stop_edit.edit_id)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn undo_edit_dispatches_stop_and_polyline() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        src_fixture(&conn);
+
+        let e = edit_stop(
+            &conn,
+            old,
+            StopEdit {
+                lat: Some(24.001),
+                ..Default::default()
+            },
+            "h",
+            "m",
+        )
+        .unwrap();
+        match undo_edit(&conn, e.edit_id, "h", "rev").unwrap() {
+            UndoOutcome::Stop {
+                restored_version_id,
+                ..
+            } => assert_eq!(restored_version_id, old),
+            other => panic!("stop edit must dispatch to the stop arm, got {other:?}"),
+        }
+
+        // create → undo deletes the override (deleted = true)
+        let l = apply_line_edit(&conn, &line_op(), "h", "n1").unwrap();
+        match undo_edit(&conn, l.edit_id, "h", "rev").unwrap() {
+            UndoOutcome::Polyline { deleted, .. } => assert!(deleted),
+            other => panic!("polyline edit must dispatch to the polyline arm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undo_edit_dispatches_station() {
+        let conn = open_in_memory().unwrap();
+        rename_fixture(&conn);
+        let renamed = apply_station_rename(&conn, &all_poles_op(), "herry", "n").unwrap();
+        match undo_edit(&conn, renamed.edit_id, "herry", "revert").unwrap() {
+            UndoOutcome::Station {
+                restored_version_id,
+                ..
+            } => assert_eq!(restored_version_id, 20), // the pre-rename version
+            other => panic!("station edit must dispatch to the station arm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undo_edit_unknown_id_surfaces_not_undoable() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        let err = undo_edit(&conn, 999, "h", "").unwrap_err();
+        assert!(err.to_string().contains("cannot be undone"), "{err}");
     }
 }
