@@ -512,7 +512,20 @@ function editFail(what, e) {
 function onEditStop(act, stop, stationId) {
   if (!editMode) return;
   if (act === 'log') {
-    openEditLog(stop);
+    openEntityLog('stop', stop.stop_id, {
+      pane: 'editlog',
+      err: '編輯',
+      undo: (editId, reopenLog) => undoEntityEdit({
+        ask: `復原站牌 #${stop.stop_code} 的編輯 #${editId}？`,
+        editId,
+        done: () => '已復原',
+        tail: async (r) => {
+          await refreshAfterEdit();
+          await selectStop(r.restored_version_id); // tagged outcome: kind "stop"
+        },
+        reopenLog,
+      }),
+    });
   } else if (act === 'rename') {
     const name = prompt(`站牌 #${stop.stop_code} 改名:`, stop.stop_name);
     if (!name || name === stop.stop_name) return;
@@ -566,40 +579,44 @@ function onEditStop(act, stop, stationId) {
   }
 }
 
-/// Edit-history panel for a stop (↩ 歷史 mini-btn): audit rows newest
-/// first; undoable rows carry an ↩ in edit mode. stop.stop_id keys the
-/// log — the version id churns on every edit, the stop id never does.
-async function openEditLog(stop) {
+/// Edit-history panel for an entity (↩ 歷史 mini-btn): audit rows newest
+/// first; undoable rows carry an ↩ in edit mode. The entity's stable id
+/// keys the log — version ids churn on every edit, the id never does
+/// (stop_id / station_id / route_id for polyline overrides). `opts.undo`
+/// receives (editId, reopenLog) so the undo tail re-fetches this same log
+/// with these same opts — fresh rows land with the undo row newest.
+async function openEntityLog(kind, id, opts) {
   busy(true);
   try {
-    const v = await api.editLog('stop', stop.stop_id);
-    paneOpen('context', `editlog:${stop.stop_id}`, () => openEditLog(stop));
+    const v = await api.editLog(kind, id);
+    const reopen = () => openEntityLog(kind, id, opts);
+    paneOpen('context', `${opts.pane}:${id}`, reopen);
     editLogPanel(v.rows ?? [], {
       canUndo: editMode,
-      onUndo: (editId) => undoStopEdit(stop, editId),
+      onUndo: (editId) => opts.undo(editId, reopen),
     });
   } catch (e) {
-    status(`編輯歷史載入失敗: ${e.message}`);
+    status(`${opts.err}歷史載入失敗: ${e.message}`);
   } finally {
     busy(false);
   }
 }
 
-/// Undo one logged stop edit: confirm → note → POST undo → reload what's
-/// on screen at the restored version, then re-fetch the log. A 409
+/// Undo one logged edit: confirm → note → POST undo → status line (`done`
+/// maps the tagged outcome) → the entity's tail (reload what's on screen
+/// at the restored state) → reopen the log for fresh rows. A 409
 /// NotUndoable/NotCurrent (stale hint, row already undone) lands in the
 /// status bar via editFail.
-async function undoStopEdit(stop, editId) {
+async function undoEntityEdit({ ask, editId, done, tail, reopenLog }) {
   if (!editMode) return;
-  if (!confirm(`復原站牌 #${stop.stop_code} 的編輯 #${editId}？`)) return;
+  if (!confirm(ask)) return;
   const note = prompt('備註（必填）:', '') ?? '';
   if (!note) return;
   try {
     const r = await api.undoEdit(editId, note);
-    status('已復原');
-    await refreshAfterEdit();
-    await selectStop(r.restored_version_id); // tagged outcome: kind "stop"
-    await openEditLog(stop); // fresh rows — the undo row is now newest
+    status(done(r));
+    await tail(r);
+    await reopenLog(); // fresh rows — the undo row is now newest
   } catch (e) {
     editFail('undo', e);
   }
@@ -611,7 +628,20 @@ function onEditStation(act, d) {
   if (!editMode) return;
   const st = d.station;
   if (act === 'log') {
-    openStationEditLog(st);
+    openEntityLog('station', st.station_id, {
+      pane: 'stationeditlog',
+      err: '編輯',
+      undo: (editId, reopenLog) => undoEntityEdit({
+        ask: `復原站點 #${st.station_id} 的編輯 #${editId}？`,
+        editId,
+        done: () => '已復原',
+        tail: async () => {
+          await refreshAfterEdit();
+          await selectStation(st.station_id);
+        },
+        reopenLog,
+      }),
+    });
   } else if (act === 'rename') {
     const name = prompt(`站點 #${st.station_id} 改名:`, st.station_name);
     if (!name || name === st.station_name) return;
@@ -650,83 +680,6 @@ function onEditStation(act, d) {
         })
         .catch((err) => editFail('move', err));
     });
-  }
-}
-
-/// Edit-history panel for a station (↩ 歷史 mini-btn): station edit rows
-/// newest first; station_id keys the log — station_version_id churns on
-/// every edit, the station id never does.
-async function openStationEditLog(st) {
-  busy(true);
-  try {
-    const v = await api.editLog('station', st.station_id);
-    paneOpen('context', `stationeditlog:${st.station_id}`, () => openStationEditLog(st));
-    editLogPanel(v.rows ?? [], {
-      canUndo: editMode,
-      onUndo: (editId) => undoStationEdit(st, editId),
-    });
-  } catch (e) {
-    status(`編輯歷史載入失敗: ${e.message}`);
-  } finally {
-    busy(false);
-  }
-}
-
-/// Undo one logged station edit: confirm → note → POST undo (the dispatched
-/// undo route restores the station row) → reload what's on screen, then
-/// re-fetch the log. A 409 lands in the status bar via editFail.
-async function undoStationEdit(st, editId) {
-  if (!editMode) return;
-  if (!confirm(`復原站點 #${st.station_id} 的編輯 #${editId}？`)) return;
-  const note = prompt('備註（必填）:', '') ?? '';
-  if (!note) return;
-  try {
-    const r = await api.undoEdit(editId, note);
-    status('已復原');
-    await refreshAfterEdit();
-    await selectStation(st.station_id);
-    await openStationEditLog(st); // fresh rows — the undo row is now newest
-  } catch (e) {
-    editFail('undo', e);
-  }
-}
-
-/// Edit-history panel for the selected route's line overrides (線史):
-/// polyline edit rows key on route_id (entity='polyline', entity_id=route).
-/// ↩ deletes the override (undo of its create) or restores the prior line.
-async function openLineLog(routeId) {
-  busy(true);
-  try {
-    const v = await api.editLog('polyline', routeId);
-    paneOpen('context', `linelog:${routeId}`, () => openLineLog(routeId));
-    editLogPanel(v.rows ?? [], {
-      canUndo: editMode,
-      onUndo: (editId) => undoLineEdit(routeId, editId),
-    });
-  } catch (e) {
-    status(`線段歷史載入失敗: ${e.message}`);
-  } finally {
-    busy(false);
-  }
-}
-
-/// Undo one logged line edit. /api/edit/undo replies the tagged outcome —
-/// for kind "polyline" {edit_id, kind, deleted}: deleted means the
-/// override's create was reverted (the row is gone, back to pure src),
-/// otherwise the prior line is back. Refresh = raw re-fetch (the effective
-/// line may have moved), then the log for the fresh rows.
-async function undoLineEdit(routeId, editId) {
-  if (!editMode) return;
-  if (!confirm(`復原路線 #${routeId} 的線段編輯 #${editId}？`)) return;
-  const note = prompt('備註（必填）:', '') ?? '';
-  if (!note) return;
-  try {
-    const r = await api.undoEdit(editId, note);
-    status(r.deleted ? '已刪除線段覆寫（回到原始線）' : '已還原線段覆寫');
-    if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
-    await openLineLog(routeId); // fresh rows — the undo row is now newest
-  } catch (e) {
-    editFail('undo', e);
   }
 }
 
@@ -970,7 +923,24 @@ async function boot() {
       lineLogBtn.style.cssText = 'display:none;';
       lineLogBtn.addEventListener('click', () => {
         if (!lastRaw) return;
-        openLineLog(lastRaw.routeId);
+        const routeId = lastRaw.routeId; // captured: log keys this route even if selection moves
+        openEntityLog('polyline', routeId, {
+          pane: 'linelog',
+          err: '線段',
+          undo: (editId, reopenLog) => undoEntityEdit({
+            ask: `復原路線 #${routeId} 的線段編輯 #${editId}？`,
+            editId,
+            // Tagged outcome, kind "polyline": deleted = the override's
+            // create was reverted (row gone, back to pure src); otherwise
+            // the prior line is back.
+            done: (r) => (r.deleted ? '已刪除線段覆寫（回到原始線）' : '已還原線段覆寫'),
+            // Raw re-fetch: the effective line may have moved.
+            tail: () => {
+              if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
+            },
+            reopenLog,
+          }),
+        });
       });
       btn.parentElement.appendChild(lineLogBtn);
       document.getElementById('layer-raw').addEventListener('change', syncLineBtn);
