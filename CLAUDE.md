@@ -104,3 +104,17 @@ the bbox, so boundary connectivity survives).
 Visual and interaction rules live in `crates/rm-web/DESIGN.md` (Do's and
 Don'ts) — read it before any rm-web UI work. The viewport rule above applies
 on top of it.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues — `gh` CLI, repo `herryhou/route_manager`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` + `docs/adr/` (created lazily). See `docs/agents/domain.md`.
