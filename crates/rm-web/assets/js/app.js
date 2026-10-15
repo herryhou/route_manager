@@ -24,6 +24,13 @@ L.tileLayer(window.RM_TILES, {
   attribution: '&copy; OpenStreetMap contributors',
 }).addTo(map);
 
+// Leaflet caches its container size at creation — while #detail is still
+// hidden. Flex reflows (#detail unhide on first selection, sidebar toggle,
+// breakpoint stacking) resize #map without telling it, so every fit/pixel
+// computation runs on a stale width until told. Invalidate on any real
+// container resize instead of remembering a manual call per layout flow.
+new ResizeObserver(() => map.invalidateSize()).observe(document.getElementById('map'));
+
 initLayers(map);
 
 // lineEdit.js reaches the map/session status through these globals.
