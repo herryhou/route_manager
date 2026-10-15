@@ -2,13 +2,26 @@
 
 use anyhow::Result;
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::Value;
+
+/// Wire row of the serving-routes arrays (stop/station detail). `bearing`
+/// is the member pole's heading — lets the client disambiguate which of a
+/// route's two directions serves the clicked side of the road.
+#[derive(Serialize)]
+struct ServingRoute {
+    route_id: i64,
+    route_code: String,
+    subroute_name: Option<String>,
+    direction: i64,
+    bearing: Option<f64>,
+}
 
 fn serving_routes_where(
     conn: &Connection,
     where_sql: &str,
     params: &[&dyn rusqlite::ToSql],
-) -> Result<Vec<Value>> {
+) -> Result<Vec<ServingRoute>> {
     let sql = format!(
         "SELECT DISTINCT r.route_id, r.route_code, sv.subroute_name, rsv.direction,
                 sb.bearing_deg
@@ -22,22 +35,28 @@ fn serving_routes_where(
     );
     let mut stmt = conn.prepare(&sql)?;
     let it = stmt.query_map(params, |r| {
-        Ok(json!({
-            "route_id": r.get::<_, i64>(0)?,
-            "route_code": r.get::<_, String>(1)?,
-            "subroute_name": r.get::<_, Option<String>>(2)?,
-            "direction": r.get::<_, i64>(3)?,
-            // member pole's heading — lets the client disambiguate which of a
-            // route's two directions serves the clicked side of the road
-            "bearing": r.get::<_, Option<f64>>(4)?,
-        }))
+        Ok(ServingRoute {
+            route_id: r.get("route_id")?,
+            route_code: r.get("route_code")?,
+            subroute_name: r.get("subroute_name")?,
+            direction: r.get("direction")?,
+            bearing: r.get("bearing_deg")?,
+        })
     })?;
     Ok(it.collect::<Result<_, _>>()?)
 }
 
 /// Member stations of a group (current versions), self included — callers
 /// filter the station they're showing to get the "other stations" chips.
-fn group_members(conn: &Connection, group_id: i64) -> Result<Vec<Value>> {
+#[derive(Serialize)]
+struct GroupMember {
+    station_id: i64,
+    station_name: String,
+    lat: f64,
+    lon: f64,
+}
+
+fn group_members(conn: &Connection, group_id: i64) -> Result<Vec<GroupMember>> {
     let mut stmt = conn.prepare(
         "SELECT st.station_id, stv.station_name, stv.latitude, stv.longitude
          FROM station_version stv
@@ -45,25 +64,116 @@ fn group_members(conn: &Connection, group_id: i64) -> Result<Vec<Value>> {
          WHERE stv.station_group_id = ?1 AND stv.valid_to IS NULL",
     )?;
     let it = stmt.query_map([group_id], |r| {
-        Ok(json!({
-            "station_id": r.get::<_, i64>(0)?,
-            "station_name": r.get::<_, String>(1)?,
-            "lat": r.get::<_, f64>(2)?,
-            "lon": r.get::<_, f64>(3)?,
-        }))
+        Ok(GroupMember {
+            station_id: r.get("station_id")?,
+            station_name: r.get("station_name")?,
+            lat: r.get("latitude")?,
+            lon: r.get("longitude")?,
+        })
     });
-    let rows: Vec<Value> = it?.collect::<Result<_, _>>()?;
+    let rows: Vec<GroupMember> = it?.collect::<Result<_, _>>()?;
     Ok(rows)
+}
+
+/// One stop-detail row — the aliased join of stop → station → group with
+/// both bearings. Field names are the SQL aliases (several source columns
+/// collide across joins: two latitude pairs, two bearing_deg).
+struct DetailRow {
+    stop_version_id: i64,
+    stop_code: String,
+    stop_name: String,
+    lat: f64,
+    lon: f64,
+    station_id: i64,
+    station_name: String,
+    station_lat: f64,
+    station_lon: f64,
+    group_id: i64,
+    group_name: String,
+    group_source: String,
+    bearing_deg: Option<f64>,
+    bearing_source: Option<String>,
+    station_bearing_deg: Option<f64>,
+    station_max_spread_deg: Option<f64>,
+    station_member_count: Option<i64>,
+    stop_id: i64,
+}
+
+/// Wire shape of the `bearing` object in stop detail (null when absent).
+#[derive(Serialize)]
+struct StopBearing {
+    bearing_deg: f64,
+    source: Option<String>,
+}
+
+/// Wire shape of the `station_bearing` object (null when absent).
+#[derive(Serialize)]
+struct StationBearing {
+    bearing_deg: f64,
+    max_spread_deg: Option<f64>,
+    member_count: Option<i64>,
+}
+
+/// Wire shape of the `stale` object in stop detail.
+#[derive(Serialize)]
+struct StaleInfo {
+    projections: Vec<i64>,
+    bearings: bool,
+}
+
+#[derive(Serialize)]
+struct StopHead {
+    stop_version_id: i64,
+    stop_code: String,
+    stop_name: String,
+    lat: f64,
+    lon: f64,
+    stop_id: i64,
+}
+
+#[derive(Serialize)]
+struct StationHead {
+    station_id: i64,
+    station_name: String,
+    lat: f64,
+    lon: f64,
+}
+
+#[derive(Serialize)]
+struct GroupHead {
+    station_group_id: i64,
+    station_group_name: String,
+    source: String,
+}
+
+/// Wire shape of `GET /api/stops/{stop_version_id}`.
+#[derive(Serialize)]
+struct StopDetailResponse {
+    stop: StopHead,
+    station: StationHead,
+    group: GroupHead,
+    bearing: Option<StopBearing>,
+    station_bearing: Option<StationBearing>,
+    group_members: Vec<GroupMember>,
+    routes_by_stop: Vec<ServingRoute>,
+    routes_by_station: Vec<ServingRoute>,
+    routes_by_group: Vec<ServingRoute>,
+    stale: StaleInfo,
 }
 
 /// `GET /api/stops/{stop_version_id}` — stop → station → group + serving routes.
 pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> {
     let found = match conn.query_row(
-        "SELECT sv.stop_version_id, sv.stop_code, sv.stop_name, sv.latitude, sv.longitude,
-                st.station_id, stv.station_name, stv.latitude, stv.longitude,
+        "SELECT sv.stop_version_id, sv.stop_code, sv.stop_name,
+                sv.latitude AS lat, sv.longitude AS lon,
+                st.station_id, stv.station_name,
+                stv.latitude AS station_lat, stv.longitude AS station_lon,
                 sg.station_group_id, sgv.station_group_name, sgv.source,
-                sb.bearing_deg, sb.source,
-                stb.bearing_deg, stb.max_spread_deg, stb.member_count, sv.stop_id
+                sb.bearing_deg, sb.source AS bearing_source,
+                stb.bearing_deg AS station_bearing_deg,
+                stb.max_spread_deg AS station_max_spread_deg,
+                stb.member_count AS station_member_count,
+                sv.stop_id
          FROM stop_version sv
          JOIN station st ON st.station_id = sv.station_id
          JOIN station_version stv
@@ -76,26 +186,26 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
          WHERE sv.stop_version_id = ?1",
         [stop_version_id],
         |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, f64>(3)?,
-                r.get::<_, f64>(4)?,
-                r.get::<_, i64>(5)?,
-                r.get::<_, String>(6)?,
-                r.get::<_, f64>(7)?,
-                r.get::<_, f64>(8)?,
-                r.get::<_, i64>(9)?,
-                r.get::<_, String>(10)?,
-                r.get::<_, String>(11)?,
-                r.get::<_, Option<f64>>(12)?,
-                r.get::<_, Option<String>>(13)?,
-                r.get::<_, Option<f64>>(14)?,
-                r.get::<_, Option<f64>>(15)?,
-                r.get::<_, Option<i64>>(16)?,
-                r.get::<_, i64>(17)?,
-            ))
+            Ok(DetailRow {
+                stop_version_id: r.get("stop_version_id")?,
+                stop_code: r.get("stop_code")?,
+                stop_name: r.get("stop_name")?,
+                lat: r.get("lat")?,
+                lon: r.get("lon")?,
+                station_id: r.get("station_id")?,
+                station_name: r.get("station_name")?,
+                station_lat: r.get("station_lat")?,
+                station_lon: r.get("station_lon")?,
+                group_id: r.get("station_group_id")?,
+                group_name: r.get("station_group_name")?,
+                group_source: r.get("source")?,
+                bearing_deg: r.get("bearing_deg")?,
+                bearing_source: r.get("bearing_source")?,
+                station_bearing_deg: r.get("station_bearing_deg")?,
+                station_max_spread_deg: r.get("station_max_spread_deg")?,
+                station_member_count: r.get("station_member_count")?,
+                stop_id: r.get("stop_id")?,
+            })
         },
     ) {
         Ok(row) => row,
@@ -103,9 +213,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
         Err(e) => return Err(e.into()),
     };
 
-    let (_, _, _, _, _, station_id, _, _, _, group_id, _, _, _, _, _, _, _, _) = &found;
-
-    let members = group_members(conn, *group_id)?;
+    let members = group_members(conn, found.group_id)?;
 
     // staleness badges — position edits mark the projection routes + bearing
     // tables stale until the refresh pipeline re-derives them. route_stop_version
@@ -119,7 +227,7 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
         conn,
         "rsv.stop_version_id IN (SELECT stop_version_id FROM stop_version
                                    WHERE station_id = ?1 AND valid_to IS NULL)",
-        &[station_id],
+        &[&found.station_id],
     )?;
     let routes_by_group = serving_routes_where(
         conn,
@@ -127,53 +235,101 @@ pub fn detail(conn: &Connection, stop_version_id: i64) -> Result<Option<Value>> 
            WHERE station_id IN (SELECT station_id FROM station_version
                                 WHERE station_group_id = ?1 AND valid_to IS NULL)
            AND valid_to IS NULL)",
-        &[group_id],
+        &[&found.group_id],
     )?;
 
-    Ok(Some(json!({
-        "stop": {
-            "stop_version_id": found.0,
-            "stop_code": found.1,
-            "stop_name": found.2,
-            "lat": found.3,
-            "lon": found.4,
-            "stop_id": found.17,
+    Ok(Some(serde_json::to_value(StopDetailResponse {
+        stop: StopHead {
+            stop_version_id: found.stop_version_id,
+            stop_code: found.stop_code,
+            stop_name: found.stop_name,
+            lat: found.lat,
+            lon: found.lon,
+            stop_id: found.stop_id,
         },
-        "station": {
-            "station_id": found.5,
-            "station_name": found.6,
-            "lat": found.7,
-            "lon": found.8,
+        station: StationHead {
+            station_id: found.station_id,
+            station_name: found.station_name,
+            lat: found.station_lat,
+            lon: found.station_lon,
         },
-        "group": {
-            "station_group_id": found.9,
-            "station_group_name": found.10,
-            "source": found.11,
+        group: GroupHead {
+            station_group_id: found.group_id,
+            station_group_name: found.group_name,
+            source: found.group_source,
         },
-        "bearing": match found.12 {
-            Some(bearing_deg) => json!({
-                "bearing_deg": bearing_deg,
-                "source": found.13,
-            }),
-            None => Value::Null,
+        bearing: found.bearing_deg.map(|bearing_deg| StopBearing {
+            bearing_deg,
+            source: found.bearing_source,
+        }),
+        station_bearing: found.station_bearing_deg.map(|bearing_deg| StationBearing {
+            bearing_deg,
+            max_spread_deg: found.station_max_spread_deg,
+            member_count: found.station_member_count,
+        }),
+        group_members: members,
+        routes_by_stop,
+        routes_by_station,
+        routes_by_group,
+        stale: StaleInfo {
+            projections: stale_projections,
+            bearings: bearings_stale,
         },
-        "station_bearing": match found.14 {
-            Some(bearing_deg) => json!({
-                "bearing_deg": bearing_deg,
-                "max_spread_deg": found.15,
-                "member_count": found.16,
-            }),
-            None => Value::Null,
-        },
-        "group_members": members,
-        "routes_by_stop": routes_by_stop,
-        "routes_by_station": routes_by_station,
-        "routes_by_group": routes_by_group,
-        "stale": {
-            "projections": stale_projections,
-            "bearings": bearings_stale,
-        },
-    })))
+    })?))
+}
+
+/// One station-detail row — station → group with the station bearing.
+struct StationDetailRow {
+    station_id: i64,
+    station_name: String,
+    lat: f64,
+    lon: f64,
+    group_id: i64,
+    group_name: String,
+    group_source: String,
+    bearing_deg: Option<f64>,
+    max_spread_deg: Option<f64>,
+    member_count: Option<i64>,
+    station_version_id: i64,
+}
+
+/// Wire row of the `stops` array in station detail.
+#[derive(Serialize)]
+struct StationStopRow {
+    stop_version_id: i64,
+    stop_code: String,
+    stop_name: String,
+    direction: i64,
+    lat: f64,
+    lon: f64,
+}
+
+/// Wire shape of `GET /api/stations/{station_id}`.
+#[derive(Serialize)]
+struct StationDetailResponse {
+    station: StationDetailHead,
+    group: GroupHead,
+    bearing: Option<StationBearing>,
+    stops: Vec<StationStopRow>,
+    routes: Vec<ServingRoute>,
+    group_members: Vec<GroupMember>,
+    stale: StationStaleInfo,
+}
+
+#[derive(Serialize)]
+struct StationDetailHead {
+    station_id: i64,
+    station_name: String,
+    lat: f64,
+    lon: f64,
+    station_version_id: i64,
+}
+
+/// Wire shape of the `stale` object in station detail (stations have no
+/// projections — only the bearing tables go stale).
+#[derive(Serialize)]
+struct StationStaleInfo {
+    bearings: bool,
 }
 
 /// `GET /api/stations/{station_id}` — station + group + stops + serving routes.
@@ -193,19 +349,19 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
          WHERE st.station_id = ?1",
         [station_id],
         |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, f64>(2)?,
-                r.get::<_, f64>(3)?,
-                r.get::<_, i64>(4)?,
-                r.get::<_, String>(5)?,
-                r.get::<_, String>(6)?,
-                r.get::<_, Option<f64>>(7)?,
-                r.get::<_, Option<f64>>(8)?,
-                r.get::<_, Option<i64>>(9)?,
-                r.get::<_, i64>(10)?,
-            ))
+            Ok(StationDetailRow {
+                station_id: r.get("station_id")?,
+                station_name: r.get("station_name")?,
+                lat: r.get("latitude")?,
+                lon: r.get("longitude")?,
+                group_id: r.get("station_group_id")?,
+                group_name: r.get("station_group_name")?,
+                group_source: r.get("source")?,
+                bearing_deg: r.get("bearing_deg")?,
+                max_spread_deg: r.get("max_spread_deg")?,
+                member_count: r.get("member_count")?,
+                station_version_id: r.get("station_version_id")?,
+            })
         },
     ) {
         Ok(row) => row,
@@ -217,16 +373,16 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
         "SELECT stop_version_id, stop_code, stop_name, direction, latitude, longitude
          FROM stop_version WHERE station_id = ?1 AND valid_to IS NULL",
     )?;
-    let stops: Vec<Value> = stmt
+    let stops: Vec<StationStopRow> = stmt
         .query_map([station_id], |r| {
-            Ok(json!({
-                "stop_version_id": r.get::<_, i64>(0)?,
-                "stop_code": r.get::<_, String>(1)?,
-                "stop_name": r.get::<_, String>(2)?,
-                "direction": r.get::<_, i64>(3)?,
-                "lat": r.get::<_, f64>(4)?,
-                "lon": r.get::<_, f64>(5)?,
-            }))
+            Ok(StationStopRow {
+                stop_version_id: r.get("stop_version_id")?,
+                stop_code: r.get("stop_code")?,
+                stop_name: r.get("stop_name")?,
+                direction: r.get("direction")?,
+                lat: r.get("latitude")?,
+                lon: r.get("longitude")?,
+            })
         })?
         .collect::<Result<_, _>>()?;
 
@@ -240,34 +396,63 @@ pub fn station_detail(conn: &Connection, station_id: i64) -> Result<Option<Value
     // stations have no projections — only the bearing tables go stale
     let bearings_stale = rm_db::stale::bearings_stale(conn)?;
 
-    Ok(Some(json!({
-        "station": {
-            "station_id": found.0,
-            "station_name": found.1,
-            "lat": found.2,
-            "lon": found.3,
-            "station_version_id": found.10,
+    Ok(Some(serde_json::to_value(StationDetailResponse {
+        station: StationDetailHead {
+            station_id: found.station_id,
+            station_name: found.station_name,
+            lat: found.lat,
+            lon: found.lon,
+            station_version_id: found.station_version_id,
         },
-        "group": {
-            "station_group_id": found.4,
-            "station_group_name": found.5,
-            "source": found.6,
+        group: GroupHead {
+            station_group_id: found.group_id,
+            station_group_name: found.group_name,
+            source: found.group_source,
         },
-        "bearing": match found.7 {
-            Some(bearing_deg) => json!({
-                "bearing_deg": bearing_deg,
-                "max_spread_deg": found.8,
-                "member_count": found.9,
-            }),
-            None => Value::Null,
+        bearing: found.bearing_deg.map(|bearing_deg| StationBearing {
+            bearing_deg,
+            max_spread_deg: found.max_spread_deg,
+            member_count: found.member_count,
+        }),
+        stops,
+        routes,
+        group_members: group_members(conn, found.group_id)?,
+        stale: StationStaleInfo {
+            bearings: bearings_stale,
         },
-        "stops": stops,
-        "routes": routes,
-        "group_members": group_members(conn, found.4)?,
-        "stale": {
-            "bearings": bearings_stale,
-        },
-    })))
+    })?))
+}
+
+/// Wire properties of a viewport feature. Stop features carry
+/// `bearing_source`, station features `spread` — the other key is absent,
+/// not null (hence skip_serializing_if, exactly the old json! behavior).
+#[derive(Serialize)]
+struct ViewportProps {
+    id: i64,
+    name: String,
+    kind: String,
+    bearing: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    spread: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bearing_source: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ViewportFeature {
+    #[serde(rename = "type")]
+    typ: &'static str,
+    geometry: Value,
+    properties: ViewportProps,
+}
+
+/// Wire shape of `GET /api/stops?bbox=…` (GeoJSON FeatureCollection).
+#[derive(Serialize)]
+struct ViewportFc {
+    #[serde(rename = "type")]
+    typ: &'static str,
+    features: Vec<ViewportFeature>,
+    truncated: bool,
 }
 
 /// `GET /api/stops?bbox=minLon,minLat,maxLon,maxLat&kind=stop|station`
@@ -317,36 +502,59 @@ pub fn viewport(
            AND latitude BETWEEN ?2 AND ?4
          LIMIT ?5"
     ))?;
-    let features: Vec<Value> = {
+    let features = {
         let it = stmt.query_map(
             rusqlite::params![min_lon, min_lat, max_lon, max_lat, limit],
             |r| {
-                let bearing = r.get::<_, Option<f64>>(4)?;
-                let mut props = json!({
-                    "id": r.get::<_, i64>(0)?,
-                    "name": r.get::<_, String>(1)?,
-                    "kind": kind,
-                    "bearing": bearing,
-                });
-                if kind == "station" {
-                    props["spread"] = r.get::<_, Option<f64>>(5)?.into();
-                } else {
-                    props["bearing_source"] = r.get::<_, Option<String>>(5)?.into();
-                }
-                Ok(json!({
-                    "type": "Feature",
-                    "geometry": crate::geojson::point(r.get::<_, f64>(2)?, r.get::<_, f64>(3)?),
-                    "properties": props,
-                }))
+                let (lat, lon): (f64, f64) = (r.get("latitude")?, r.get("longitude")?);
+                Ok(ViewportFeature {
+                    typ: "Feature",
+                    geometry: crate::geojson::point(lon, lat),
+                    properties: ViewportProps {
+                        id: if kind == "station" {
+                            r.get::<_, i64>("station_id")?
+                        } else {
+                            r.get::<_, i64>("stop_version_id")?
+                        },
+                        name: r.get(name_col)?,
+                        kind: kind.to_string(),
+                        bearing: r.get("bearing_deg")?,
+                        spread: if kind == "station" {
+                            r.get("max_spread_deg")?
+                        } else {
+                            None
+                        },
+                        bearing_source: if kind == "station" {
+                            None
+                        } else {
+                            r.get("source")?
+                        },
+                    },
+                })
             },
         )?;
-        it.collect::<Result<_, _>>()?
+        it.collect::<Result<Vec<_>, _>>()?
     };
-    Ok(json!({
-        "type": "FeatureCollection",
-        "features": features,
-        "truncated": total > limit,
-    }))
+    Ok(serde_json::to_value(ViewportFc {
+        typ: "FeatureCollection",
+        features,
+        truncated: total > limit,
+    })?)
+}
+
+/// Wire row of `GET /api/stops?q=`.
+#[derive(Serialize)]
+struct SearchStopRow {
+    stop_version_id: i64,
+    stop_code: String,
+    stop_name: String,
+    lat: f64,
+    lon: f64,
+}
+
+#[derive(Serialize)]
+struct StopsSearchResponse {
+    stops: Vec<SearchStopRow>,
 }
 
 /// `GET /api/stops?q=` — name/code prefix or substring search, LIMIT 30.
@@ -359,18 +567,32 @@ pub fn search(conn: &Connection, q: &str) -> Result<Value> {
          ORDER BY stop_code
          LIMIT 30",
     )?;
-    let stops: Vec<Value> = stmt
+    let stops: Vec<SearchStopRow> = stmt
         .query_map([like], |r| {
-            Ok(json!({
-                "stop_version_id": r.get::<_, i64>(0)?,
-                "stop_code": r.get::<_, String>(1)?,
-                "stop_name": r.get::<_, String>(2)?,
-                "lat": r.get::<_, f64>(3)?,
-                "lon": r.get::<_, f64>(4)?,
-            }))
+            Ok(SearchStopRow {
+                stop_version_id: r.get("stop_version_id")?,
+                stop_code: r.get("stop_code")?,
+                stop_name: r.get("stop_name")?,
+                lat: r.get("latitude")?,
+                lon: r.get("longitude")?,
+            })
         })?
         .collect::<Result<_, _>>()?;
-    Ok(json!({ "stops": stops }))
+    Ok(serde_json::to_value(StopsSearchResponse { stops })?)
+}
+
+/// Wire row of `GET /api/stations?q=`.
+#[derive(Serialize)]
+struct StationSearchRow {
+    station_id: i64,
+    station_name: String,
+    lat: f64,
+    lon: f64,
+}
+
+#[derive(Serialize)]
+struct StationsSearchResponse {
+    stations: Vec<StationSearchRow>,
 }
 
 /// `GET /api/stations?q=` — station name substring search, LIMIT 30.
@@ -387,17 +609,17 @@ pub fn station_search(conn: &Connection, q: &str) -> Result<Value> {
          ORDER BY stv.station_name
          LIMIT 30",
     )?;
-    let stations: Vec<Value> = stmt
+    let stations: Vec<StationSearchRow> = stmt
         .query_map([like], |r| {
-            Ok(json!({
-                "station_id": r.get::<_, i64>(0)?,
-                "station_name": r.get::<_, String>(1)?,
-                "lat": r.get::<_, f64>(2)?,
-                "lon": r.get::<_, f64>(3)?,
-            }))
+            Ok(StationSearchRow {
+                station_id: r.get("station_id")?,
+                station_name: r.get("station_name")?,
+                lat: r.get("latitude")?,
+                lon: r.get("longitude")?,
+            })
         })?
         .collect::<Result<_, _>>()?;
-    Ok(json!({ "stations": stations }))
+    Ok(serde_json::to_value(StationsSearchResponse { stations })?)
 }
 
 /// `GET /api/stations/nearest?lat=&lon=&max_m=` — nearest current station to
@@ -407,6 +629,20 @@ pub fn station_search(conn: &Connection, q: &str) -> Result<Value> {
 /// (small) candidate set and the radius cut is applied on the computed
 /// distance. The box divisor (111,000 < the true 111,195 m/deg at R=6371 km)
 /// deliberately over-widens, so the bbox is a strict superset of the circle.
+/// Wire shape of `GET /api/stations/nearest` — the one endpoint that
+/// spells `latitude`/`longitude` in full (kept for wire compatibility;
+/// everywhere else the wire says `lat`/`lon`).
+#[derive(Serialize)]
+struct StationNearest {
+    station_id: i64,
+    station_name: String,
+    #[serde(rename = "latitude")]
+    lat: f64,
+    #[serde(rename = "longitude")]
+    lon: f64,
+    distance_m: f64,
+}
+
 pub fn station_nearest(conn: &Connection, lat: f64, lon: f64, max_m: f64) -> Result<Option<Value>> {
     let lat_delta = max_m / 111_000.0;
     let lon_delta = lat_delta / f64::max(lat.to_radians().cos().abs(), 0.01);
@@ -418,14 +654,14 @@ pub fn station_nearest(conn: &Connection, lat: f64, lon: f64, max_m: f64) -> Res
          WHERE stv.latitude BETWEEN ?1 - ?3 AND ?1 + ?3
            AND stv.longitude BETWEEN ?2 - ?4 AND ?2 + ?4",
     )?;
-    let mut best: Option<Value> = None;
+    let mut best: Option<StationNearest> = None;
     let mut best_d = f64::INFINITY;
     let rows = stmt.query_map(rusqlite::params![lat, lon, lat_delta, lon_delta], |r| {
         Ok((
-            r.get::<_, i64>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, f64>(2)?,
-            r.get::<_, f64>(3)?,
+            r.get::<_, i64>("station_id")?,
+            r.get::<_, String>("station_name")?,
+            r.get::<_, f64>("latitude")?,
+            r.get::<_, f64>("longitude")?,
         ))
     })?;
     for row in rows {
@@ -433,16 +669,16 @@ pub fn station_nearest(conn: &Connection, lat: f64, lon: f64, max_m: f64) -> Res
         let d = haversine_m(lat, lon, slat, slon);
         if d <= max_m && d < best_d {
             best_d = d;
-            best = Some(json!({
-                "station_id": station_id,
-                "station_name": station_name,
-                "latitude": slat,
-                "longitude": slon,
-                "distance_m": d,
-            }));
+            best = Some(StationNearest {
+                station_id,
+                station_name,
+                lat: slat,
+                lon: slon,
+                distance_m: d,
+            });
         }
     }
-    Ok(best)
+    Ok(best.map(serde_json::to_value).transpose()?)
 }
 
 /// Great-circle distance in metres (earth radius 6371 km).
