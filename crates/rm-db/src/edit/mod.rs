@@ -2,11 +2,13 @@
 
 mod line;
 mod station_move;
+mod station_rename;
 mod station_undo;
 mod stop;
 
 pub use line::{edit_polyline_line, undo_polyline_line, LineEditCmd};
 pub use station_move::{move_station, StationMove};
+pub use station_rename::{rename_station, RenameLevel, StationRename};
 pub use station_undo::undo_station;
 pub use stop::{edit_stop, regroup_stop, undo_stop, RegroupStop, StopEdit};
 
@@ -36,6 +38,10 @@ pub enum EditError {
     EmptyEdit,
     #[error("edit sets no field to a new value")]
     NoOpEdit,
+    #[error("new station name is empty")]
+    EmptyNewName,
+    #[error("new station name equals the current name")]
+    NoOpRename,
 }
 
 #[derive(Debug)]

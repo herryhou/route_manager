@@ -13,6 +13,35 @@ pub use station_move::*;
 pub use stop::*;
 pub use undo::*;
 
+/// The crate's public edit-error surface. Formerly defined by the rename
+/// module; now a standalone shim type mirroring `rm_db::EditError` until
+/// the final migration step flips rm-web over to the rm-db variants.
+#[derive(Debug, thiserror::Error)]
+pub enum EditError {
+    #[error("station version {0} is not the current version (or does not exist)")]
+    StationNotCurrent(i64),
+    #[error("new station name is empty")]
+    EmptyNewName,
+    #[error("new station name equals the current name")]
+    NoOpRename,
+    #[error("edit {0} cannot be undone (not current, or is itself an undo)")]
+    NotUndoable(i64),
+    #[error("stop version {0} is not the current version (or does not exist)")]
+    NotCurrent(i64),
+    #[error("station {0} does not exist or is not current")]
+    UnknownStation(i64),
+    #[error("edit changes nothing")]
+    EmptyEdit,
+    #[error("edit sets no field to a new value")]
+    NoOpEdit,
+    #[error("route {0} does not exist")]
+    UnknownRoute(String),
+    #[error("invalid polyline: {0}")]
+    InvalidLine(String),
+    #[error("line {0}/{1} was edited by someone else — reload and retry")]
+    LineNotCurrent(String, i64),
+}
+
 /// rm-db's internal edit errors surface 1:1 as this crate's public
 /// EditError (stop-side semantics).
 pub(crate) fn map_db_err(e: anyhow::Error) -> anyhow::Error {
@@ -28,18 +57,10 @@ pub(crate) fn map_db_err(e: anyhow::Error) -> anyhow::Error {
         }
         Some(rm_db::EditError::EmptyEdit) => EditError::EmptyEdit.into(),
         Some(rm_db::EditError::NoOpEdit) => EditError::NoOpEdit.into(),
+        Some(rm_db::EditError::EmptyNewName) => EditError::EmptyNewName.into(),
+        Some(rm_db::EditError::NoOpRename) => EditError::NoOpRename.into(),
         _ => e,
     }
-}
-
-/// Station-flavored mapping: a stale pole version (NotCurrent, fired by a
-/// rename's per-pole guard) surfaces as the station-level error — rename
-/// and move act on the station as a whole.
-pub(crate) fn map_station_db_err(e: anyhow::Error) -> anyhow::Error {
-    if let Some(rm_db::EditError::NotCurrent(id)) = e.downcast_ref::<rm_db::EditError>() {
-        return EditError::StationNotCurrent(*id).into();
-    }
-    map_db_err(e)
 }
 
 #[cfg(test)]
@@ -87,29 +108,16 @@ mod tests {
     }
 
     #[test]
-    fn map_station_db_err_remaps_stale_pole_to_station_error() {
-        // scenario-1 semantics: a stale pole surfaces as the station-level error
+    fn map_db_err_maps_rename_guards() {
         assert_eq!(
-            variant(map_station_db_err(anyhow::Error::new(
-                rm_db::EditError::NotCurrent(10)
+            variant(map_db_err(anyhow::Error::new(
+                rm_db::EditError::EmptyNewName
             ))),
-            Some("StationNotCurrent(10)".into())
-        );
-    }
-
-    #[test]
-    fn map_station_db_err_delegates_the_rest() {
-        assert_eq!(
-            variant(map_station_db_err(anyhow::Error::new(
-                rm_db::EditError::StationNotCurrent(2)
-            ))),
-            Some("StationNotCurrent(2)".into())
+            Some("EmptyNewName".into())
         );
         assert_eq!(
-            variant(map_station_db_err(anyhow::Error::new(
-                rm_db::EditError::NotUndoable(4)
-            ))),
-            Some("NotUndoable(4)".into())
+            variant(map_db_err(anyhow::Error::new(rm_db::EditError::NoOpRename))),
+            Some("NoOpRename".into())
         );
     }
 }
