@@ -1,8 +1,9 @@
 # Handoff: route_manger — post rm-edit collapse
 
-Written 2026-10-15 after the collapse branch merged. Repo:
-`/Users/herry/project/rust/route_manger`, master at `a54c147` (pushed to
-origin), clean tree, 324 tests green, `cargo fmt --check` clean.
+Written 2026-10-15 after the collapse branch merged; updated 2026-10-16
+after candidate 3. Repo: `/Users/herry/project/rust/route_manger`, master
+at `fbbd5ec` (ahead of origin — push when convenient), clean tree, 335
+tests green, `cargo fmt --check` clean.
 
 ## Just finished (do not redo)
 
@@ -50,18 +51,16 @@ HTTP-level tests in `crates/rm-web/tests/edit.rs` — same JSON keys, same
 The survey report is archived at `docs/architecture-review-2026-10-15.html`
 (re-run `/mattpocock-skills:improve-codebase-architecture` only if you want
 a fresh survey rather than the queued candidates).
-Candidates 1 (collapse rm-edit) and 5 (tagged undo outcome — master
-`a54c147`: `rm_db::undo_edit` dispatch + `UndoOutcome` tagged serde enum,
-handler pass-through, JS reads `restored_version_id`/`deleted`) are done;
-queued, in suggested order:
+Candidates 1 (collapse rm-edit), 5 (tagged undo outcome — master
+`a54c147`) and 3 (stale-mark owner — master `fbbd5ec`, 2026-10-16:
+`rm_db::stale` module owns StaleTable/mark/snapshot/clear_if_unchanged;
+edit writers, the three `run_stale` kernels, and rm-web's badge/count
+reads all route through it; 4 commits 78fd825→fbbd5ec; 335 tests green)
+are done; queued, in suggested order:
 
-- **Candidate 3**: give the stale mark one owner — rm_db stale-mark module
-  (mark / marks_for / clear_if_unchanged); the three pipeline `run_stale`
-  loops shrink to load→rebuild→clear; rm-web's two EXISTS copies die.
-  Self-contained, fully testable, no JS — recommended next.
 - **Candidate 2**: one shape authority for query responses — serde struct
   per endpoint in queries/{stops,routes,qa,pairs}.rs. Biggest leverage but
-  the heaviest grilling (design-it-twice territory); do before 4.
+  the heaviest grilling (design-it-twice territory); do before 4. Next.
 - **Candidate 4**: split app.js along its seams — candidate 5 already
   unified the undo fields, so the undo skeleton is now trivial; JS has no
   test infra, so verification is manual browser pass. Last.
