@@ -19,10 +19,21 @@ export const map = L.map('map', { preferCanvas: true }).fitBounds(
   { padding: [24, 24] },
 );
 
-L.tileLayer(window.RM_TILES, {
-  maxZoom: 23,
-  attribution: '&copy; OpenStreetMap contributors',
-}).addTo(map);
+// Basemap: MapLibre GL renders the osm-liberty style into a Leaflet tile
+// layer — vector tiles from the local Martin server; RM_TILES (--tiles)
+// swaps the vector source template. Style loads async: the layer joins
+// tilePane when it arrives, below the overlay panes either way. GL never
+// moves the viewport — the adapter only mirrors Leaflet's center/zoom.
+fetch('/vendor/osm-liberty-local.json')
+  .then((r) => {
+    if (!r.ok) throw new Error(`style HTTP ${r.status}`);
+    return r.json();
+  })
+  .then((style) => {
+    style.sources.openmaptiles.tiles = [window.RM_TILES];
+    L.maplibreGL({ style, maxZoom: 23 }).addTo(map);
+  })
+  .catch((e) => console.error('basemap failed:', e));
 
 // Leaflet caches its container size at creation — while #detail is still
 // hidden. Flex reflows (#detail unhide on first selection, sidebar toggle,

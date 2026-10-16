@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 
 use crate::state::AppState;
 
-const DEFAULT_TILES: &str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const DEFAULT_TILES: &str = "http://localhost:3000/osm-2020-02-10-v3.11_taiwan_taipei/{z}/{x}/{y}";
 
 fn asset(content_type: &'static str, body: &'static str) -> Response {
     (
@@ -77,6 +77,22 @@ pub async fn serve(State(state): State<AppState>, uri: Uri) -> Response {
             include_str!("../../assets/vendor/leaflet.js"),
         ),
         "/vendor/leaflet.css" => asset("text/css", include_str!("../../assets/vendor/leaflet.css")),
+        "/vendor/maplibre-gl.js" => asset(
+            "application/javascript",
+            include_str!("../../assets/vendor/maplibre-gl.js"),
+        ),
+        "/vendor/maplibre-gl.css" => asset(
+            "text/css",
+            include_str!("../../assets/vendor/maplibre-gl.css"),
+        ),
+        "/vendor/leaflet-maplibre-gl.js" => asset(
+            "application/javascript",
+            include_str!("../../assets/vendor/leaflet-maplibre-gl.js"),
+        ),
+        "/vendor/osm-liberty-local.json" => asset(
+            "application/json",
+            include_str!("../../assets/vendor/osm-liberty-local.json"),
+        ),
         _ => (StatusCode::NOT_FOUND, "not found").into_response(),
     }
 }

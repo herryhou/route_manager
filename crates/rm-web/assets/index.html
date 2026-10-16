@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/leaflet.css">
+  <link rel="stylesheet" href="/vendor/maplibre-gl.css">
   <link rel="stylesheet" href="/style.css">
 </head>
 
@@ -70,9 +71,11 @@
   </div>
   <footer id="statusbar">
     <span class="status-left"><span id="busy" hidden></span><span id="status-msg"></span></span>
-    <span id="tile-note">底圖圖資需要網路連線，資料圖層皆為本機</span>
+    <span id="tile-note">底圖為本機 Martin 向量圖資，標籤字型需網路</span>
   </footer>
   <script src="/vendor/leaflet.js"></script>
+  <script src="/vendor/maplibre-gl.js"></script>
+  <script src="/vendor/leaflet-maplibre-gl.js"></script>
   <script>window.RM_TILES = "__TILES__"; window.RM_BOUNDS = __BOUNDS__;</script>
   <script type="module" src="/js/app.js"></script>
 </body>
