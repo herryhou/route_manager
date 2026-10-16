@@ -132,6 +132,18 @@ it next to the pipeline:
 cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
 ```
 
+The basemap is vector tiles rendered in-browser by vendored MapLibre GL
+(5.24.0 UMD, worker inlined — v6 is ESM-only and would break the
+single-binary `include_str!` build) behind the `leaflet-maplibre-gl`
+adapter (0.1.4). By default it reads the OpenMapTiles Taipei extract from
+a local [Martin](https://maplibre.org/martin/) server at
+`http://localhost:3000` (`--tiles <url-template>` overrides the source).
+Two online remnants, mirroring the Google Fonts exception: label glyph
+fonts and the sprite come from CDNs referenced by the osm-liberty style,
+so the basemap draws offline but labels need the network. The adapter
+only mirrors Leaflet's viewport into GL — it never zooms or pans on its
+own (CLAUDE.md whitelist holds).
+
 ![rm-web browsing a Taipei route — path, bearings, stop popup with 經過路線 chips, on-map legend](assets/screenshot.jpg)
 
 See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.

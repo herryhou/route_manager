@@ -174,7 +174,7 @@ Spacing rhythm is an 8px base: 8px gaps between plates and around the main row; 
 
 Responsive: the tool targets desktop mouse interaction. A single `max-width: 900px` breakpoint stacks the plates vertically so every region stays reachable — the topbar wraps (`height: auto; min-height: 56px`), the sidebar caps at 42vh, the map gets at least 48vh, and the detail column goes full-width. No other breakpoints; no touch affordances.
 
-Architecture note for extenders: assets are `include_str!`-embedded in a single axum binary with `Cache-Control: no-cache`. A new JS file must be registered in **both** `crates/rm-web/src/handlers/assets.rs` (a `/js/x.js` match arm) and `crates/rm-web/src/handlers/mod.rs` (a route). Zero-build vanilla ES modules; Leaflet is vendored; `index.html` gets the tile template injected as `window.RM_TILES`.
+Architecture note for extenders: assets are `include_str!`-embedded in a single axum binary with `Cache-Control: no-cache`. A new JS file must be registered in **both** `crates/rm-web/src/handlers/assets.rs` (a `/js/x.js` match arm) and `crates/rm-web/src/handlers/mod.rs` (a route). Zero-build vanilla ES modules; Leaflet and MapLibre GL (vector basemap via the adapter layer) are vendored; `index.html` gets the tile template injected as `window.RM_TILES`.
 
 ## Elevation & Depth
 
