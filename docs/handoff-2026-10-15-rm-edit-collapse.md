@@ -2,7 +2,7 @@
 
 Written 2026-10-15 after the collapse branch merged; updated 2026-10-16
 after candidates 3, 2 and 4. Repo: `/Users/herry/project/rust/route_manger`,
-master at `9144fb6`, pushed, clean tree, 350 tests green
+master at `e07751c`, pushed, clean tree, 350 tests green
 (335 + 15 golden shape), `cargo fmt --check` clean.
 
 ## Just finished (do not redo)
@@ -62,8 +62,13 @@ from the report's "split along seams" to in-place dedup — zero new JS
 files, zero Rust diffs; openEntityLog + undoEntityEdit replace the
 stop/station/line log+undo hand-copies, openMarkerPopup replaces the
 popup pair behind two 1-line entry points; 1007→985 ln; behavior
-preserved by contract, browser checklist pending human verification)** —
-all seven candidates' actionable ones are done. Remaining from the
+preserved by contract, browser checklist pending human verification)**
+— all seven candidates' actionable ones are done. Candidate 4 was
+verified end-to-end by a playwright-cli browser pass (2026-10-16): all
+flows green, console clean — see memory `candidate4-appjs-seams.md`.
+That pass also caught a master-breaking bug: candidate 2's JSDoc commit
+(ed25484) had deleted `fetchJson` — every page load died at boot;
+restored in `e07751c`. Remaining from the
 report: 6 (asset table) + 7 (publish QA thresholds) were marked
 Speculative/opportunistic — pick up only when one actually bites.
 
