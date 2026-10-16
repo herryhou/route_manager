@@ -68,6 +68,15 @@ function setChip(id, text) {
   if (el.classList.contains('chip-click')) el.classList.toggle('hot', parseInt(text, 10) > 0);
 }
 
+/// Re-seed the refresh-btn pending-count badge. Boot and edit-toggle seed
+/// it, but line saves/undos mark derived data stale mid-session with no
+/// push channel — edit-side flows call this right after writing.
+function refreshBadge() {
+  api.refreshStatus().then((v) => {
+    setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
+  }).catch(() => { });
+}
+
 let allRoutes = [];
 let selectedKey = null;
 let selectedRoute = null; // { route_id, dir, xno }
@@ -90,8 +99,9 @@ function syncLineBtn() {
 
 function onLineSaved(out, err) {
   if (err) { status(`線段儲存失敗: ${err.message}`); return; }
-  status(out.created ? '已建立線段覆寫' : '已更新線段覆寫');
+  status(out.created ? '已建立線段覆寫；藍線待「套用」重算' : '已更新線段覆寫；藍線待「套用」重算');
   if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
+  refreshBadge();
 }
 
 /// Re-draw the raw layer from the cached payload (raw/effective toggle
@@ -448,9 +458,7 @@ async function enableEditMode() {
   document.getElementById('refresh-btn').hidden = false;
   // Re-seed the pending-count badge: the boot seed may be stale (no token
   // yet, or marks created in a previous session).
-  api.refreshStatus().then((v) => {
-    setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
-  }).catch(() => { });
+  refreshBadge();
 }
 
 function disableEditMode() {
@@ -884,9 +892,7 @@ async function boot() {
       // pending (a no-op run is harmless) — edits made later in the
       // session have no push channel, so a disabled-at-0 rule would
       // brick the button after new edits (spec deviation, flagged).
-      api.refreshStatus().then((v) => {
-        setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
-      }).catch(() => { });
+      refreshBadge();
       rbtn.addEventListener('click', async () => {
         if (refreshTimer) return; // a run is already in flight
         if (!confirm('套用更新？將對所有過期編輯重跑比對、投影與方位。')) return;
@@ -953,11 +959,14 @@ async function boot() {
             editId,
             // Tagged outcome, kind "polyline": deleted = the override's
             // create was reverted (row gone, back to pure src); otherwise
-            // the prior line is back.
-            done: (r) => (r.deleted ? '已刪除線段覆寫（回到原始線）' : '已還原線段覆寫'),
-            // Raw re-fetch: the effective line may have moved.
+            // the prior line is back. The drawn route path still reads the
+            // derived seg_geometry_draft until the next 套用 — say so.
+            done: (r) => (r.deleted ? '已刪除線段覆寫（回到原始線）' : '已還原線段覆寫') + '；藍線待「套用」重算',
+            // Raw re-fetch: the effective line may have moved. Badge: the
+            // undo re-marked derived datasets stale mid-session.
             tail: () => {
               if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
+              refreshBadge();
             },
             reopenLog,
           }),
