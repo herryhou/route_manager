@@ -6,6 +6,16 @@
 // are pinned by crates/rm-web/tests/shape.rs. One deliberate drift:
 // /api/stations/nearest spells latitude/longitude, everything else lat/lon.
 
+export async function fetchJson(path, { headers, signal } = {}) {
+  const res = await fetch(path, { headers, signal });
+  if (!res.ok) {
+    let msg = '';
+    try { msg = (await res.json()).error ?? ''; } catch { /* not json */ }
+    throw new Error(`HTTP ${res.status}: ${msg || res.statusText}`);
+  }
+  return res.json();
+}
+
 /**
  * @typedef {Object} ServingRoute
  * @property {number} route_id
