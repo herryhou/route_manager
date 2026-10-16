@@ -9,21 +9,23 @@ const seed = window.RM_BOUNDS; // [w, s, e, n] seeded by the server at boot
 export const map = L.map('map', { preferCanvas: true }).fitBounds(
   seed
     ? [
-        [seed[1], seed[0]],
-        [seed[3], seed[2]],
-      ]
+      [seed[1], seed[0]],
+      [seed[3], seed[2]],
+    ]
     : [
-        [23.974, 120.498],
-        [24.447, 121.322],
-      ],
+      [23.974, 120.498],
+      [24.447, 121.322],
+    ],
   { padding: [24, 24] },
 );
 
 // Basemap: MapLibre GL renders the osm-liberty style into a Leaflet tile
-// layer — vector tiles from the local Martin server; RM_TILES (--tiles)
-// swaps the vector source template. Style loads async: the layer joins
-// tilePane when it arrives, below the overlay panes either way. GL never
-// moves the viewport — the adapter only mirrors Leaflet's center/zoom.
+// layer — style and vector tiles both come from the local Martin server
+// (/style/osm_liberty); RM_TILES (--tiles) still swaps the vector source
+// template. Style loads async: the layer joins tilePane when it arrives,
+// below the overlay panes either way. GL never moves the viewport — the
+// adapter only mirrors Leaflet's center/zoom.
+// fetch('http://localhost:3000/style/osm_liberty')
 fetch('/vendor/osm-liberty-local.json')
   .then((r) => {
     if (!r.ok) throw new Error(`style HTTP ${r.status}`);
