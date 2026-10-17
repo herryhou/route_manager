@@ -1,10 +1,16 @@
 //! rm-job: dry-run-first job CLI over `rm_db`'s manual-edit primitives.
 //!
 //! The binary is a thin wrapper (parse → run → print → exit); everything
-//! testable lives here. SQLite is touched only through `rm_db`.
+//! testable lives here. SQLite is touched only through `rm_db`. Every run
+//! prints exactly one envelope JSON object to stdout (`envelope`); human
+//! text goes to stderr.
+
+pub mod envelope;
+pub mod params;
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
@@ -13,17 +19,39 @@ use rm_db::{
     StationVerdict, UndoOutcome,
 };
 
-/// Everything one run wrote: `out` is the report (stdout), `err` the
-/// rejection reason or usage line (stderr). Both buffered so tests can
-/// assert content without process capture.
+/// Everything one run wrote: `out` is the envelope JSON (the only stdout
+/// content), `err` the human text — rejection/no-op reasons, usage lines
+/// (stderr). Both buffered so tests can assert content without process
+/// capture.
 #[derive(Debug, Default)]
 pub struct Report {
     pub out: String,
     pub err: String,
 }
 
+/// The agent-facing help tail: discover the schema, call with one JSON
+/// payload, read the exit code (agent-friendly-cli skill).
+const AGENT_USAGE: &str = "\
+AGENT USAGE:
+  # 1. Discover parameter shapes
+  rm-job schema
+  rm-job schema add-stop
+
+  # 2. Execute with the discovered schema (--json payload wins; clap still
+  #    requires the flags to parse, their values are ignored)
+  rm-job add-stop X --lat 24.14 --lon 120.69 --json '{\"name\":\"X\",\"lat\":24.14,\"lon\":120.69,\"attach\":[\"1:0\"],\"db\":\"data/taichung.db\"}'
+
+  # 3. Check exit code, parse stdout
+  # exit 0 ok, 1 rejected, 2 no-op; stdout is exactly one envelope JSON:
+  # {\"status\":\"ok|rejected|noop\",\"command\":\"add-stop\",\"data\":{...},\"logs\":[...],\"duration_ms\":N}
+";
+
 #[derive(Parser)]
-#[command(name = "rm-job", about = "Dry-run-first job CLI over rm_db edits")]
+#[command(
+    name = "rm-job",
+    about = "Dry-run-first job CLI over rm_db edits",
+    after_help = AGENT_USAGE
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -60,6 +88,10 @@ pub enum Command {
         /// Write the shown plan (default: dry run)
         #[arg(long)]
         apply: bool,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// add-stop`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
     },
     /// Undo a job edit by its edit_log id.
     Undo {
@@ -71,6 +103,15 @@ pub enum Command {
         /// Editor name recorded on the undo's audit row
         #[arg(long, default_value = "rm-job")]
         editor: String,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// undo`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
+    /// Print command schemas: every command, or one --json payload schema.
+    Schema {
+        /// The command to describe (omit: list every command)
+        command: Option<String>,
     },
 }
 
@@ -102,11 +143,49 @@ pub fn parse_attach(s: &str) -> Result<AttachCmd, String> {
     })
 }
 
+/// What one command concluded; `run` maps it to the envelope and exit code.
+enum Outcome {
+    /// Success — the command's `data` payload.
+    Ok(serde_json::Value),
+    /// Rejected — human reason for stderr and `data.reason`; exit 1.
+    Rejected(String),
+    /// No-op — human reason for stderr and `data.reason`; exit 2.
+    Noop(String),
+}
+
 /// Run one CLI invocation to completion. Returns the process exit code
-/// (0 ok, 1 rejected, 2 no-op) and the buffered report.
+/// (0 ok, 1 rejected, 2 no-op) and the buffered report; `report.out` is
+/// always the envelope JSON, `report.err` the human text.
 pub fn run(cli: Cli) -> (i32, Report) {
-    let mut report = Report::default();
-    let code = match cli.command {
+    let started = Instant::now();
+    let (command, outcome) = dispatch(cli);
+    let (mut env, code) = match &outcome {
+        Outcome::Ok(data) => (envelope::ok(command, data.clone()), 0),
+        Outcome::Rejected(reason) => envelope::rejected(command, reason),
+        Outcome::Noop(reason) => envelope::noop(command, reason),
+    };
+    env.duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let mut report = Report {
+        out: serde_json::to_string(&env).expect("envelope always serializes"),
+        ..Report::default()
+    };
+    match &outcome {
+        Outcome::Ok(_) => {}
+        Outcome::Rejected(reason) => {
+            let _ = writeln!(report.err, "rejected: {reason}");
+        }
+        Outcome::Noop(reason) => {
+            let _ = writeln!(report.err, "no-op: {reason}");
+        }
+    }
+    (code, report)
+}
+
+/// Parse and run one command. Flags are ignored when `--json` carries the
+/// invocation; the payload is deserialized into the command's `params`
+/// struct. Never writes — the outcome carries everything.
+fn dispatch(cli: Cli) -> (&'static str, Outcome) {
+    match cli.command {
         Command::AddStop {
             name,
             lat,
@@ -117,72 +196,160 @@ pub fn run(cli: Cli) -> (i32, Report) {
             editor,
             note,
             apply,
+            json,
         } => {
-            // parse before open: a rejected attach must not create the db
-            let mut attachments = Vec::with_capacity(attach.len());
-            for a in &attach {
-                match parse_attach(a) {
-                    Ok(c) => attachments.push(c),
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::AddStopParams>(&payload) {
+                    Ok(p) => p,
                     Err(e) => {
-                        report.err.push_str(&e);
-                        report.err.push('\n');
-                        return (1, report);
+                        return (
+                            "add-stop",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
                     }
-                }
-            }
-            if attachments.is_empty() {
-                report.err.push_str(
-                    "no-op: nothing to attach — give at least one --attach XNO:DIR[@CODE]\n",
-                );
-                return (2, report);
-            }
-            let conn = match rm_db::open(&db) {
-                Ok(c) => c,
-                Err(e) => return reject(&mut report, e),
+                },
+                None => params::AddStopParams {
+                    name,
+                    lat,
+                    lon,
+                    attach,
+                    station,
+                    db: db.display().to_string(),
+                    editor,
+                    note,
+                    apply,
+                },
             };
-            let cmd = AddStopCmd {
-                name,
-                lat,
-                lon,
-                station_id: station,
-                attachments,
-            };
-            if apply {
-                match add_stop(&conn, cmd, &editor, note.as_deref().unwrap_or("")) {
-                    Ok(o) => write_outcome(&mut report.out, &o),
-                    Err(e) => return reject(&mut report, e),
-                }
-            } else {
-                match plan_add_stop(&conn, &cmd) {
-                    Ok(plan) => write_plan(&mut report.out, &plan),
-                    Err(e) => return reject(&mut report, e),
-                }
-            }
-            0
+            add_stop_job(p)
         }
         Command::Undo {
             edit_id,
             db,
             editor,
+            json,
         } => {
-            let conn = match rm_db::open(&db) {
-                Ok(c) => c,
-                Err(e) => return reject(&mut report, e),
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::UndoParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return ("undo", Outcome::Rejected(format!("invalid --json payload: {e}")))
+                    }
+                },
+                None => params::UndoParams {
+                    edit_id,
+                    db: db.display().to_string(),
+                    editor,
+                },
             };
-            match undo_edit(&conn, edit_id, &editor, "") {
-                Ok(o) => write_undo(&mut report.out, edit_id, &o),
-                Err(e) => return reject(&mut report, e),
-            }
-            0
+            undo_job(p)
         }
-    };
-    (code, report)
+        Command::Schema { command } => match command.as_deref() {
+            None => ("schema", Outcome::Ok(schema_list())),
+            Some(name) => match schema_for(name) {
+                Some(data) => ("schema", Outcome::Ok(data)),
+                None => (
+                    "schema",
+                    Outcome::Rejected(format!(
+                        "unknown command '{name}': no --json schema; run `rm-job schema` for the list"
+                    )),
+                ),
+            },
+        },
+    }
 }
 
-/// Rejection: the reason to the stderr buffer, exit 1.
-fn reject(report: &mut Report, e: anyhow::Error) -> (i32, Report) {
-    let _ = writeln!(report.err, "rejected: {e:#}");
-    (1, std::mem::take(report))
+/// The add-stop job over one resolved payload.
+fn add_stop_job(p: params::AddStopParams) -> (&'static str, Outcome) {
+    // parse before open: a rejected attach must not create the db
+    let mut attachments = Vec::with_capacity(p.attach.len());
+    for a in &p.attach {
+        match parse_attach(a) {
+            Ok(c) => attachments.push(c),
+            Err(e) => return ("add-stop", Outcome::Rejected(e)),
+        }
+    }
+    if attachments.is_empty() {
+        return (
+            "add-stop",
+            Outcome::Noop("nothing to attach — give at least one --attach XNO:DIR[@CODE]".into()),
+        );
+    }
+    let conn = match rm_db::open(&PathBuf::from(&p.db)) {
+        Ok(c) => c,
+        Err(e) => return ("add-stop", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let cmd = AddStopCmd {
+        name: p.name,
+        lat: p.lat,
+        lon: p.lon,
+        station_id: p.station,
+        attachments,
+    };
+    let mut out = String::new();
+    if p.apply {
+        match add_stop(&conn, cmd, &p.editor, p.note.as_deref().unwrap_or("")) {
+            Ok(o) => write_outcome(&mut out, &o),
+            Err(e) => return ("add-stop", Outcome::Rejected(format!("{e:#}"))),
+        }
+    } else {
+        match plan_add_stop(&conn, &cmd) {
+            Ok(plan) => write_plan(&mut out, &plan),
+            Err(e) => return ("add-stop", Outcome::Rejected(format!("{e:#}"))),
+        }
+    }
+    (
+        "add-stop",
+        Outcome::Ok(serde_json::json!({ "report": out })),
+    )
+}
+
+/// The undo job over one resolved payload.
+fn undo_job(p: params::UndoParams) -> (&'static str, Outcome) {
+    let conn = match rm_db::open(&PathBuf::from(&p.db)) {
+        Ok(c) => c,
+        Err(e) => return ("undo", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let mut out = String::new();
+    match undo_edit(&conn, p.edit_id, &p.editor, "") {
+        Ok(o) => write_undo(&mut out, p.edit_id, &o),
+        Err(e) => return ("undo", Outcome::Rejected(format!("{e:#}"))),
+    }
+    ("undo", Outcome::Ok(serde_json::json!({ "report": out })))
+}
+
+/// The `schema` command's list form: every command with its description.
+pub fn schema_list() -> serde_json::Value {
+    serde_json::json!({
+        "commands": [
+            {
+                "name": "add-stop",
+                "description": "Add a stop and attach it to route directions (dry run unless --apply).",
+            },
+            {
+                "name": "undo",
+                "description": "Undo a job edit by its edit_log id.",
+            },
+            {
+                "name": "schema",
+                "description": "Print command schemas: every command, or one --json payload schema.",
+            },
+        ]
+    })
+}
+
+/// One command's `--json` payload schema, or None for an unknown name.
+pub fn schema_for(name: &str) -> Option<serde_json::Value> {
+    match name {
+        "add-stop" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::AddStopParams),
+        })),
+        "undo" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::UndoParams),
+        })),
+        _ => None,
+    }
 }
 
 /// The dry-run report: station verdict, one line per attach (position +

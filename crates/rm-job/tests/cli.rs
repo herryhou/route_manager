@@ -4,8 +4,15 @@
 
 use std::path::{Path, PathBuf};
 
-use rm_job::{parse_attach, run, Cli, Command};
+use rm_job::{parse_attach, run, Cli, Command, Report};
 use rusqlite::Connection;
+
+/// The stdout envelope, parsed — every run's stdout must be exactly one
+/// JSON object.
+fn envelope_of(report: &Report) -> serde_json::Value {
+    serde_json::from_str(&report.out)
+        .unwrap_or_else(|e| panic!("stdout not JSON: {e}: {}", report.out))
+}
 
 const T0: &str = "2026-01-01T00:00:00Z";
 
@@ -67,6 +74,7 @@ fn add_stop_cli(name: &str, attaches: &[&str], db: &Path, apply: bool) -> Cli {
             editor: "test".to_string(),
             note: None,
             apply,
+            json: None,
         },
     }
 }
@@ -77,6 +85,7 @@ fn undo_cli(edit_id: i64, db: &Path) -> Cli {
             edit_id,
             db: db.to_path_buf(),
             editor: "test".to_string(),
+            json: None,
         },
     }
 }
@@ -170,7 +179,10 @@ fn dry_run_is_default_exit_0_prints_verdict_and_counts() {
     let before = dump_at(&db, &[]);
     let (code, report) = run(add_stop_cli("X", &["1:0"], &db, false));
     assert_eq!(code, 0, "{}{}", report.out, report.err);
-    let out = &report.out;
+    let out = envelope_of(&report)["data"]["report"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert!(out.contains("create new station"), "{out}");
     assert!(out.contains("route 1 dir 0: insert after end"), "{out}");
     assert!(out.contains("between Old → -"), "{out}");
@@ -184,10 +196,13 @@ fn apply_writes_and_reports_ids() {
     let (_dir, db) = fixture_db();
     let (code, report) = run(add_stop_cli("X", &["1:0"], &db, true));
     assert_eq!(code, 0, "{}{}", report.out, report.err);
-    let out = &report.out;
-    let edit_id = grab(out, "edit_id ");
-    let stop_id = grab(out, "stop_id ");
-    let station_id = grab(out, "station_id ");
+    let out = envelope_of(&report)["data"]["report"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let edit_id = grab(&out, "edit_id ");
+    let stop_id = grab(&out, "stop_id ");
+    let station_id = grab(&out, "station_id ");
     assert!(edit_id > 0 && stop_id > 0 && station_id > 0, "{out}");
     assert!(out.contains("refresh needed for routes: 1"), "{out}");
     // readback: the minted stop exists
@@ -230,13 +245,120 @@ fn undo_subcommand_roundtrips() {
     let b0 = dump_at(&db, ROUNDTRIP_SKIP);
     let (code, report) = run(add_stop_cli("X", &["1:0"], &db, true));
     assert_eq!(code, 0, "{}{}", report.out, report.err);
-    let edit_id = grab(&report.out, "edit_id ");
+    let v = envelope_of(&report);
+    let edit_id = grab(v["data"]["report"].as_str().unwrap(), "edit_id ");
     let (code, report) = run(undo_cli(edit_id, &db));
     assert_eq!(code, 0, "{}{}", report.out, report.err);
-    assert!(report.out.contains("undo"), "{}", report.out);
+    let v = envelope_of(&report);
+    let out = v["data"]["report"].as_str().unwrap();
+    assert!(out.contains("undo"), "{}", report.out);
     assert_eq!(
         dump_at(&db, ROUNDTRIP_SKIP),
         b0,
         "apply then undo is byte-identical (B2==B0)"
     );
+}
+
+#[test]
+fn stdout_is_always_json() {
+    let (_dir, db) = fixture_db();
+    for (code, report) in [
+        run(add_stop_cli("X", &["1:0"], &db, false)),  // ok
+        run(add_stop_cli("X", &["99:0"], &db, false)), // rejected
+        run(add_stop_cli("X", &[], &db, false)),       // noop
+    ] {
+        let v = envelope_of(&report);
+        assert_eq!(v["command"], "add-stop");
+        assert_eq!(
+            code,
+            match v["status"].as_str().unwrap() {
+                "ok" => 0,
+                "rejected" => 1,
+                "noop" => 2,
+                s => panic!("{s}"),
+            }
+        );
+    }
+}
+
+#[test]
+fn add_stop_json_payload_matches_flags() {
+    let (_dir, db) = fixture_db();
+    let payload = format!(
+        r#"{{"name":"X","lat":24.1405,"lon":120.6857,"attach":["1:0"],"db":"{}","editor":"test","apply":false}}"#,
+        db.display()
+    );
+    let cli = Cli {
+        command: Command::AddStop {
+            name: String::new(),
+            lat: 0.0,
+            lon: 0.0,
+            attach: vec![],
+            station: None,
+            db: db.clone(),
+            editor: String::new(),
+            note: None,
+            apply: false,
+            json: Some(payload),
+        },
+    };
+    let (code, report) = run(cli);
+    assert_eq!(code, 0, "{}{}", report.out, report.err);
+    assert!(envelope_of(&report)["data"]["report"]
+        .as_str()
+        .unwrap()
+        .contains("create new station"));
+}
+
+#[test]
+fn schema_lists_all_commands_and_describes_add_stop() {
+    let (_, report) = run(Cli {
+        command: Command::Schema { command: None },
+    });
+    let v = envelope_of(&report);
+    let cmds: Vec<&str> = v["data"]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert!(cmds.contains(&"add-stop") && cmds.contains(&"schema"));
+    let (_, report) = run(Cli {
+        command: Command::Schema {
+            command: Some("add-stop".into()),
+        },
+    });
+    let v = envelope_of(&report);
+    let schema = &v["data"]["schema"];
+    assert!(
+        schema["properties"]["name"]["type"] == "string",
+        "{}",
+        report.out
+    );
+    assert!(schema["properties"]["apply"]["type"] == "boolean");
+}
+
+#[test]
+fn rejected_envelope_carries_reason() {
+    let (_dir, db) = fixture_db();
+    let (code, report) = run(add_stop_cli("X", &["99:0"], &db, false));
+    assert_eq!(code, 1);
+    let v = envelope_of(&report);
+    assert_eq!(v["status"], "rejected");
+    assert!(
+        v["data"]["reason"].as_str().unwrap().contains("99"),
+        "{}",
+        report.out
+    );
+    assert!(report.err.contains("99"), "{}", report.err);
+}
+
+#[test]
+fn envelope_carries_duration_and_omits_empty_fields() {
+    let (_dir, db) = fixture_db();
+    let (code, report) = run(add_stop_cli("X", &["1:0"], &db, false));
+    assert_eq!(code, 0);
+    let v = envelope_of(&report);
+    assert!(v["duration_ms"].is_u64(), "{}", report.out);
+    assert!(v.get("logs").is_none(), "empty logs are omitted: {v}");
 }
