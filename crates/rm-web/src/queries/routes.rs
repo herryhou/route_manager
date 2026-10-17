@@ -43,6 +43,7 @@ fn direction_rows(conn: &Connection, route_ids: &[i64]) -> Result<Vec<DirectionR
          LEFT JOIN seg_match_stat ms
            ON ms.route_version_id = rv.route_version_id AND ms.direction = rsv.direction
          WHERE r.route_id IN ({placeholders})
+           AND r.current_route_version_id = rv.route_version_id
          GROUP BY r.route_id, rsv.direction
          ORDER BY r.route_id, rsv.direction"
     );
@@ -316,6 +317,7 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
          FROM seg_geometry_draft gd
          JOIN subroute_version sv ON sv.subroute_version_id = gd.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         JOIN route r ON r.route_id = rv.route_id
          JOIN route_stop_version frs
            ON frs.route_stop_version_id = gd.from_route_stop_version_id
          JOIN stop_version fsv ON fsv.stop_version_id = frs.stop_version_id
@@ -324,7 +326,8 @@ pub fn path(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> {
            ON trs.route_stop_version_id = gd.to_route_stop_version_id
          JOIN stop_version tsv ON tsv.stop_version_id = trs.stop_version_id
          JOIN station_version tst ON tst.station_id = tsv.station_id AND tst.valid_to IS NULL
-         WHERE rv.route_id = ?1 AND gd.direction = ?2
+         WHERE r.route_id = ?1 AND r.current_route_version_id = rv.route_version_id
+           AND gd.direction = ?2
          ORDER BY gd.ordinal",
     )?;
     let it = stmt.query_map(rusqlite::params![route_id, direction], |r| {
@@ -498,8 +501,10 @@ pub fn ways(conn: &Connection, route_id: i64, dir: i64) -> Result<Value> {
          FROM seg_match_way mw
          JOIN subroute_version sv ON sv.subroute_version_id = mw.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         JOIN route r ON r.route_id = rv.route_id
          JOIN osm_way w ON w.osm_way_id = mw.osm_way_id
-         WHERE rv.route_id = ?1 AND mw.direction = ?2
+         WHERE r.route_id = ?1 AND r.current_route_version_id = rv.route_version_id
+           AND mw.direction = ?2
          ORDER BY mw.ordinal",
     )?;
     let runs: Vec<WayRun> = stmt
@@ -807,5 +812,108 @@ mod tests {
             ["B1", "B2"],
             "superseded chain A rows must not merge in"
         );
+    }
+
+    #[test]
+    fn direction_rows_counts_only_the_current_chain() {
+        let conn = rm_db::open_in_memory().unwrap();
+        two_chain_fixture(&conn);
+
+        let rows = direction_rows(&conn, &[1]).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].stops, 2,
+            "superseded chain A rows must not merge in"
+        );
+    }
+
+    /// Two-chain fixture plus the station_version + seg_geometry_draft rows
+    /// path() reads — one piece per chain, distinguished by length_m.
+    fn path_fixture(conn: &Connection) {
+        two_chain_fixture(conn);
+        conn.execute(
+            "INSERT INTO station (station_id, ext_uid, created_at) VALUES (2, 'tcg:node:2', ?1)",
+            [TS],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO station_group (station_group_id, created_at) VALUES (1, ?1)",
+            [TS],
+        )
+        .unwrap();
+        for (stv_id, station_id, name) in [(1, 1, "SA"), (2, 2, "SB")] {
+            conn.execute(
+                "INSERT INTO station_version (station_version_id, station_id, station_group_id,
+                                               station_name, latitude, longitude, valid_from, created_at)
+                 VALUES (?1, ?2, 1, ?3, 24.0, 120.0, ?4, ?4)",
+                rusqlite::params![stv_id, station_id, name, TS],
+            )
+            .unwrap();
+        }
+        for (sv_id, from_rsv, to_rsv, length) in [(1, 1, 2, 100.0), (2, 3, 4, 200.0)] {
+            conn.execute(
+                "INSERT INTO seg_geometry_draft (subroute_version_id, direction, ordinal,
+                                                  from_route_stop_version_id, to_route_stop_version_id,
+                                                  encoded_polyline, length_m, geometry_method)
+                 VALUES (?1, 0, 1, ?2, ?3, '_p~iF~ps|U_ulLnnqC', ?4, 'path')",
+                rusqlite::params![sv_id, from_rsv, to_rsv, length],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn path_draws_only_the_current_chain() {
+        let conn = rm_db::open_in_memory().unwrap();
+        path_fixture(&conn);
+
+        let out = path(&conn, 1, 0).unwrap();
+        let features = out["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1, "superseded chain A piece must not draw");
+        assert_eq!(features[0]["properties"]["length_m"], 200.0);
+    }
+
+    /// Two-chain fixture plus OSM way 9001 (nodes 100→200→300) and the
+    /// seg_match_way rows ways() reads — one run per chain, distinguished
+    /// by cum_end_m.
+    fn ways_fixture(conn: &Connection) {
+        two_chain_fixture(conn);
+        conn.execute(
+            "INSERT INTO osm_way (osm_way_id, highway, name) VALUES (9001, 'secondary', 'Road')",
+            [],
+        )
+        .unwrap();
+        for (ord, node_id) in [(0, 100), (1, 200), (2, 300)] {
+            conn.execute(
+                "INSERT INTO osm_way_node (osm_way_id, ordinal, osm_node_id) VALUES (9001, ?1, ?2)",
+                rusqlite::params![ord, node_id],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO osm_node (osm_node_id, lat, lon) VALUES (?1, 24.0, 120.0)",
+                [node_id],
+            )
+            .unwrap();
+        }
+        for (sv_id, cum_end) in [(1, 100.0), (2, 200.0)] {
+            conn.execute(
+                "INSERT INTO seg_match_way (subroute_version_id, direction, ordinal, osm_way_id,
+                                             entry_node_id, exit_node_id, cum_start_m, cum_end_m)
+                 VALUES (?1, 0, 1, 9001, 100, 300, 0.0, ?2)",
+                rusqlite::params![sv_id, cum_end],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn ways_lists_only_the_current_chain() {
+        let conn = rm_db::open_in_memory().unwrap();
+        ways_fixture(&conn);
+
+        let out = ways(&conn, 1, 0).unwrap();
+        let features = out["features"].as_array().unwrap();
+        assert_eq!(features.len(), 1, "superseded chain A run must not list");
+        assert_eq!(features[0]["properties"]["cum_end_m"], 200.0);
     }
 }
