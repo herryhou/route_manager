@@ -395,6 +395,124 @@ fn move_stop_resolves_by_xno_code_and_previews() {
     assert_eq!(d["changes"]["lat"], 24.15);
 }
 
+/// One remove-stop run: the payload carries the whole invocation; flags
+/// are ignored when `--json` is given.
+fn run_remove_stop(db: &Path, payload: serde_json::Value) -> (i32, Report) {
+    run(Cli {
+        command: Command::RemoveStop {
+            xno: None,
+            direction: None,
+            code: None,
+            sequence: None,
+            all: false,
+            delete_pole: false,
+            db: db.to_path_buf(),
+            editor: "test".to_string(),
+            note: None,
+            apply: false,
+            json: Some(payload.to_string()),
+        },
+    })
+}
+
+/// Serve the fixture's pole (stop_version 10, code '001') from dir 1 as
+/// well: a detach from dir 0 then does not orphan the pole, so apply is
+/// undoable and the one-way warning has its non-orphan trigger. The
+/// explicit rsv id moves the allocator past it (apply mints rsv rows).
+fn seed_second_direction(db: &Path) {
+    let conn = rm_db::open(db).unwrap();
+    conn.execute_batch(
+        "INSERT INTO route_stop_version
+             (route_stop_version_id, subroute_version_id, stop_version_id, direction, stop_sequence, created_at)
+         VALUES (2, 1, 10, 1, 1, '2026-01-01T00:00:00Z');
+         UPDATE id_sequence SET next_value = 3 WHERE table_name = 'route_stop_version';",
+    )
+    .unwrap();
+}
+
+#[test]
+fn remove_stop_dry_run_reports_plan_then_apply_roundtrips() {
+    let (_dir, db) = fixture_db();
+    seed_second_direction(&db);
+    // resolve the code on route "1" via find-stop: the fixture's stop "Old"
+    let code_on_route = find_stop_ok(&db, "1", Some("Old"), None)["candidates"][0]["stop_code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b0 = dump_at(&db, &[]);
+    let (code, report) = run_remove_stop(
+        &db,
+        serde_json::json!({"xno":"1","direction":0,"code":code_on_route,"db":db.display().to_string()}),
+    );
+    assert_eq!(code, 0, "{}", report.out);
+    assert_eq!(dump_at(&db, &[]), b0, "dry run must not write");
+    let d = &envelope_of(&report)["data"];
+    assert_eq!(d["occurrences"].as_array().unwrap().len(), 1);
+
+    let b0 = dump_at(&db, ROUNDTRIP_SKIP);
+    let (code, report) = run_remove_stop(
+        &db,
+        serde_json::json!({"xno":"1","direction":0,"code":code_on_route,"db":db.display().to_string(),"apply":true}),
+    );
+    assert_eq!(code, 0, "{}", report.out);
+    let eid = envelope_of(&report)["data"]["edit_id"].as_i64().unwrap();
+    run_undo(eid, &db);
+    assert_eq!(
+        dump_at(&db, ROUNDTRIP_SKIP),
+        b0,
+        "apply+undo byte-identical (B2==B0)"
+    );
+}
+
+/// The one-way `--delete-pole` warning must reach the envelope: dry run
+/// with the flag on a pole still served by another direction (the merged
+/// primitive's warning fires exactly there) — status ok, never a write.
+#[test]
+fn remove_stop_dry_run_warns_one_way_delete_pole() {
+    let (_dir, db) = fixture_db();
+    seed_second_direction(&db);
+    let b0 = dump_at(&db, &[]);
+    let (code, report) = run_remove_stop(
+        &db,
+        serde_json::json!({"xno":"1","direction":0,"code":"001","delete_pole":true,"db":db.display().to_string()}),
+    );
+    assert_eq!(code, 0, "{}", report.out);
+    assert_eq!(dump_at(&db, &[]), b0, "dry run must not write");
+    let d = envelope_of(&report)["data"].clone();
+    assert_eq!(d["pole_orphan"], false, "{}", report.out);
+    assert!(
+        d["warnings"].as_array().unwrap().iter().any(|w| w
+            .as_str()
+            .is_some_and(|w| w.contains("one-way") && w.contains("not undoable"))),
+        "{}",
+        report.out
+    );
+}
+
+/// The fixture's code twice in ONE direction (loop shape): no
+/// disambiguator — exit 1, stderr says how many times the code occurs.
+#[test]
+fn remove_stop_duplicate_needs_sequence() {
+    let (_dir, db) = fixture_db();
+    {
+        let conn = rm_db::open(&db).unwrap();
+        conn.execute_batch(
+            "INSERT INTO stop (stop_id, ext_uid, created_at) VALUES (2, 'tcg:stop:2', '2026-01-01T00:00:00Z');
+             INSERT INTO stop_version (stop_version_id, stop_id, station_id, stop_code, stop_name, direction, latitude, longitude, valid_from, created_at)
+                 VALUES (12, 2, 1, '001', 'Old 同碼', 0, 24.1, 120.1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO route_stop_version (route_stop_version_id, subroute_version_id, stop_version_id, direction, stop_sequence, created_at)
+                 VALUES (2, 1, 12, 0, 2, '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+    }
+    let (code, report) = run_remove_stop(
+        &db,
+        serde_json::json!({"xno":"1","direction":0,"code":"001","db":db.display().to_string()}),
+    );
+    assert_eq!(code, 1);
+    assert!(report.err.contains("occurs 2 times"), "{}", report.err);
+}
+
 /// A second pole sharing the code (other direction) makes xno+code
 /// ambiguous — rejected with a "resolve" reason naming both candidate ids.
 #[test]

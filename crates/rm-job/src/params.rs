@@ -106,6 +106,37 @@ pub struct MoveStopParams {
     pub apply: bool,
 }
 
+/// `rm-job remove-stop --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RemoveStopParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Route XNO to detach from
+    pub xno: String,
+    /// Direction (0 = outbound, 1 = inbound)
+    pub direction: i64,
+    /// Exact stop code to detach
+    pub code: String,
+    /// When the code occurs more than once in the direction: the stop_sequence to take
+    #[serde(default)]
+    pub sequence: Option<i64>,
+    /// When the code occurs more than once in the direction: take every occurrence
+    #[serde(default)]
+    pub all: bool,
+    /// Delete the pole itself when the detach orphans it (one-way, not undoable)
+    #[serde(default)]
+    pub delete_pole: bool,
+    /// Editor name recorded on the audit row
+    #[serde(default = "default_editor")]
+    pub editor: String,
+    /// Note recorded on the audit row
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Write the edit (default: dry run)
+    #[serde(default)]
+    pub apply: bool,
+}
+
 /// `rm-job undo --json '...'`
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UndoParams {

@@ -14,10 +14,12 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 
 use rm_db::{
-    add_stop, edit_stop, plan_add_stop, preview_stop_edit, undo_edit, AddStopCmd, AddStopOutcome,
-    AddStopPlan, AttachCmd, StationVerdict, StopEdit, UndoOutcome,
+    add_stop, detach_stop, edit_stop, plan_add_stop, plan_detach_stop, preview_stop_edit,
+    undo_edit, AddStopCmd, AddStopOutcome, AddStopPlan, AttachCmd, DetachCmd, DetachPlan,
+    StationVerdict, StopEdit, UndoOutcome,
 };
 
 /// Everything one run wrote: `out` is the envelope JSON (the only stdout
@@ -129,6 +131,47 @@ pub enum Command {
         apply: bool,
         /// Full invocation as one JSON object (schema: `rm-job schema
         /// move-stop`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
+    /// Detach a stop occurrence from one route direction (dry run unless
+    /// --apply).
+    RemoveStop {
+        /// Route XNO to detach from
+        #[arg(required_unless_present = "json")]
+        xno: Option<String>,
+        /// Direction (0 = outbound, 1 = inbound)
+        #[arg(required_unless_present = "json")]
+        direction: Option<i64>,
+        /// Exact stop code to detach
+        #[arg(required_unless_present = "json")]
+        code: Option<String>,
+        /// When the code occurs more than once in the direction: the
+        /// stop_sequence to take
+        #[arg(long)]
+        sequence: Option<i64>,
+        /// When the code occurs more than once in the direction: take every
+        /// occurrence
+        #[arg(long)]
+        all: bool,
+        /// Delete the pole itself when the detach orphans it (one-way, not
+        /// undoable)
+        #[arg(long)]
+        delete_pole: bool,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Editor name recorded on the audit row
+        #[arg(long, default_value = "rm-job")]
+        editor: String,
+        /// Note recorded on the audit row
+        #[arg(long)]
+        note: Option<String>,
+        /// Write the edit (default: dry run)
+        #[arg(long)]
+        apply: bool,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// remove-stop`); flags are ignored when given
         #[arg(long)]
         json: Option<String>,
     },
@@ -356,6 +399,46 @@ fn dispatch(cli: Cli) -> (&'static str, Outcome) {
                 },
             };
             move_stop_job(p)
+        }
+        Command::RemoveStop {
+            xno,
+            direction,
+            code,
+            sequence,
+            all,
+            delete_pole,
+            db,
+            editor,
+            note,
+            apply,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::RemoveStopParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "remove-stop",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::RemoveStopParams {
+                    // clap requires xno, direction and code unless --json is
+                    // present
+                    xno: xno.unwrap_or_default(),
+                    direction: direction.unwrap_or(0),
+                    code: code.unwrap_or_default(),
+                    sequence,
+                    all,
+                    delete_pole,
+                    db: db.display().to_string(),
+                    editor,
+                    note,
+                    apply,
+                },
+            };
+            remove_stop_job(p)
         }
         Command::Undo {
             edit_id,
@@ -601,6 +684,110 @@ fn move_stop_job(p: params::MoveStopParams) -> (&'static str, Outcome) {
     }
 }
 
+/// The remove-stop dry-run envelope data: a serde mirror of rm_db's
+/// `DetachPlan` (which intentionally stays non-`Serialize`).
+#[derive(Serialize)]
+struct PlanData {
+    xno: String,
+    direction: i64,
+    route_id: i64,
+    route_version_id: i64,
+    stop_id: i64,
+    stop_version_id: i64,
+    stop_code: String,
+    stop_name: String,
+    occurrences: Vec<PlanOccurrence>,
+    pole_orphan: bool,
+    serving_directions: Vec<i64>,
+    delete_pole: bool,
+    stale_routes: Vec<i64>,
+    warnings: Vec<String>,
+}
+
+/// One detached occurrence in the envelope: the rsv row left out of the
+/// new chain and its sequence.
+#[derive(Serialize)]
+struct PlanOccurrence {
+    route_stop_version_id: i64,
+    sequence: i64,
+}
+
+impl From<&DetachPlan> for PlanData {
+    fn from(p: &DetachPlan) -> Self {
+        PlanData {
+            xno: p.xno.clone(),
+            direction: p.direction,
+            route_id: p.route_id,
+            route_version_id: p.route_version_id,
+            stop_id: p.stop_id,
+            stop_version_id: p.stop_version_id,
+            stop_code: p.stop_code.clone(),
+            stop_name: p.stop_name.clone(),
+            occurrences: p
+                .occurrences
+                .iter()
+                .map(|o| PlanOccurrence {
+                    route_stop_version_id: o.route_stop_version_id,
+                    sequence: o.sequence,
+                })
+                .collect(),
+            pole_orphan: p.pole_orphan,
+            serving_directions: p.serving_directions.clone(),
+            delete_pole: p.delete_pole,
+            stale_routes: p.stale_routes.clone(),
+            warnings: p.warnings.clone(),
+        }
+    }
+}
+
+/// The remove-stop job over one resolved payload: plan (dry run) or
+/// detach (apply) through rm_db's detach primitive. Rejections carry the
+/// `EditError` text.
+fn remove_stop_job(p: params::RemoveStopParams) -> (&'static str, Outcome) {
+    let conn = match rm_db::open(&PathBuf::from(&p.db)) {
+        Ok(c) => c,
+        Err(e) => return ("remove-stop", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let cmd = DetachCmd {
+        xno: p.xno,
+        direction: p.direction,
+        stop_code: p.code,
+        sequence: p.sequence,
+        all: p.all,
+        delete_pole: p.delete_pole,
+    };
+    if p.apply {
+        match detach_stop(&conn, cmd, &p.editor, p.note.as_deref().unwrap_or("")) {
+            Ok(o) => (
+                "remove-stop",
+                Outcome::Ok(
+                    serde_json::json!({
+                        "edit_id": o.edit_id,
+                        "old_route_version_id": o.old_route_version_id,
+                        "new_route_version_id": o.new_route_version_id,
+                        "pole_deleted": o.pole_deleted,
+                        "stale_routes": o.stale_routes,
+                    }),
+                    Vec::new(),
+                ),
+            ),
+            Err(e) => return ("remove-stop", Outcome::Rejected(format!("{e:#}"))),
+        }
+    } else {
+        match plan_detach_stop(&conn, &cmd) {
+            Ok(plan) => (
+                "remove-stop",
+                Outcome::Ok(
+                    serde_json::to_value(PlanData::from(&plan))
+                        .expect("plan mirror always serializes"),
+                    Vec::new(),
+                ),
+            ),
+            Err(e) => return ("remove-stop", Outcome::Rejected(format!("{e:#}"))),
+        }
+    }
+}
+
 /// The undo job over one resolved payload.
 fn undo_job(p: params::UndoParams) -> (&'static str, Outcome) {
     let conn = match rm_db::open(&PathBuf::from(&p.db)) {
@@ -692,6 +879,10 @@ pub fn schema_list() -> serde_json::Value {
                 "description": "Move/rename one stop pole (dry run unless --apply).",
             },
             {
+                "name": "remove-stop",
+                "description": "Detach a stop occurrence from one route direction (dry run unless --apply).",
+            },
+            {
                 "name": "undo",
                 "description": "Undo a job edit by its edit_log id.",
             },
@@ -725,6 +916,10 @@ pub fn schema_for(name: &str) -> Option<serde_json::Value> {
         "move-stop" => Some(serde_json::json!({
             "command": name,
             "schema": schemars::schema_for!(params::MoveStopParams),
+        })),
+        "remove-stop" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::RemoveStopParams),
         })),
         "undo" => Some(serde_json::json!({
             "command": name,
