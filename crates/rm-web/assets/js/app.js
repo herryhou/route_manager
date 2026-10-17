@@ -19,6 +19,11 @@ export const map = L.map('map', { preferCanvas: true }).fitBounds(
   { padding: [24, 24] },
 );
 
+// contextmenu → clipboard coordinates for the rm-job workflow (docs/agents/rm-jobs.md).
+map.on('contextmenu', (e) => {
+  navigator.clipboard?.writeText(`${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`);
+});
+
 // Basemap: MapLibre GL renders the osm-liberty style into a Leaflet tile
 // layer — style and vector tiles both come from the local Martin server
 // (/style/osm_liberty); RM_TILES (--tiles) still swaps the vector source
