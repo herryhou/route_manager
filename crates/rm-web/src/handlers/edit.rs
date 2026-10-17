@@ -86,7 +86,12 @@ fn edit_conflict(err: ApiError) -> ApiError {
             | rm_db::EditError::UnknownDirection(_, _)
             | rm_db::EditError::UnknownAfterStop(_, _, _)
             | rm_db::EditError::OffPathStop { .. }
-            | rm_db::EditError::DuplicateAttach(_, _) => ApiError::bad_request(&e.to_string()),
+            | rm_db::EditError::DuplicateAttach(_, _)
+            // rm-job detach verdicts (unused by rm-web today, but the match
+            // must stay exhaustive): both ask the caller to adjust the
+            // request (--sequence/--all, --delete-pole), not retry later.
+            | rm_db::EditError::DuplicateStopOccurrence { .. }
+            | rm_db::EditError::OrphanPoleRefused(_) => ApiError::bad_request(&e.to_string()),
             rm_db::EditError::NotCurrent(_)
             | rm_db::EditError::StationNotCurrent(_)
             | rm_db::EditError::NotUndoable(_)
