@@ -9,7 +9,7 @@
     "sources": {
         "openmaptiles": {
             "tiles": [
-                "http://localhost:3000/osm-2020-02-10-v3.11_asia_taiwan/{z}/{x}/{y}"
+                "http://localhost:3000/taiwan-261004/{z}/{x}/{y}"
             ],
             "type": "vector",
             "attribution": "<a href=\"https://www.maptiler.com/copyright/\" target=\"_blank\">&copy; MapTiler</a> <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\">&copy; OpenStreetMap contributors</a>",
@@ -3717,6 +3717,7 @@
             "type": "symbol",
             "source": "openmaptiles",
             "source-layer": "poi",
+            "minzoom": 16,
             "filter": [
                 "all",
                 [
@@ -3730,7 +3731,7 @@
             "layout": {
                 "icon-image": "{class}",
                 "text-anchor": "left",
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Condensed Italic"
                 ],

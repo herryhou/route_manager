@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 
 use crate::state::AppState;
 
-const DEFAULT_TILES: &str = "http://localhost:3000/osm-2020-02-10-v3.11_asia_taiwan/{z}/{x}/{y}";
+const DEFAULT_TILES: &str = "http://localhost:3000/taiwan-261004/{z}/{x}/{y}";
 
 fn asset(content_type: &'static str, body: &'static str) -> Response {
     (
