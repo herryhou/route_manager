@@ -9,6 +9,14 @@ fn default_editor() -> String {
     "agent".to_string()
 }
 
+fn default_meters() -> f64 {
+    10.0
+}
+
+fn default_end() -> String {
+    "both".to_string()
+}
+
 /// `rm-job add-stop --json '...'`
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct AddStopParams {
@@ -133,6 +141,32 @@ pub struct RemoveStopParams {
     #[serde(default)]
     pub note: Option<String>,
     /// Write the edit (default: dry run)
+    #[serde(default)]
+    pub apply: bool,
+}
+
+/// `rm-job extend-path --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExtendPathParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Route XNO
+    pub xno: String,
+    /// Direction (0 = outbound, 1 = inbound)
+    pub direction: i64,
+    /// Extension length per end (m)
+    #[serde(default = "default_meters")]
+    pub meters: f64,
+    /// Which end(s) to extend: both, first or last
+    #[serde(default = "default_end")]
+    pub end: String,
+    /// Editor name recorded on the audit row
+    #[serde(default = "default_editor")]
+    pub editor: String,
+    /// Note recorded on the audit row
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Write the extension as a polyline override (default: dry run)
     #[serde(default)]
     pub apply: bool,
 }

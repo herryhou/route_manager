@@ -291,7 +291,7 @@ fn path_source(
 /// the table is missing the override is treated as absent (a `logs` entry
 /// names the table, never an error — the /raw incident rule) and the src
 /// half is loaded with the same queries `load_polyline_line` runs.
-fn line_snapshot(
+pub(crate) fn line_snapshot(
     conn: &Connection,
     xno: &str,
     direction: i64,

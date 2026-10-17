@@ -6,6 +6,7 @@
 //! text goes to stderr.
 
 pub mod envelope;
+pub mod extend;
 pub mod params;
 pub mod queries;
 
@@ -17,9 +18,9 @@ use clap::{Parser, Subcommand};
 use serde::Serialize;
 
 use rm_db::{
-    add_stop, detach_stop, edit_stop, plan_add_stop, plan_detach_stop, preview_stop_edit,
-    undo_edit, AddStopCmd, AddStopOutcome, AddStopPlan, AttachCmd, DetachCmd, DetachPlan,
-    StationVerdict, StopEdit, UndoOutcome,
+    add_stop, detach_stop, edit_polyline_line, edit_stop, plan_add_stop, plan_detach_stop,
+    preview_stop_edit, undo_edit, AddStopCmd, AddStopOutcome, AddStopPlan, AttachCmd, DetachCmd,
+    DetachPlan, LineEditCmd, StationVerdict, StopEdit, UndoOutcome,
 };
 
 /// Everything one run wrote: `out` is the envelope JSON (the only stdout
@@ -172,6 +173,38 @@ pub enum Command {
         apply: bool,
         /// Full invocation as one JSON object (schema: `rm-job schema
         /// remove-stop`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
+    /// Extend a direction's polyline outward along the OSM road graph,
+    /// written as a polyline override (dry run unless --apply).
+    ExtendPath {
+        /// Route XNO
+        #[arg(required_unless_present = "json")]
+        xno: Option<String>,
+        /// Direction (0 = outbound, 1 = inbound)
+        #[arg(required_unless_present = "json")]
+        direction: Option<i64>,
+        /// Extension length per end (m)
+        #[arg(long, default_value_t = 10.0)]
+        meters: f64,
+        /// Which end(s) to extend: both, first or last
+        #[arg(long, default_value = "both")]
+        end: String,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Editor name recorded on the audit row
+        #[arg(long, default_value = "rm-job")]
+        editor: String,
+        /// Note recorded on the audit row
+        #[arg(long)]
+        note: Option<String>,
+        /// Write the extension as a polyline override (default: dry run)
+        #[arg(long)]
+        apply: bool,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// extend-path`); flags are ignored when given
         #[arg(long)]
         json: Option<String>,
     },
@@ -439,6 +472,42 @@ fn dispatch(cli: Cli) -> (&'static str, Outcome) {
                 },
             };
             remove_stop_job(p)
+        }
+        Command::ExtendPath {
+            xno,
+            direction,
+            meters,
+            end,
+            db,
+            editor,
+            note,
+            apply,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::ExtendPathParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "extend-path",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::ExtendPathParams {
+                    // clap requires xno and direction unless --json is
+                    // present
+                    xno: xno.unwrap_or_default(),
+                    direction: direction.unwrap_or(0),
+                    meters,
+                    end,
+                    db: db.display().to_string(),
+                    editor,
+                    note,
+                    apply,
+                },
+            };
+            extend_path_job(p)
         }
         Command::Undo {
             edit_id,
@@ -788,6 +857,91 @@ fn remove_stop_job(p: params::RemoveStopParams) -> (&'static str, Outcome) {
     }
 }
 
+/// The extend-path job over one resolved payload: plan the outward walk
+/// (read-only), then on --apply write it as a whole-line polyline override.
+/// Dry runs open read-only; the rejection text carries rm_db's / the walk's
+/// own error wording verbatim (e.g. "run rm-osm-prepare").
+fn extend_path_job(p: params::ExtendPathParams) -> (&'static str, Outcome) {
+    if !matches!(p.end.as_str(), "both" | "first" | "last") {
+        return (
+            "extend-path",
+            Outcome::Rejected(format!(
+                "invalid end '{}' — expected both, first or last",
+                p.end
+            )),
+        );
+    }
+    let conn = if p.apply {
+        match rm_db::open(&PathBuf::from(&p.db)) {
+            Ok(c) => c,
+            Err(e) => return ("extend-path", Outcome::Rejected(format!("{e:#}"))),
+        }
+    } else {
+        match rm_db::open_readonly(&PathBuf::from(&p.db)) {
+            Ok(c) => c,
+            Err(e) => return ("extend-path", Outcome::Rejected(format!("{e:#}"))),
+        }
+    };
+    let mut logs = Vec::new();
+    let (candidate, extensions, source) =
+        match extend::plan_extension(&conn, &p.xno, p.direction, p.meters, &p.end, &mut logs) {
+            Ok(v) => v,
+            Err(e) => return ("extend-path", Outcome::Rejected(format!("{e:#}"))),
+        };
+    let exts = serde_json::to_value(&extensions).expect("extensions always serialize");
+    if !p.apply {
+        return (
+            "extend-path",
+            Outcome::Ok(
+                serde_json::json!({ "source": source, "extensions": exts }),
+                logs,
+            ),
+        );
+    }
+    if extensions.iter().all(|e| e.new_vertices.is_empty()) {
+        return (
+            "extend-path",
+            Outcome::Noop(format!(
+                "graph offers no extension within {} m of either end",
+                p.meters
+            )),
+        );
+    }
+    // currency token from a fresh snapshot (apply's open migrated the db,
+    // so the override table exists here)
+    let snap = match rm_db::load_polyline_line(&conn, &p.xno, p.direction) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (
+                "extend-path",
+                Outcome::Rejected(format!("route '{}' does not exist", p.xno)),
+            )
+        }
+        Err(e) => return ("extend-path", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let cmd = LineEditCmd {
+        xno: p.xno.clone(),
+        direction: p.direction,
+        points: candidate.iter().map(|q| [q.lat, q.lon]).collect(),
+        expected_updated_at: snap.override_row.map(|o| o.updated_at),
+    };
+    match edit_polyline_line(&conn, cmd, &p.editor, p.note.as_deref().unwrap_or("")) {
+        Ok(o) => (
+            "extend-path",
+            Outcome::Ok(
+                serde_json::json!({
+                    "edit_id": o.edit_id,
+                    "created": o.created,
+                    "updated_at": o.updated_at,
+                    "extensions": exts,
+                }),
+                logs,
+            ),
+        ),
+        Err(e) => return ("extend-path", Outcome::Rejected(format!("{e:#}"))),
+    }
+}
+
 /// The undo job over one resolved payload.
 fn undo_job(p: params::UndoParams) -> (&'static str, Outcome) {
     let conn = match rm_db::open(&PathBuf::from(&p.db)) {
@@ -883,6 +1037,10 @@ pub fn schema_list() -> serde_json::Value {
                 "description": "Detach a stop occurrence from one route direction (dry run unless --apply).",
             },
             {
+                "name": "extend-path",
+                "description": "Extend a direction's polyline outward along the OSM road graph, written as a polyline override (dry run unless --apply).",
+            },
+            {
                 "name": "undo",
                 "description": "Undo a job edit by its edit_log id.",
             },
@@ -920,6 +1078,10 @@ pub fn schema_for(name: &str) -> Option<serde_json::Value> {
         "remove-stop" => Some(serde_json::json!({
             "command": name,
             "schema": schemars::schema_for!(params::RemoveStopParams),
+        })),
+        "extend-path" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::ExtendPathParams),
         })),
         "undo" => Some(serde_json::json!({
             "command": name,

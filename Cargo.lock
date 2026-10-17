@@ -1058,6 +1058,7 @@ dependencies = [
  "clap",
  "rm-core",
  "rm-db",
+ "rm-osm-match",
  "rusqlite",
  "schemars",
  "serde",
