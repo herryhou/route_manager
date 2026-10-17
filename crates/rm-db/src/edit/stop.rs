@@ -58,6 +58,38 @@ pub fn edit_stop(
     apply_stop_edit(conn, &op, editor, note)
 }
 
+/// What `edit_stop` would do, without doing it: the current row plus the
+/// planned op (unchanged fields already dropped). Same guards as the apply
+/// path (`NotCurrent`, `EmptyEdit`, `NoOpEdit`); zero writes.
+#[derive(Debug)]
+pub struct StopEditPreview {
+    pub stop_id: i64,
+    pub stop_version_id: i64,
+    pub current_stop_name: String,
+    pub current_lat: f64,
+    pub current_lon: f64,
+    pub op: StopEditOp,
+}
+
+/// Dry-run twin of `edit_stop`: load → the same plan guards → the preview.
+pub fn preview_stop_edit(
+    conn: &Connection,
+    stop_version_id: i64,
+    cmd: StopEdit,
+) -> Result<StopEditPreview> {
+    let snapshot =
+        load_stop_snapshot(conn, stop_version_id)?.ok_or(EditError::NotCurrent(stop_version_id))?;
+    let op = plan_stop_edit(&snapshot, cmd)?;
+    Ok(StopEditPreview {
+        stop_id: snapshot.stop_id,
+        stop_version_id: snapshot.stop_version_id,
+        current_stop_name: snapshot.stop_name,
+        current_lat: snapshot.latitude,
+        current_lon: snapshot.longitude,
+        op,
+    })
+}
+
 #[derive(Debug)]
 pub struct RegroupStop {
     pub stop_version_id: i64,
@@ -377,6 +409,44 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");
+    }
+
+    #[test]
+    fn preview_stop_edit_mirrors_guards_and_writes_nothing() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM stop_version", [], |r| r.get(0))
+            .unwrap();
+        let p = preview_stop_edit(
+            &conn,
+            old,
+            StopEdit {
+                lat: Some(24.5),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(p.stop_version_id, old);
+        assert_eq!(p.op.lat, Some(24.5));
+        assert!(matches!(
+            preview_stop_edit(&conn, 999, StopEdit::default())
+                .unwrap_err()
+                .downcast_ref::<EditError>(),
+            Some(EditError::NotCurrent(999))
+        ));
+        assert!(matches!(
+            preview_stop_edit(&conn, old, StopEdit::default())
+                .unwrap_err()
+                .downcast_ref::<EditError>(),
+            Some(EditError::EmptyEdit)
+        ));
+        assert_eq!(
+            n,
+            conn.query_row("SELECT COUNT(*) FROM stop_version", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap()
+        );
     }
 
     #[test]

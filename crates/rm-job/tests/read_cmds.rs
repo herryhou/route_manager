@@ -214,3 +214,161 @@ fn unknown_xno_rejected() {
     let (code, _) = run_show_route(&db, "999");
     assert_eq!(code, 1);
 }
+
+/// One move-stop run: the payload carries the whole invocation; `apply`
+/// overrides the payload's `apply` flag. Exit 0 ok, 1 rejected, 2 no-op.
+fn run_move_stop(db: &Path, mut payload: serde_json::Value, apply: bool) -> (i32, Report) {
+    payload["apply"] = serde_json::Value::Bool(apply);
+    run(Cli {
+        command: Command::MoveStop {
+            stop_version_id: None,
+            xno: None,
+            code: None,
+            lat: None,
+            lon: None,
+            stop_name: None,
+            db: db.to_path_buf(),
+            editor: "test".to_string(),
+            note: None,
+            apply,
+            json: Some(payload.to_string()),
+        },
+    })
+}
+
+fn run_undo(edit_id: i64, db: &Path) -> (i32, Report) {
+    run(Cli {
+        command: Command::Undo {
+            edit_id: Some(edit_id),
+            db: db.to_path_buf(),
+            editor: "test".to_string(),
+            json: None,
+        },
+    })
+}
+
+/// Every user table's full contents, name-then-rowid order — the
+/// byte-identical read-only check (cli.rs's dump helper, same shape).
+fn dump_at(db: &Path, skip: &[&str]) -> String {
+    use rusqlite::types::ValueRef;
+    let conn = rm_db::open(db).unwrap();
+    let names: Vec<String> = conn
+        .prepare(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+             ORDER BY name",
+        )
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let mut out = String::new();
+    for t in names {
+        if skip.contains(&t.as_str()) {
+            continue;
+        }
+        out.push_str(&format!("-- {t}\n"));
+        let mut stmt = conn
+            .prepare(&format!("SELECT * FROM \"{t}\" ORDER BY rowid"))
+            .unwrap();
+        let ncols = stmt.column_count();
+        let mut rows = stmt.query([]).unwrap();
+        while let Some(row) = rows.next().unwrap() {
+            for i in 0..ncols {
+                match row.get_ref(i).unwrap() {
+                    ValueRef::Null => out.push_str("· "),
+                    ValueRef::Integer(n) => out.push_str(&format!("{n} ")),
+                    ValueRef::Real(f) => out.push_str(&format!("{f:?} ")),
+                    ValueRef::Text(s) => {
+                        out.push_str(&format!("{:?} ", String::from_utf8_lossy(s)))
+                    }
+                    ValueRef::Blob(b) => out.push_str(&format!("blob:{b:?} ")),
+                }
+            }
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Excluded from the round-trip dump: the audit rows (the undo writes its
+/// own by design), the stale marks (the undo deletes the job's own), the id
+/// allocator (apply mints ids; ids are never reused), and `stop_version` —
+/// a stop-edit undo keeps the closed minted version as history
+/// (`apply_stop_undo` UPDATEs valid_to, deletes nothing; only add-stop's
+/// undo removes its rows), so the byte-identical gate runs without it and
+/// the restored current row is asserted explicitly instead.
+const ROUNDTRIP_SKIP: &[&str] = &["edit_log", "stale_mark", "id_sequence", "stop_version"];
+
+#[test]
+fn move_stop_dry_run_then_apply_and_undo() {
+    let (_dir, db) = fixture_db();
+    let svi = find_stop_ok(&db, "1", Some("Old"), None)["candidates"][0]["stop_version_id"]
+        .as_i64()
+        .unwrap();
+    let b0 = dump_at(&db, &[]);
+    let (code, report) = run_move_stop(
+        &db,
+        serde_json::json!({"stop_version_id": svi, "lat": 24.15, "db": db.display().to_string()}),
+        false,
+    );
+    assert_eq!(code, 0, "{}", report.out);
+    assert_eq!(dump_at(&db, &[]), b0, "dry run must not write");
+    let d = envelope_of(&report)["data"].clone();
+    assert_eq!(d["changes"]["lat"], 24.15);
+
+    let b0 = dump_at(&db, ROUNDTRIP_SKIP);
+    let (code, report) = run_move_stop(
+        &db,
+        serde_json::json!({"stop_version_id": svi, "lat": 24.15, "db": db.display().to_string(), "apply": true}),
+        true,
+    );
+    assert_eq!(code, 0, "{}", report.out);
+    let edit_id = envelope_of(&report)["data"]["edit_id"].as_i64().unwrap();
+    assert!(edit_id > 0);
+
+    let (code, report) = run_undo(edit_id, &db);
+    assert_eq!(code, 0, "{}{}", report.out, report.err);
+    assert_eq!(
+        dump_at(&db, ROUNDTRIP_SKIP),
+        b0,
+        "apply then undo is byte-identical (sans retained version history)"
+    );
+    // the version history the dump above excludes: the predecessor is
+    // current again, the minted version stays closed
+    let conn = rm_db::open(&db).unwrap();
+    let (cur_svi, cur_lat): (i64, f64) = conn
+        .query_row(
+            "SELECT stop_version_id, latitude FROM stop_version \
+             WHERE stop_id = 1 AND valid_to IS NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (cur_svi, cur_lat),
+        (10, 24.0),
+        "undo restores the predecessor"
+    );
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM stop_version WHERE stop_id = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 2, "the closed minted version is kept as history");
+}
+
+#[test]
+fn move_stop_by_xno_code_ambiguous_rejected() {
+    let (_dir, db) = fixture_db();
+    let (code, report) = run_move_stop(
+        &db,
+        serde_json::json!({"xno": "1", "code": "不存在", "lat": 24.15, "db": db.display().to_string()}),
+        false,
+    );
+    assert_eq!(code, 1);
+    assert!(report.err.contains("resolve"), "{}", report.err);
+}

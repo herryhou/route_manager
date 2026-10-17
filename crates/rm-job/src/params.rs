@@ -72,6 +72,40 @@ pub struct ShowPathParams {
     pub direction: i64,
 }
 
+/// `rm-job move-stop --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MoveStopParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Target pole's stop_version_id (else resolve xno + code)
+    #[serde(default)]
+    pub stop_version_id: Option<i64>,
+    /// Route XNO to resolve the pole on (with code, when stop_version_id is absent)
+    #[serde(default)]
+    pub xno: Option<String>,
+    /// Exact stop code to resolve the pole (with xno, when stop_version_id is absent)
+    #[serde(default)]
+    pub code: Option<String>,
+    /// New latitude
+    #[serde(default)]
+    pub lat: Option<f64>,
+    /// New longitude
+    #[serde(default)]
+    pub lon: Option<f64>,
+    /// New stop name
+    #[serde(default)]
+    pub stop_name: Option<String>,
+    /// Editor name recorded on the audit row
+    #[serde(default = "default_editor")]
+    pub editor: String,
+    /// Note recorded on the audit row
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Write the edit (default: dry run)
+    #[serde(default)]
+    pub apply: bool,
+}
+
 /// `rm-job undo --json '...'`
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UndoParams {

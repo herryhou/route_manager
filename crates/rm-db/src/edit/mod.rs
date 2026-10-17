@@ -18,7 +18,9 @@ pub use matched_path::{bearing_at, matched_path, project_onto_path, OFF_PATH_MAX
 pub use station_move::{move_station, StationMove};
 pub use station_rename::{rename_station, RenameLevel, StationRename};
 pub use station_undo::undo_station;
-pub use stop::{edit_stop, regroup_stop, undo_stop, RegroupStop, StopEdit};
+pub use stop::{
+    edit_stop, preview_stop_edit, regroup_stop, undo_stop, RegroupStop, StopEdit, StopEditPreview,
+};
 
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};

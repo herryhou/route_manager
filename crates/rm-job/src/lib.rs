@@ -16,8 +16,8 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 
 use rm_db::{
-    add_stop, plan_add_stop, undo_edit, AddStopCmd, AddStopOutcome, AddStopPlan, AttachCmd,
-    StationVerdict, UndoOutcome,
+    add_stop, edit_stop, plan_add_stop, preview_stop_edit, undo_edit, AddStopCmd, AddStopOutcome,
+    AddStopPlan, AttachCmd, StationVerdict, StopEdit, UndoOutcome,
 };
 
 /// Everything one run wrote: `out` is the envelope JSON (the only stdout
@@ -92,6 +92,43 @@ pub enum Command {
         apply: bool,
         /// Full invocation as one JSON object (schema: `rm-job schema
         /// add-stop`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
+    /// Move/rename one stop pole (dry run unless --apply).
+    MoveStop {
+        /// Target pole's stop_version_id (else resolve --xno + --code)
+        #[arg(long)]
+        stop_version_id: Option<i64>,
+        /// Route XNO to resolve the pole on (with --code)
+        #[arg(long)]
+        xno: Option<String>,
+        /// Exact stop code to resolve the pole (with --xno)
+        #[arg(long)]
+        code: Option<String>,
+        /// New latitude
+        #[arg(long)]
+        lat: Option<f64>,
+        /// New longitude
+        #[arg(long)]
+        lon: Option<f64>,
+        /// New stop name
+        #[arg(long)]
+        stop_name: Option<String>,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Editor name recorded on the audit row
+        #[arg(long, default_value = "rm-job")]
+        editor: String,
+        /// Note recorded on the audit row
+        #[arg(long)]
+        note: Option<String>,
+        /// Write the edit (default: dry run)
+        #[arg(long)]
+        apply: bool,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// move-stop`); flags are ignored when given
         #[arg(long)]
         json: Option<String>,
     },
@@ -282,6 +319,44 @@ fn dispatch(cli: Cli) -> (&'static str, Outcome) {
             };
             add_stop_job(p)
         }
+        Command::MoveStop {
+            stop_version_id,
+            xno,
+            code,
+            lat,
+            lon,
+            stop_name,
+            db,
+            editor,
+            note,
+            apply,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::MoveStopParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "move-stop",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::MoveStopParams {
+                    stop_version_id,
+                    xno,
+                    code,
+                    lat,
+                    lon,
+                    stop_name,
+                    db: db.display().to_string(),
+                    editor,
+                    note,
+                    apply,
+                },
+            };
+            move_stop_job(p)
+        }
         Command::Undo {
             edit_id,
             db,
@@ -435,6 +510,97 @@ fn add_stop_job(p: params::AddStopParams) -> (&'static str, Outcome) {
     )
 }
 
+/// The move-stop job over one resolved payload: resolve the target pole
+/// (`stop_version_id` if given, else `xno`+`code` must match exactly one
+/// current pole), then preview (dry run) or apply.
+fn move_stop_job(p: params::MoveStopParams) -> (&'static str, Outcome) {
+    let conn = match rm_db::open(&PathBuf::from(&p.db)) {
+        Ok(c) => c,
+        Err(e) => return ("move-stop", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let svi = match p.stop_version_id {
+        Some(svi) => svi,
+        None => match (p.xno.as_deref(), p.code.as_deref()) {
+            (Some(xno), Some(code)) => match queries::find_stop(&conn, xno, None, Some(code)) {
+                Ok(candidates) if candidates.len() == 1 => candidates[0].stop_version_id,
+                Ok(candidates) if candidates.is_empty() => {
+                    return (
+                        "move-stop",
+                        Outcome::Rejected(format!(
+                        "cannot resolve stop: route '{xno}' has no current stop with code '{code}'"
+                    )),
+                    )
+                }
+                Ok(candidates) => {
+                    let ids = candidates
+                        .iter()
+                        .map(|c| c.stop_version_id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return (
+                        "move-stop",
+                        Outcome::Rejected(format!(
+                            "cannot resolve stop: {} current poles on route '{xno}' match \
+                             code '{code}' — pass stop_version_id ({ids})",
+                            candidates.len()
+                        )),
+                    );
+                }
+                Err(e) => return ("move-stop", Outcome::Rejected(format!("{e:#}"))),
+            },
+            _ => {
+                return (
+                    "move-stop",
+                    Outcome::Rejected(
+                        "cannot resolve stop: give stop_version_id, or both xno and code".into(),
+                    ),
+                )
+            }
+        },
+    };
+    let cmd = StopEdit {
+        lat: p.lat,
+        lon: p.lon,
+        stop_name: p.stop_name,
+    };
+    if p.apply {
+        let out = match edit_stop(&conn, svi, cmd, &p.editor, p.note.as_deref().unwrap_or("")) {
+            Ok(o) => o,
+            Err(e) => return ("move-stop", Outcome::Rejected(format!("{e:#}"))),
+        };
+        (
+            "move-stop",
+            Outcome::Ok(
+                serde_json::json!({
+                    "edit_id": out.edit_id,
+                    "new_stop_version_id": out.new_version_id,
+                    "stale_routes": out.stale_routes,
+                }),
+                Vec::new(),
+            ),
+        )
+    } else {
+        match preview_stop_edit(&conn, svi, cmd) {
+            Ok(prev) => (
+                "move-stop",
+                Outcome::Ok(
+                    serde_json::json!({
+                        "stop_id": prev.stop_id,
+                        "stop_version_id": prev.stop_version_id,
+                        "changes": {
+                            "lat": prev.op.lat,
+                            "lon": prev.op.lon,
+                            "stop_name": prev.op.stop_name,
+                        },
+                    }),
+                    Vec::new(),
+                ),
+            ),
+            Err(e) => return ("move-stop", Outcome::Rejected(format!("{e:#}"))),
+        }
+    }
+}
+
 /// The undo job over one resolved payload.
 fn undo_job(p: params::UndoParams) -> (&'static str, Outcome) {
     let conn = match rm_db::open(&PathBuf::from(&p.db)) {
@@ -522,6 +688,10 @@ pub fn schema_list() -> serde_json::Value {
                 "description": "Add a stop and attach it to route directions (dry run unless --apply).",
             },
             {
+                "name": "move-stop",
+                "description": "Move/rename one stop pole (dry run unless --apply).",
+            },
+            {
                 "name": "undo",
                 "description": "Undo a job edit by its edit_log id.",
             },
@@ -551,6 +721,10 @@ pub fn schema_for(name: &str) -> Option<serde_json::Value> {
         "add-stop" => Some(serde_json::json!({
             "command": name,
             "schema": schemars::schema_for!(params::AddStopParams),
+        })),
+        "move-stop" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::MoveStopParams),
         })),
         "undo" => Some(serde_json::json!({
             "command": name,
