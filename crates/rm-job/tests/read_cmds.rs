@@ -135,6 +135,18 @@ fn find_stop_by_name_returns_candidate_with_ids() {
         .any(|d| d.as_i64() == Some(0)));
 }
 
+/// Code-only filter: exercises the `stop_code =` branch and its placeholder
+/// binding (code-only must give ?2 bound with 2 args).
+#[test]
+fn find_stop_by_code_only_returns_fixture_row() {
+    let (_dir, db) = fixture_db();
+    let v = find_stop_ok(&db, "1", None, Some("001"));
+    let c = &v["candidates"][0];
+    assert_eq!(c["stop_code"], "001");
+    assert_eq!(c["stop_name"], "Old");
+    assert!(c["stop_version_id"].as_i64().unwrap() > 0);
+}
+
 #[test]
 fn find_stop_no_match_is_ok_empty() {
     let (_dir, db) = fixture_db();
@@ -164,6 +176,19 @@ fn show_path_reports_source_and_endpoints() {
     let v = show_path_ok(&db, "1", 0);
     assert_eq!(v["source"], "src");
     assert!(v["endpoints"].as_array().unwrap().len() == 2);
+}
+
+/// Dir 1 has no src row and no override row: pathless — "none" with null
+/// encoded/endpoints, still a 0 exit (the `path_source` "none" arm).
+#[test]
+fn show_path_none_when_no_src_or_override() {
+    let (_dir, db) = fixture_db();
+    let (code, report) = run_show_path(&db, "1", 1);
+    assert_eq!(code, 0, "{}{}", report.out, report.err);
+    let v = envelope_of(&report)["data"].clone();
+    assert_eq!(v["source"], "none");
+    assert!(v["encoded"].is_null(), "{}", report.out);
+    assert!(v["endpoints"].is_null(), "{}", report.out);
 }
 
 #[test]
