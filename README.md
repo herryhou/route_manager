@@ -148,6 +148,28 @@ own (CLAUDE.md whitelist holds).
 
 See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
 
+## Agent data jobs (rm-job)
+
+LLM agents run route/stop corrections (add, move, remove stops; extend
+paths; undo) through `rm-job`: every command prints one JSON envelope to
+stdout, every write is dry-run by default and undoable. Never apply before
+the human has seen the dry-run output; `remove-stop --delete-pole` is
+one-way. Runbook: `docs/agents/rm-jobs.md` (agents: skill `rm-jobs`).
+
+```sh
+# 1. discover commands / one command's JSON payload schema
+cargo run -r -p rm-job -- schema
+cargo run -r -p rm-job -- schema move-stop
+
+# 2. dry-run: plan a stop move, write nothing
+cargo run -r -p rm-job -- move-stop --json \
+    '{"db":"data/taichung.db","xno":"1","code":"51","lat":24.1776,"lon":120.7395}'
+
+# 3. apply: identical command + "apply": true, after the human approved
+cargo run -r -p rm-job -- move-stop --json \
+    '{"db":"data/taichung.db","xno":"1","code":"51","lat":24.1776,"lon":120.7395,"apply":true}'
+```
+
 ## Data model notes
 
 - Station identity is the API `node.id` (`station.ext_uid = tcg:node:{id}`).
