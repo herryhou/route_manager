@@ -983,9 +983,11 @@ fn plan_stop_add_undo(edit: &StopEditRow) -> Result<StopAddUndoOp, EditError> {
 ///
 /// Guards run inside the tx BEFORE any write: for every route in the
 /// payload, `current_route_version_id` must still be the add's `new_rv`
-/// and the version's whole `route_stop_version` id set must equal the
-/// payload's `new_rsv_ids` — anything else (`NotUndoable`) means the route
-/// moved on past this add and it is no longer the newest write.
+/// and the version's whole `route_stop_version` mapping (rsv id →
+/// stop_version_id) must still be the add's — exactly the payload's
+/// `new_rsv_ids`, each pointing at the pole's own versions or the old
+/// version's rows. Anything else (`NotUndoable`) means the route moved on
+/// past this add and it is no longer the newest write.
 pub fn undo_stop_add(
     conn: &Connection,
     edit_id: i64,
@@ -1018,22 +1020,43 @@ fn apply_stop_add_undo(
         if current != Some(r.new_rv) {
             return Err(EditError::NotUndoable(op.edit_id).into());
         }
-        let mut ids: Vec<i64> = {
+        let mut pairs: Vec<(i64, i64)> = {
             let mut stmt = tx.prepare(
-                "SELECT route_stop_version_id FROM route_stop_version
+                "SELECT route_stop_version_id, stop_version_id FROM route_stop_version
                  WHERE subroute_version_id IN (
                      SELECT subroute_version_id FROM subroute_version
                      WHERE route_version_id = ?1)",
             )?;
             let rows = stmt
-                .query_map([r.new_rv], |row| row.get(0))?
+                .query_map([r.new_rv], |row| Ok((row.get(0)?, row.get(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
             rows
         };
-        ids.sort_unstable();
+        pairs.sort_unstable();
         let mut want = r.new_rsv_ids.clone();
         want.sort_unstable();
-        if ids != want {
+        if pairs.iter().map(|p| p.0).collect::<Vec<_>>() != want {
+            return Err(EditError::NotUndoable(op.edit_id).into());
+        }
+        // the id set misses an in-place repoint (rm-web pole edits swap
+        // stop_version_id under unchanged ids) — the mapping must still be
+        // the add's: the pole's own versions or the old version's rows
+        let old_svs: Vec<i64> = {
+            let mut stmt = tx.prepare(
+                "SELECT stop_version_id FROM route_stop_version
+                 WHERE subroute_version_id IN (
+                     SELECT subroute_version_id FROM subroute_version
+                     WHERE route_version_id = ?1)",
+            )?;
+            let rows = stmt
+                .query_map([r.old_rv], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        if pairs
+            .iter()
+            .any(|&(_, sv)| !op.stop_version_ids.contains(&sv) && !old_svs.contains(&sv))
+        {
             return Err(EditError::NotUndoable(op.edit_id).into());
         }
     }
@@ -2205,6 +2228,50 @@ mod tests {
         let err = undo_stop_add(&conn, first.edit_id, "herry", "revert").unwrap_err();
         match err.downcast_ref::<EditError>() {
             Some(EditError::NotUndoable(id)) => assert_eq!(*id, first.edit_id),
+            other => panic!("expected NotUndoable, got {other:?}"),
+        }
+        assert_eq!(
+            dump_with(&conn, ROUNDTRIP_SKIP),
+            before,
+            "refused undo writes nothing"
+        );
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM edit_log WHERE action = 'undo'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0, "no undo audit row either");
+    }
+
+    #[test]
+    fn undo_refuses_after_pole_repoint() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let out = add_stop(&conn, golden_cmd(), "herry", "job").unwrap();
+        // rm-web pole edits repoint rsv rows in place (ids unchanged): a
+        // rename of the job's own pole mints a fresh stop_version and
+        // swings its rsv row onto it — the id-set guard passes, only the
+        // mapping catches the interleave
+        conn.execute(
+            "INSERT INTO stop_version (stop_version_id, stop_id, station_id, stop_code,
+                 stop_name, direction, latitude, longitude, valid_from, created_at)
+             VALUES (16, 4, 2, 'M4', 'X2', 0, 24.1410, 120.6857,
+                 '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE route_stop_version SET stop_version_id = 16
+             WHERE route_stop_version_id = 6 AND stop_version_id = 14",
+            [],
+        )
+        .unwrap();
+        let before = dump_with(&conn, ROUNDTRIP_SKIP);
+        let err = undo_stop_add(&conn, out.edit_id, "herry", "revert").unwrap_err();
+        match err.downcast_ref::<EditError>() {
+            Some(EditError::NotUndoable(id)) => assert_eq!(*id, out.edit_id),
             other => panic!("expected NotUndoable, got {other:?}"),
         }
         assert_eq!(

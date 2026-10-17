@@ -5,6 +5,11 @@ through the `rm-job` CLI — a thin dry-run-first wrapper over `rm_db`'s
 manual-edit primitives. Every write is planned before it happens, undoable,
 and audited in `edit_log`. Always release mode: `cargo run -r -p rm-job -- ...`.
 
+The default DB is `data/taichung.db` — for another city pass
+`--db data/<city>.db` (e.g. `--db data/taipei.db`) on every command. A
+typo'd `--db` path never errors: `rm_db::open` creates a new empty DB
+there.
+
 ## When to reach for rm-job
 
 - The user asks in natural language for a **new stop** attached to one or
@@ -45,7 +50,9 @@ spot and paste the coordinates — never invent or look them up.
 
 `--apply` prints `edit_id <N>`; keep it and report it to the user.
 `rm-job undo <N>` reverts the whole job — every row the apply wrote — in
-one transaction.
+one transaction. Undo in LIFO order — newest job first: edits interleaved
+after a job (rm-web pole edits included) make its undo refuse with
+`NotUndoable` instead of rewinding over them.
 
 ## The refresh rule
 
