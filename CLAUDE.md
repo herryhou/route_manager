@@ -118,3 +118,8 @@ Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `
 ### Domain docs
 
 Single-context: root `GLOSSARY.md` + `docs/adr/` (created lazily). See `docs/agents/domain.md`.
+
+### AI-assist jobs
+
+rm-job CLI for natural-language data jobs — dry-run first, never `--apply`
+without showing the plan. See `docs/agents/rm-jobs.md`.
