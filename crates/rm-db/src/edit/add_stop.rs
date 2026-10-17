@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 use super::matched_path::{bearing_at, matched_path, project_onto_path, OFF_PATH_MAX_M};
-use super::EditError;
+use super::{load_stop_edit, EditError, EditOutcome, StopEditRow};
 use crate::stale::{mark_line_stale, mark_position_stale, seg_match_key};
 
 /// Maximum distance (m) between the proposed coordinate and a current
@@ -862,10 +862,282 @@ pub fn apply_add_stop(
     })
 }
 
+// ---------- undo ----------
+
+/// One route's inverse, parsed from the add's logged `routes` array.
+#[derive(Debug)]
+struct RouteAddUndo {
+    route_id: i64,
+    old_rv: i64,
+    new_rv: i64,
+    old_revision: i64,
+    old_updated_at: String,
+    new_sv_id: i64,
+    new_rsv_ids: Vec<i64>,
+}
+
+/// Write-side op for the add-stop undo, emitted by `plan_stop_add_undo`
+/// from the append-only log; apply re-validates currency inside its tx.
+#[derive(Debug)]
+struct StopAddUndoOp {
+    edit_id: i64,
+    stop_id: i64,
+    station_id: i64,
+    station_created: bool,
+    group_created: bool,
+    stop_version_ids: Vec<i64>,
+    routes: Vec<RouteAddUndo>,
+}
+
+/// A JSON value that is exactly an array of integers.
+fn i64_vec(v: Option<&serde_json::Value>) -> Option<Vec<i64>> {
+    let arr = v?.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for x in arr {
+        out.push(x.as_i64()?);
+    }
+    Some(out)
+}
+
+/// Pure guard + parse: only a non-undo `stop_add` row whose payload is
+/// fully formed is invertible — every missing or malformed field is a
+/// refusal (`NotUndoable`), never a panic.
+fn plan_stop_add_undo(edit: &StopEditRow) -> Result<StopAddUndoOp, EditError> {
+    let refused = || EditError::NotUndoable(edit.edit_id);
+    if edit.entity != "stop_add" || edit.action == "undo" {
+        return Err(refused());
+    }
+    let c = &edit.changes;
+    if c.get("kind").and_then(|k| k.as_str()) != Some("stop_add") {
+        return Err(refused());
+    }
+    let (Some(stop_id), Some(station_id)) = (
+        c.get("stop_id").and_then(|v| v.as_i64()),
+        c.get("station_id").and_then(|v| v.as_i64()),
+    ) else {
+        return Err(refused());
+    };
+    let (Some(station_created), Some(group_created)) = (
+        c.get("station_created").and_then(|v| v.as_bool()),
+        c.get("group_created").and_then(|v| v.as_bool()),
+    ) else {
+        return Err(refused());
+    };
+    let Some(stop_version_ids) = i64_vec(c.get("stop_version_ids")) else {
+        return Err(refused());
+    };
+    let Some(routes_json) = c.get("routes").and_then(|v| v.as_array()) else {
+        return Err(refused());
+    };
+    let mut routes = Vec::with_capacity(routes_json.len());
+    for r in routes_json {
+        let (Some(route_id), Some(old_rv), Some(new_rv)) = (
+            r.get("route_id").and_then(|v| v.as_i64()),
+            r.get("old_rv").and_then(|v| v.as_i64()),
+            r.get("new_rv").and_then(|v| v.as_i64()),
+        ) else {
+            return Err(refused());
+        };
+        let (Some(old_revision), Some(new_sv_id)) = (
+            r.get("old_revision").and_then(|v| v.as_i64()),
+            r.get("new_sv_id").and_then(|v| v.as_i64()),
+        ) else {
+            return Err(refused());
+        };
+        let Some(old_updated_at) = r
+            .get("old_updated_at")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+        else {
+            return Err(refused());
+        };
+        let Some(new_rsv_ids) = i64_vec(r.get("new_rsv_ids")) else {
+            return Err(refused());
+        };
+        routes.push(RouteAddUndo {
+            route_id,
+            old_rv,
+            new_rv,
+            old_revision,
+            old_updated_at,
+            new_sv_id,
+            new_rsv_ids,
+        });
+    }
+    Ok(StopAddUndoOp {
+        edit_id: edit.edit_id,
+        stop_id,
+        station_id,
+        station_created,
+        group_created,
+        stop_version_ids,
+        routes,
+    })
+}
+
+/// Undo a stop_add in ONE transaction: delete the job's own rows in the
+/// pinned child-before-parent order, restore the route pointers, delete
+/// the add's own stale marks, and write the undo's audit row
+/// (`action='undo'`, `changes.kind='stop_add_undo'`). Mints nothing and
+/// marks nothing stale — the derived data reads the restored rows again.
+///
+/// Guards run inside the tx BEFORE any write: for every route in the
+/// payload, `current_route_version_id` must still be the add's `new_rv`
+/// and the version's whole `route_stop_version` id set must equal the
+/// payload's `new_rsv_ids` — anything else (`NotUndoable`) means the route
+/// moved on past this add and it is no longer the newest write.
+pub fn undo_stop_add(
+    conn: &Connection,
+    edit_id: i64,
+    editor: &str,
+    note: &str,
+) -> Result<EditOutcome> {
+    let row = load_stop_edit(conn, edit_id)?.ok_or(EditError::NotUndoable(edit_id))?;
+    let op = plan_stop_add_undo(&row)?;
+    apply_stop_add_undo(conn, &op, editor, note)
+}
+
+fn apply_stop_add_undo(
+    conn: &Connection,
+    op: &StopAddUndoOp,
+    editor: &str,
+    note: &str,
+) -> Result<EditOutcome> {
+    let tx = conn.unchecked_transaction()?;
+
+    // guards BEFORE any write: the add must still be the newest write on
+    // every route it touched
+    for r in &op.routes {
+        let current: Option<i64> = tx
+            .query_row(
+                "SELECT current_route_version_id FROM route WHERE route_id = ?1",
+                [r.route_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current != Some(r.new_rv) {
+            return Err(EditError::NotUndoable(op.edit_id).into());
+        }
+        let mut ids: Vec<i64> = {
+            let mut stmt = tx.prepare(
+                "SELECT route_stop_version_id FROM route_stop_version
+                 WHERE subroute_version_id IN (
+                     SELECT subroute_version_id FROM subroute_version
+                     WHERE route_version_id = ?1)",
+            )?;
+            let rows = stmt
+                .query_map([r.new_rv], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        ids.sort_unstable();
+        let mut want = r.new_rsv_ids.clone();
+        want.sort_unstable();
+        if ids != want {
+            return Err(EditError::NotUndoable(op.edit_id).into());
+        }
+    }
+
+    // the payload carries no group id; the minted station's version rows
+    // name the group (read here, before any delete)
+    let group_ids: Vec<i64> = if op.group_created {
+        let ids: Vec<i64> = {
+            let mut stmt =
+                tx.prepare("SELECT station_group_id FROM station_version WHERE station_id = ?1")?;
+            let rows = stmt
+                .query_map([op.station_id], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        if ids.is_empty() {
+            return Err(EditError::NotUndoable(op.edit_id).into());
+        }
+        ids
+    } else {
+        Vec::new()
+    };
+
+    // the pinned delete order: children before parents. The pointer
+    // restore sits between the subroute_version and route_version deletes
+    // because the FK route.current_route_version_id → route_version
+    // forbids deleting the pointed-at row.
+    for r in &op.routes {
+        for &rsv in &r.new_rsv_ids {
+            tx.execute(
+                "DELETE FROM route_stop_version WHERE route_stop_version_id = ?1",
+                [rsv],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM subroute_version WHERE subroute_version_id = ?1",
+            [r.new_sv_id],
+        )?;
+        tx.execute(
+            "UPDATE route SET current_route_version_id = ?1, revision = ?2, updated_at = ?3
+             WHERE route_id = ?4",
+            params![r.old_rv, r.old_revision, r.old_updated_at, r.route_id],
+        )?;
+        tx.execute(
+            "DELETE FROM route_version WHERE route_version_id = ?1",
+            [r.new_rv],
+        )?;
+    }
+    for &svi in &op.stop_version_ids {
+        tx.execute("DELETE FROM stop_version WHERE stop_version_id = ?1", [svi])?;
+    }
+    tx.execute("DELETE FROM stop WHERE stop_id = ?1", [op.stop_id])?;
+    if op.station_created {
+        tx.execute(
+            "DELETE FROM station_version WHERE station_id = ?1",
+            [op.station_id],
+        )?;
+        tx.execute("DELETE FROM station WHERE station_id = ?1", [op.station_id])?;
+    }
+    if op.group_created {
+        for &gid in &group_ids {
+            tx.execute(
+                "DELETE FROM station_group_version WHERE station_group_id = ?1",
+                [gid],
+            )?;
+            tx.execute(
+                "DELETE FROM station_group WHERE station_group_id = ?1",
+                [gid],
+            )?;
+        }
+    }
+    tx.execute(
+        "DELETE FROM stale_mark WHERE cause_edit_id = ?1",
+        [op.edit_id],
+    )?;
+
+    let now = crate::now_rfc3339();
+    let changes = json!({ "kind": "stop_add_undo" });
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, undo_of, version_before, version_after)
+         VALUES (?1, ?2, 'stop_add', ?3, 'undo', ?4, ?5, ?6, NULL, NULL)",
+        params![
+            now,
+            editor,
+            op.stop_id,
+            changes.to_string(),
+            if note.is_empty() { None } else { Some(note) },
+            op.edit_id
+        ],
+    )?;
+    let undo_edit_id = tx.last_insert_rowid();
+    tx.commit()?;
+    Ok(EditOutcome {
+        edit_id: undo_edit_id,
+        new_version_id: 0, // nothing minted or restored — the add's rows are gone
+        stale_routes: Vec::new(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::open_in_memory;
+    use crate::{undo_edit, UndoOutcome};
     use rm_core::geo;
     use rusqlite::{params, Connection};
 
@@ -1388,8 +1660,9 @@ mod tests {
     }
 
     /// Every user table's full contents, name-then-rowid order — the
-    /// byte-identical read-only check.
-    fn dump(conn: &Connection) -> String {
+    /// byte-identical read-only check. `skip` drops tables the comparison
+    /// means to exclude.
+    fn dump_with(conn: &Connection, skip: &[&str]) -> String {
         use rusqlite::types::ValueRef;
         let names: Vec<String> = conn
             .prepare(
@@ -1404,6 +1677,9 @@ mod tests {
             .unwrap();
         let mut out = String::new();
         for t in names {
+            if skip.contains(&t.as_str()) {
+                continue;
+            }
             out.push_str(&format!("-- {t}\n"));
             let mut stmt = conn
                 .prepare(&format!("SELECT * FROM \"{t}\" ORDER BY rowid"))
@@ -1426,6 +1702,11 @@ mod tests {
             }
         }
         out
+    }
+
+    /// The read-only check: nothing excluded.
+    fn dump(conn: &Connection) -> String {
+        dump_with(conn, &[])
     }
 
     // ---------- apply_add_stop ----------
@@ -1828,5 +2109,194 @@ mod tests {
             "{err}"
         );
         assert_eq!(dump(&conn), before, "zero partial write");
+    }
+
+    // ---------- undo_stop_add ----------
+
+    /// Round-trip exclusions: the audit rows (undo writes its own by
+    /// design, checked separately), the stale marks (the job's own are
+    /// deleted by undo, covered by their own test), and the id allocator
+    /// (apply mints ids and ids are never reused, so the sequence
+    /// legitimately moves — undo restores data, not ids).
+    const ROUNDTRIP_SKIP: &[&str] = &["edit_log", "stale_mark", "id_sequence"];
+
+    #[test]
+    fn undo_roundtrips_add_to_byte_identical() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let b0 = dump_with(&conn, ROUNDTRIP_SKIP);
+        let out = add_stop(&conn, golden_cmd(), "herry", "job").unwrap();
+        undo_stop_add(&conn, out.edit_id, "herry", "revert").unwrap();
+        let b2 = dump_with(&conn, ROUNDTRIP_SKIP);
+        assert_eq!(b2, b0, "apply then undo is byte-identical (B2==B0)");
+        // the undo's own audit row (excluded from the dump above)
+        let (entity, action, undo_of, changes): (String, String, Option<i64>, String) = conn
+            .query_row(
+                "SELECT entity, action, undo_of, changes FROM edit_log WHERE undo_of = ?1",
+                [out.edit_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!((entity.as_str(), action.as_str()), ("stop_add", "undo"));
+        assert_eq!(undo_of, Some(out.edit_id));
+        let c: serde_json::Value = serde_json::from_str(&changes).unwrap();
+        assert_eq!(c["kind"], "stop_add_undo");
+    }
+
+    #[test]
+    fn undo_deletes_own_stale_marks_only() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        // a foreign edit + its mark on a seg_match key this job never
+        // writes ('9:9' vs the job's '1:0'/'2:0')
+        conn.execute(
+            "INSERT INTO edit_log (edit_id, ts, editor, entity, entity_id, action, changes)
+             VALUES (9001, '2026-01-02T00:00:00Z', 'other', 'stop', 1, 'update', '{}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO stale_mark (table_name, key, cause_edit_id, marked_at)
+             VALUES ('seg_match', '9:9', 9001, '2026-01-02T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let out = add_stop(&conn, golden_cmd(), "herry", "job").unwrap();
+        let job_marks: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM stale_mark WHERE cause_edit_id = ?1",
+                [out.edit_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(job_marks > 0, "premise: the job marked datasets stale");
+        undo_stop_add(&conn, out.edit_id, "herry", "revert").unwrap();
+        let rows: Vec<(String, String, i64)> = conn
+            .prepare(
+                "SELECT table_name, key, cause_edit_id FROM stale_mark ORDER BY table_name, key",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![("seg_match".into(), "9:9".into(), 9001)],
+            "the job's marks gone, the foreign one intact"
+        );
+    }
+
+    #[test]
+    fn undo_refuses_after_route_moved_on() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let first = add_stop(&conn, golden_cmd(), "herry", "job").unwrap();
+        // a second add on route 1 moves its pointer past the first job's
+        // new_rv — the first job is no longer the newest write
+        add_stop(
+            &conn,
+            cmd("Y", 24.1405, 120.6857, vec![attach("1", 0, Some("001"))]),
+            "herry",
+            "more",
+        )
+        .unwrap();
+        let before = dump_with(&conn, ROUNDTRIP_SKIP);
+        let err = undo_stop_add(&conn, first.edit_id, "herry", "revert").unwrap_err();
+        match err.downcast_ref::<EditError>() {
+            Some(EditError::NotUndoable(id)) => assert_eq!(*id, first.edit_id),
+            other => panic!("expected NotUndoable, got {other:?}"),
+        }
+        assert_eq!(
+            dump_with(&conn, ROUNDTRIP_SKIP),
+            before,
+            "refused undo writes nothing"
+        );
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM edit_log WHERE action = 'undo'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0, "no undo audit row either");
+    }
+
+    #[test]
+    fn undo_of_undo_refused() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let out = add_stop(&conn, golden_cmd(), "herry", "job").unwrap();
+        let u = undo_stop_add(&conn, out.edit_id, "herry", "revert").unwrap();
+        let err = undo_stop_add(&conn, u.edit_id, "herry", "again").unwrap_err();
+        assert!(
+            matches!(
+                err.downcast_ref::<EditError>(),
+                Some(EditError::NotUndoable(_))
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn undo_edit_dispatches_stop_add() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let out = add_stop(&conn, golden_cmd(), "herry", "job").unwrap();
+        let o = undo_edit(&conn, out.edit_id, "herry", "revert").unwrap();
+        let UndoOutcome::StopAdd { edit_id } = o else {
+            panic!("expected StopAdd, got {o:?}");
+        };
+        assert!(
+            edit_id > out.edit_id,
+            "edit_id is the undo's own audit row id"
+        );
+    }
+
+    /// Replace every second-precision RFC3339 timestamp with `<ts>`: two
+    /// runs never share the wall clock, so the determinism check
+    /// normalizes before comparing.
+    fn normalize_ts(s: &str) -> String {
+        fn is_ts(w: &[char]) -> bool {
+            w.len() == 20
+                && w[4] == '-'
+                && w[7] == '-'
+                && w[10] == 'T'
+                && w[13] == ':'
+                && w[16] == ':'
+                && w[19] == 'Z'
+                && w.iter()
+                    .enumerate()
+                    .all(|(i, c)| matches!(i, 4 | 7 | 10 | 13 | 16 | 19) || c.is_ascii_digit())
+        }
+        let chars: Vec<char> = s.chars().collect();
+        let mut out = String::with_capacity(s.len());
+        let mut i = 0;
+        while i < chars.len() {
+            if chars.len() - i >= 20 && is_ts(&chars[i..i + 20]) {
+                out.push_str("<ts>");
+                i += 20;
+            } else {
+                out.push(chars[i]);
+                i += 1;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn determinism_same_add_two_fresh_dbs() {
+        let run = || -> String {
+            let conn = open_in_memory().unwrap();
+            apply_fixture(&conn);
+            let out = add_stop(&conn, golden_cmd(), "herry", "job").unwrap();
+            undo_stop_add(&conn, out.edit_id, "herry", "revert").unwrap();
+            normalize_ts(&dump(&conn))
+        };
+        assert_eq!(
+            run(),
+            run(),
+            "same cmd on two fresh dbs: identical end state incl. audit rows"
+        );
     }
 }

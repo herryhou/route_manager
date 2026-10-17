@@ -204,10 +204,10 @@ pub async fn log(
 }
 
 /// POST /api/edit/undo/{edit_id} — revert an edit by restoring the version
-/// that preceded it. rm_db's dispatcher picks the kind's undo service and
-/// returns one tagged outcome (`kind`: stop/station/polyline) either way;
-/// unknown ids route down the stop arm and surface as its 409 NotUndoable,
-/// as before.
+/// that preceded it (or deleting an add's own rows). rm_db's dispatcher
+/// picks the kind's undo service and returns one tagged outcome (`kind`:
+/// stop/stop_add/station/polyline) either way; unknown ids route down the
+/// stop arm and surface as its 409 NotUndoable, as before.
 pub async fn undo(
     Path(edit_id): Path<i64>,
     State(state): State<AppState>,

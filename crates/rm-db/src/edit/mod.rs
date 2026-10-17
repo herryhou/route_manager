@@ -9,9 +9,9 @@ mod station_undo;
 mod stop;
 
 pub use add_stop::{
-    add_stop, apply_add_stop, plan_add_stop, qualify_station, AddStopCmd, AddStopOutcome,
-    AddStopPlan, AttachCmd, PlannedAttach, Qualification, RowCounts, StationCandidate,
-    StationVerdict, QUALIFY_BEARING_TOL_DEG, QUALIFY_MAX_DIST_M,
+    add_stop, apply_add_stop, plan_add_stop, qualify_station, undo_stop_add, AddStopCmd,
+    AddStopOutcome, AddStopPlan, AttachCmd, PlannedAttach, Qualification, RowCounts,
+    StationCandidate, StationVerdict, QUALIFY_BEARING_TOL_DEG, QUALIFY_MAX_DIST_M,
 };
 pub use line::{edit_polyline_line, undo_polyline_line, LineEditCmd};
 pub use matched_path::{bearing_at, matched_path, project_onto_path, OFF_PATH_MAX_M};
@@ -466,6 +466,10 @@ pub enum UndoOutcome {
         edit_id: i64,
         restored_version_id: i64,
     },
+    /// An add-stop undo deleted the job's own rows — nothing was restored.
+    StopAdd {
+        edit_id: i64,
+    },
     Station {
         edit_id: i64,
         restored_version_id: i64,
@@ -493,6 +497,8 @@ pub fn undo_edit(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> R
                 restored_version_id: o.restored_station_version_id,
             })
         }
+        Some("stop_add") => undo_stop_add(conn, edit_id, editor, note)
+            .map(|o| UndoOutcome::StopAdd { edit_id: o.edit_id }),
         // "stop" and any unknown id alike — the stop service's plan guard
         // refuses foreign rows and missing rows with `NotUndoable`.
         _ => undo_stop(conn, edit_id, editor, note).map(|o| UndoOutcome::Stop {
