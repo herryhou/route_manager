@@ -115,6 +115,10 @@ fn walk_one(g: &RoadGraph, pts: &[LatLng], end: &str, meters: f64) -> Result<Ext
     };
     // travel direction pointing outward (away from the path interior)
     let outward = geo::bearing_deg(second, endpoint);
+    let outward_vec = {
+        let b = outward.to_radians();
+        (b.sin(), b.cos()) // (east, north) unit vector
+    };
 
     // snap: the nearest segment within MAX_SNAP_M (ties → lowest seg idx)
     let mut best: Option<(f64, u32)> = None;
@@ -139,12 +143,31 @@ fn walk_one(g: &RoadGraph, pts: &[LatLng], end: &str, meters: f64) -> Result<Ext
         );
     };
     let snap = g.seg(snap_idx);
-    let (start, snap_other) = if geo::haversine_m(endpoint, g.node_pos(snap.a))
-        <= geo::haversine_m(endpoint, g.node_pos(snap.b))
-    {
+    // Start node. A seg end coincident with the endpoint (within
+    // SAME_POINT_M) is the start outright — alignment is degenerate at
+    // zero distance. Mid-segment snap: the end best aligned with the
+    // outward bearing wins (dot of the endpoint→node unit vector with
+    // `outward_vec`), so the walk leaves on the outward side; exact
+    // alignment tie → the nearer node, then the lower node index. Proximity
+    // alone picks the end behind the travel direction when the endpoint
+    // sits nearer it, and the first walked leg (endpoint→start) backtracks
+    // along the snap segment before re-crossing the endpoint.
+    let dist_a = geo::haversine_m(endpoint, g.node_pos(snap.a));
+    let dist_b = geo::haversine_m(endpoint, g.node_pos(snap.b));
+    let (start, snap_other) = if dist_a <= SAME_POINT_M {
         (snap.a, snap.b)
-    } else {
+    } else if dist_b <= SAME_POINT_M {
         (snap.b, snap.a)
+    } else {
+        let score = |n: u32, d: f64| (align(endpoint, g.node_pos(n), outward_vec), d, n);
+        let (a, b) = (score(snap.a, dist_a), score(snap.b, dist_b));
+        let a_wins =
+            a.0 > b.0 || (a.0 == b.0 && a.1 < b.1) || (a.0 == b.0 && a.1 == b.1 && a.2 < b.2);
+        if a_wins {
+            (snap.a, snap.b)
+        } else {
+            (snap.b, snap.a)
+        }
     };
 
     // Dijkstra outward. Heap key total order: cost, then relaxation rank
@@ -159,10 +182,6 @@ fn walk_one(g: &RoadGraph, pts: &[LatLng], end: &str, meters: f64) -> Result<Ext
     let mut prev: Vec<Option<(u32, u32)>> = vec![None; n]; // (prev node, seg idx)
     let mut done = vec![false; n];
     let mut next_rank = 0u32;
-    let outward_vec = {
-        let b = outward.to_radians();
-        (b.sin(), b.cos()) // (east, north) unit vector
-    };
     dist[start as usize] = 0.0;
     heap.push(Reverse(Key(0.0f64.to_bits(), next_rank, start)));
     next_rank += 1;
@@ -272,6 +291,15 @@ fn unit_dir(from: (f64, f64), to: (f64, f64)) -> (f64, f64) {
     } else {
         (dx / norm, dy / norm)
     }
+}
+
+/// Alignment of the `from → to` direction with `rv`, both (east, north):
+/// the dot product of `bearing_deg(from, to)`'s unit vector with `rv` — +1
+/// dead ahead, −1 dead behind. Only meaningful at positive distance
+/// (`bearing_deg` is degenerate at 0).
+fn align(from: LatLng, to: LatLng, rv: (f64, f64)) -> f64 {
+    let b = geo::bearing_deg(from, to).to_radians();
+    b.sin() * rv.0 + b.cos() * rv.1
 }
 
 /// One node's out-edges ordered for relaxation: straightest continuation

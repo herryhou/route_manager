@@ -124,6 +124,36 @@ fn fork_db() -> (tempfile::TempDir, PathBuf) {
     (dir, db)
 }
 
+/// Mid-segment snap fixture: the path ends traveling due east at a point
+/// sitting mid-way along E-W way 500 — nearer to west node 1 (behind the
+/// travel direction) than east node 2 (ahead of it). Way 501 continues
+/// east from node 2, so the outward walk must start on the east side.
+fn midseg_db() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("t.db");
+    let conn = rm_db::open(&db).unwrap();
+    let encoded = polyline::encode(&[
+        LatLng::new(24.1400, 120.68005),
+        LatLng::new(24.1400, 120.68010),
+    ]);
+    seed_route(&conn, &encoded);
+    conn.execute_batch(
+        "INSERT INTO osm_way (osm_way_id, highway, oneway, name) VALUES
+            (500, 'residential', 0, '幹道'),
+            (501, 'residential', 0, '延伸路');
+         INSERT INTO osm_node (osm_node_id, lat, lon) VALUES
+            (1, 24.1400000, 120.6800000),
+            (2, 24.1400000, 120.6803000),
+            (3, 24.1400000, 120.6804000),
+            (4, 24.1400000, 120.6805000);
+         INSERT INTO osm_way_node (osm_way_id, ordinal, osm_node_id) VALUES
+            (500, 1, 1), (500, 2, 2),
+            (501, 1, 2), (501, 2, 3), (501, 3, 4);",
+    )
+    .unwrap();
+    (dir, db)
+}
+
 /// Route + src polyline but zero osm rows — `RoadGraph::from_conn`'s own
 /// "run rm-osm-prepare" error must surface verbatim.
 fn graphless_db() -> (tempfile::TempDir, PathBuf) {
@@ -366,6 +396,39 @@ fn fork_takes_straightest_continuation() {
     );
     assert!((19.5..20.5).contains(&d), "final vertex {d:.3} m out");
     assert!(last[0] > 24.1401, "extension runs due north: {last:?}");
+}
+
+/// Mid-segment snap with the nearer node behind the outward bearing: every
+/// extension vertex must project non-negatively onto the outward bearing —
+/// no vertex lands behind the endpoint in the travel direction. Proximity-
+/// only start selection walked to the nearer (west) node first, spiking the
+/// override backward along the snap segment.
+#[test]
+fn midseg_snap_starts_on_the_outward_side() {
+    let (_dir, db) = midseg_db();
+    let conn = rm_db::open_readonly(&db).unwrap();
+    let endpoint = LatLng::new(24.1400, 120.68010);
+    let outward = geo::bearing_deg(LatLng::new(24.1400, 120.68005), endpoint);
+    let mut logs = Vec::new();
+    let (_candidate, exts, _source) =
+        extend::plan_extension(&conn, "1", 0, 15.0, "last", &mut logs).unwrap();
+    let ext = &exts[0];
+    assert!(ext.snap_dist_m < 1e-9, "endpoint sits on the snap segment");
+    assert!(!ext.new_vertices.is_empty(), "walk reaches way 501");
+    for v in &ext.new_vertices {
+        let b = geo::bearing_deg(endpoint, LatLng::new(v[0], v[1]));
+        let diff = ((b - outward + 540.0) % 360.0) - 180.0;
+        assert!(
+            diff.abs() <= 90.0,
+            "vertex {v:?} lies behind the endpoint (bearing {b:.1} vs outward {outward:.1})"
+        );
+    }
+    assert_eq!(
+        ext.way_ids,
+        vec![501],
+        "snap seg 500 not walked backward: {:?}",
+        ext.way_ids
+    );
 }
 
 #[test]
