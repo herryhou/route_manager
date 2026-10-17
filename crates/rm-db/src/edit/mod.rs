@@ -9,9 +9,9 @@ mod station_undo;
 mod stop;
 
 pub use add_stop::{
-    plan_add_stop, qualify_station, AddStopCmd, AddStopPlan, AttachCmd, PlannedAttach,
-    Qualification, RowCounts, StationCandidate, StationVerdict, QUALIFY_BEARING_TOL_DEG,
-    QUALIFY_MAX_DIST_M,
+    add_stop, apply_add_stop, plan_add_stop, qualify_station, AddStopCmd, AddStopOutcome,
+    AddStopPlan, AttachCmd, PlannedAttach, Qualification, RowCounts, StationCandidate,
+    StationVerdict, QUALIFY_BEARING_TOL_DEG, QUALIFY_MAX_DIST_M,
 };
 pub use line::{edit_polyline_line, undo_polyline_line, LineEditCmd};
 pub use matched_path::{bearing_at, matched_path, project_onto_path, OFF_PATH_MAX_M};

@@ -5,11 +5,12 @@ use std::collections::BTreeSet;
 
 use anyhow::Result;
 use rm_core::{geo, LatLng};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::json;
 
 use super::matched_path::{bearing_at, matched_path, project_onto_path, OFF_PATH_MAX_M};
 use super::EditError;
-use crate::stale::seg_match_key;
+use crate::stale::{mark_line_stale, mark_position_stale, seg_match_key};
 
 /// Maximum distance (m) between the proposed coordinate and a current
 /// station's reference point for qualification.
@@ -185,6 +186,9 @@ pub struct PlannedAttach {
     pub xno: String,
     pub direction: i64,
     pub route_id: i64,
+    /// The route's current `route_version_id` at plan time — apply
+    /// re-validates the route pointer against it inside the tx.
+    pub route_version_id: i64,
     pub insert_after_stop_code: Option<String>,
     pub neighbor_before: Option<String>,
     pub neighbor_after: Option<String>,
@@ -468,6 +472,7 @@ pub fn plan_add_stop(conn: &Connection, cmd: &AddStopCmd) -> Result<AddStopPlan>
                     xno: r.xno.clone(),
                     direction: r.direction,
                     route_id: r.route_id,
+                    route_version_id: r.route_version_id,
                     insert_after_stop_code: (r.insert_idx < r.seq.len())
                         .then(|| before_code.clone()),
                     neighbor_before: Some(before_name.clone()),
@@ -489,6 +494,371 @@ pub fn plan_add_stop(conn: &Connection, cmd: &AddStopCmd) -> Result<AddStopPlan>
         },
         stale_routes,
         warnings,
+    })
+}
+
+// ---------- apply ----------
+
+/// What one applied add-stop did: the audit row id, the minted pole, its
+/// pole versions in attachment order, the resolved station, whether the
+/// station (and with it the group) was newly minted, and the distinct
+/// routes whose derived data went stale (ascending).
+#[derive(Debug)]
+pub struct AddStopOutcome {
+    pub edit_id: i64,
+    pub stop_id: i64,
+    pub stop_version_ids: Vec<i64>,
+    pub station_id: i64,
+    pub station_created: bool,
+    pub stale_routes: Vec<i64>,
+}
+
+/// Per-route state captured before the pointer move: the plan's old
+/// version plus the revision/updated_at the undo restores.
+struct RouteState {
+    route_id: i64,
+    old_rv: i64,
+    old_revision: i64,
+    old_updated_at: String,
+}
+
+/// Application service: plan (read-only) → apply (one tx).
+pub fn add_stop(
+    conn: &Connection,
+    cmd: AddStopCmd,
+    editor: &str,
+    note: &str,
+) -> Result<AddStopOutcome> {
+    let plan = plan_add_stop(conn, &cmd)?;
+    apply_add_stop(conn, &plan, editor, note)
+}
+
+/// Apply a plan in ONE transaction: mint the station chain (`CreateNew`
+/// only), the stop, one pole version per attachment, then per route a new
+/// `route_version` + `subroute_version` with the whole current
+/// `route_stop_version` set re-minted (the new pole spliced at its planned
+/// position), move the pointer, write one tagged `edit_log` row, and mark
+/// the line + position datasets stale. Re-validates inside the tx: each
+/// route's `current_route_version_id` must still be the version the plan
+/// resolved, else `NotCurrent(old_rv)` — a plan applied after the route
+/// moved on is refused before any write.
+pub fn apply_add_stop(
+    conn: &Connection,
+    plan: &AddStopPlan,
+    editor: &str,
+    note: &str,
+) -> Result<AddStopOutcome> {
+    let tx = conn.unchecked_transaction()?;
+    let now = crate::now_rfc3339();
+
+    // distinct routes in attachment first-appearance order (Vec-driven —
+    // the mint order below is pinned to this sequence)
+    let mut routes: Vec<(i64, i64)> = Vec::new(); // (route_id, planned old rv)
+    for a in &plan.attachments {
+        if !routes.iter().any(|(rid, _)| *rid == a.route_id) {
+            routes.push((a.route_id, a.route_version_id));
+        }
+    }
+
+    // in-tx re-validation BEFORE any write: the pointer must still sit on
+    // the planned version; the pre-move revision/updated_at are the undo
+    // payload's restore values
+    let mut state: Vec<RouteState> = Vec::with_capacity(routes.len());
+    for (rid, old_rv) in &routes {
+        let (current, revision, updated_at): (Option<i64>, i64, String) = tx
+            .query_row(
+                "SELECT current_route_version_id, revision, updated_at
+                 FROM route WHERE route_id = ?1",
+                [rid],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?
+            .ok_or(EditError::NotCurrent(*old_rv))?;
+        if current != Some(*old_rv) {
+            return Err(EditError::NotCurrent(*old_rv).into());
+        }
+        state.push(RouteState {
+            route_id: *rid,
+            old_rv: *old_rv,
+            old_revision: revision,
+            old_updated_at: updated_at,
+        });
+    }
+
+    // 1. station chain (CreateNew only) — ids minted in the pinned order
+    // before the inserts: the group's ext_uid embeds the new station's
+    // ext_uid, so the station id must exist when the group row is written
+    let station_created = matches!(plan.station, StationVerdict::CreateNew);
+    let station_id = match &plan.station {
+        StationVerdict::UseExisting {
+            station_id: sid, ..
+        }
+        | StationVerdict::Pinned {
+            station_id: sid, ..
+        } => *sid,
+        StationVerdict::CreateNew => {
+            let group_id = crate::mint(&tx, "station_group")?;
+            let group_version_id = crate::mint(&tx, "station_group_version")?;
+            let new_station_id = crate::mint(&tx, "station")?;
+            let station_version_id = crate::mint(&tx, "station_version")?;
+            let station_ext_uid = format!("manual:{new_station_id}");
+            // rm_identity::group_ext_uid's single-member form, inlined
+            // (rm-db cannot depend on rm-identity)
+            let group_ext_uid = format!(
+                "tcg:grp:{}",
+                rm_core::blake3_128_hex(station_ext_uid.as_bytes())
+            );
+            tx.execute(
+                "INSERT INTO station_group (station_group_id, ext_uid, created_at)
+                 VALUES (?1, ?2, ?3)",
+                params![group_id, group_ext_uid, now],
+            )?;
+            tx.execute(
+                "INSERT INTO station_group_version
+                    (station_group_version_id, station_group_id, station_group_name,
+                     valid_from, created_at, source)
+                 VALUES (?1, ?2, ?3, ?4, ?4, 'manual')",
+                params![group_version_id, group_id, plan.name, now],
+            )?;
+            tx.execute(
+                "INSERT INTO station (station_id, ext_uid, created_at) VALUES (?1, ?2, ?3)",
+                params![new_station_id, station_ext_uid, now],
+            )?;
+            tx.execute(
+                "INSERT INTO station_version
+                    (station_version_id, station_id, station_group_id, station_name,
+                     latitude, longitude, valid_from, created_at, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 'manual')",
+                params![
+                    station_version_id,
+                    new_station_id,
+                    group_id,
+                    plan.name,
+                    plan.lat,
+                    plan.lon,
+                    now
+                ],
+            )?;
+            new_station_id
+        }
+    };
+
+    // 2. the stop identity
+    let stop_id = crate::mint(&tx, "stop")?;
+    tx.execute(
+        "INSERT INTO stop (stop_id, ext_uid, created_at) VALUES (?1, ?2, ?3)",
+        params![stop_id, format!("manual:{stop_id}"), now],
+    )?;
+
+    // 3. one pole version per attachment, in attachment order
+    let mut stop_version_ids = Vec::with_capacity(plan.attachments.len());
+    let mut attach_svi: Vec<(i64, i64, i64)> = Vec::new(); // (route_id, direction, svi)
+    for a in &plan.attachments {
+        let svi = crate::mint(&tx, "stop_version")?;
+        tx.execute(
+            "INSERT INTO stop_version
+                (stop_version_id, stop_id, station_id, stop_code, stop_name, direction,
+                 latitude, longitude, valid_from, created_at, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, 'manual')",
+            params![
+                svi,
+                stop_id,
+                station_id,
+                format!("M{stop_id}"),
+                plan.name,
+                a.direction,
+                plan.lat,
+                plan.lon,
+                now
+            ],
+        )?;
+        stop_version_ids.push(svi);
+        attach_svi.push((a.route_id, a.direction, svi));
+    }
+
+    // 4. per route (attachment first-appearance order): new route_version +
+    // subroute_version + the whole current route_stop_version set re-minted
+    // (directions ascending), the new pole spliced at its planned position
+    let mut applied_routes: Vec<serde_json::Value> = Vec::new();
+    let mut new_rv_of: Vec<(i64, i64)> = Vec::new(); // (route_id, new_rv)
+    for st in &state {
+        let max_no: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(version_no), 0) FROM route_version WHERE route_id = ?1",
+            [st.route_id],
+            |r| r.get(0),
+        )?;
+        let new_rv = crate::mint(&tx, "route_version")?;
+        tx.execute(
+            "INSERT INTO route_version
+                (route_version_id, route_id, version_no, valid_from, valid_to, status, created_at, published_at)
+             VALUES (?1, ?2, ?3, ?4, NULL, 'PUBLISHED', ?4, ?4)",
+            params![new_rv, st.route_id, max_no + 1, now],
+        )?;
+        let (subroute_id, subroute_name): (i64, String) = tx.query_row(
+            "SELECT subroute_id, subroute_name FROM subroute_version
+             WHERE route_version_id = ?1 ORDER BY subroute_version_id LIMIT 1",
+            [st.old_rv],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let new_sv_id = crate::mint(&tx, "subroute_version")?;
+        tx.execute(
+            "INSERT INTO subroute_version
+                (subroute_version_id, route_version_id, subroute_id, subroute_name, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![new_sv_id, new_rv, subroute_id, subroute_name, now],
+        )?;
+
+        // the old version's rows in travel order (directions ascending)
+        let old_rows: Vec<(i64, i64, i64, Option<i64>, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT rsv.direction, rsv.stop_sequence, rsv.stop_version_id,
+                        rsv.source_order_no, s.stop_code
+                 FROM route_stop_version rsv
+                 JOIN stop_version s ON s.stop_version_id = rsv.stop_version_id
+                 JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
+                 WHERE sv.route_version_id = ?1
+                 ORDER BY rsv.direction, rsv.stop_sequence",
+            )?;
+            let rows = stmt
+                .query_map([st.old_rv], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, Option<i64>>(3)?,
+                        r.get::<_, String>(4)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+
+        let mut new_rsv_ids = Vec::new();
+        let mut i = 0;
+        while i < old_rows.len() {
+            let dir = old_rows[i].0;
+            let mut j = i;
+            while j < old_rows.len() && old_rows[j].0 == dir {
+                j += 1;
+            }
+            let seq: Vec<(i64, Option<i64>)> = old_rows[i..j].iter().map(|r| (r.2, r.3)).collect();
+            let codes: Vec<&str> = old_rows[i..j].iter().map(|r| r.4.as_str()).collect();
+            let attach = plan
+                .attachments
+                .iter()
+                .find(|a| a.route_id == st.route_id && a.direction == dir);
+            let new_svi = if attach.is_some() {
+                attach_svi
+                    .iter()
+                    .find(|(rid, d, _)| *rid == st.route_id && *d == dir)
+                    .map(|(_, _, svi)| *svi)
+            } else {
+                None
+            };
+            // splice position: after the referenced stop code; None = append
+            let insert_at: Option<usize> = match attach.map(|a| &a.insert_after_stop_code) {
+                None => None,
+                Some(None) => Some(seq.len()),
+                Some(Some(code)) => match codes.iter().position(|c| *c == code) {
+                    Some(p) => Some(p + 1),
+                    // the sequence moved on under the same version
+                    // (a pole rename repoints rsv rows) — refuse
+                    None => return Err(EditError::NotCurrent(st.old_rv).into()),
+                },
+            };
+            let mut rows_out: Vec<(i64, Option<i64>)> = Vec::with_capacity(seq.len() + 1);
+            for (k, (svi, order_no)) in seq.iter().enumerate() {
+                if let (Some(svi), Some(at)) = (new_svi, insert_at) {
+                    if at == k {
+                        rows_out.push((svi, None));
+                    }
+                }
+                rows_out.push((*svi, *order_no));
+            }
+            if let (Some(svi), Some(at)) = (new_svi, insert_at) {
+                if at >= seq.len() {
+                    rows_out.push((svi, None));
+                }
+            }
+            for (n, (svi, order_no)) in rows_out.iter().enumerate() {
+                let rsv_id = crate::mint(&tx, "route_stop_version")?;
+                tx.execute(
+                    "INSERT INTO route_stop_version
+                        (route_stop_version_id, subroute_version_id, stop_version_id,
+                         direction, stop_sequence, source_order_no, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![rsv_id, new_sv_id, svi, dir, (n + 1) as i64, order_no, now],
+                )?;
+                new_rsv_ids.push(rsv_id);
+            }
+            i = j;
+        }
+
+        applied_routes.push(json!({
+            "route_id": st.route_id,
+            "old_rv": st.old_rv,
+            "new_rv": new_rv,
+            "old_revision": st.old_revision,
+            "old_updated_at": st.old_updated_at,
+            "new_sv_id": new_sv_id,
+            "new_rsv_ids": new_rsv_ids,
+        }));
+        new_rv_of.push((st.route_id, new_rv));
+    }
+
+    // 5. the pointer move — the only UPDATE a re-versioning write makes
+    for (rid, new_rv) in &new_rv_of {
+        tx.execute(
+            "UPDATE route SET current_route_version_id = ?1, revision = revision + 1, updated_at = ?2
+             WHERE route_id = ?3",
+            params![new_rv, now, rid],
+        )?;
+    }
+
+    // 6. one tagged audit row (group_created == station_created: the group
+    // is minted only in the CreateNew verdict)
+    let changes = json!({
+        "kind": "stop_add",
+        "stop_id": stop_id,
+        "station_id": station_id,
+        "station_created": station_created,
+        "group_created": station_created,
+        "stop_version_ids": stop_version_ids,
+        "routes": applied_routes,
+    });
+    tx.execute(
+        "INSERT INTO edit_log (ts, editor, entity, entity_id, action, changes, note, version_before, version_after)
+         VALUES (?1, ?2, 'stop_add', ?3, 'add', ?4, ?5, NULL, NULL)",
+        params![
+            now,
+            editor,
+            stop_id,
+            changes.to_string(),
+            if note.is_empty() { None } else { Some(note) }
+        ],
+    )?;
+    let edit_id = tx.last_insert_rowid();
+
+    // 7. stale marks: the line datasets per attached (route, direction),
+    // then the position datasets per new pole version
+    for a in &plan.attachments {
+        mark_line_stale(&tx, a.route_id, a.direction, edit_id, &now)?;
+    }
+    for &svi in &stop_version_ids {
+        mark_position_stale(&tx, svi, edit_id, &now)?;
+    }
+    tx.commit()?;
+
+    let mut stale_routes: Vec<i64> = plan.attachments.iter().map(|a| a.route_id).collect();
+    stale_routes.sort_unstable();
+    stale_routes.dedup();
+    Ok(AddStopOutcome {
+        edit_id,
+        stop_id,
+        stop_version_ids,
+        station_id,
+        station_created,
+        stale_routes,
     })
 }
 
@@ -1056,5 +1426,407 @@ mod tests {
             }
         }
         out
+    }
+
+    // ---------- apply_add_stop ----------
+
+    /// plan_fixture + id_sequence seeds covering every table apply mints
+    /// (existing max + 1), and source_order_no on the current rsv rows so
+    /// the carry behavior is observable.
+    fn apply_fixture(conn: &Connection) {
+        plan_fixture(conn);
+        conn.execute_batch(
+            "INSERT INTO id_sequence (table_name, next_value) VALUES
+                 ('station_group', 2), ('station_group_version', 2),
+                 ('station', 2), ('station_version', 21),
+                 ('stop', 4), ('stop_version', 14),
+                 ('route_version', 3), ('subroute_version', 3),
+                 ('route_stop_version', 5);
+             UPDATE route_stop_version SET source_order_no = route_stop_version_id * 10
+                 WHERE route_stop_version_id <= 4;",
+        )
+        .unwrap();
+    }
+
+    /// The golden two-attach command: mid-insert on route 1 dir 0 (A → new
+    /// → B), append on route 2 dir 0 (C → new), sibling route 2 dir 1
+    /// re-minted untouched.
+    fn golden_cmd() -> AddStopCmd {
+        cmd(
+            "X",
+            24.1410,
+            120.6857,
+            vec![attach("1", 0, Some("001")), attach("2", 0, None)],
+        )
+    }
+
+    fn golden_plan(conn: &Connection) -> AddStopPlan {
+        plan_add_stop(conn, &golden_cmd()).unwrap()
+    }
+
+    #[test]
+    fn apply_mints_exact_key_sets_per_table() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let out = apply_add_stop(&conn, &golden_plan(&conn), "herry", "job").unwrap();
+        assert_eq!(out.stop_id, 4);
+        assert_eq!(out.stop_version_ids, vec![14, 15], "attachment order");
+        assert_eq!(out.station_id, 2);
+        assert!(out.station_created);
+
+        let ids = |t: &str, col: &str| -> Vec<i64> {
+            let mut stmt = conn
+                .prepare(&format!("SELECT {col} FROM {t} ORDER BY {col}"))
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        // the FULL key set per table — pre-existing rows keep their ids
+        assert_eq!(ids("stop", "stop_id"), vec![1, 2, 3, 4]);
+        assert_eq!(
+            ids("stop_version", "stop_version_id"),
+            vec![10, 11, 12, 13, 14, 15]
+        );
+        assert_eq!(ids("station", "station_id"), vec![1, 2]);
+        assert_eq!(ids("station_version", "station_version_id"), vec![20, 21]);
+        assert_eq!(ids("station_group", "station_group_id"), vec![1, 2]);
+        assert_eq!(
+            ids("station_group_version", "station_group_version_id"),
+            vec![1, 2]
+        );
+        assert_eq!(ids("route_version", "route_version_id"), vec![1, 2, 3, 4]);
+        assert_eq!(
+            ids("subroute_version", "subroute_version_id"),
+            vec![1, 2, 3, 4]
+        );
+        assert_eq!(
+            ids("route_stop_version", "route_stop_version_id"),
+            (1..=10).collect::<Vec<_>>()
+        );
+
+        // minted stop: manual ext_uid; one pole version per attachment with
+        // the M-code and the attachment's direction
+        let stop_ext: String = conn
+            .query_row("SELECT ext_uid FROM stop WHERE stop_id = 4", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(stop_ext, "manual:4");
+        let poles: Vec<(i64, i64, String, String, i64)> = conn
+            .prepare(
+                "SELECT stop_version_id, station_id, stop_code, stop_name, direction
+                 FROM stop_version WHERE stop_version_id >= 14 ORDER BY stop_version_id",
+            )
+            .unwrap()
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            poles,
+            vec![
+                (14, 2, "M4".into(), "X".into(), 0),
+                (15, 2, "M4".into(), "X".into(), 0),
+            ]
+        );
+
+        // new station chain: manual ext_uids; the group ext_uid is the
+        // inlined single-member rm_identity::group_ext_uid formula
+        let (st_ext, grp_ext): (String, String) = conn
+            .query_row(
+                "SELECT s.ext_uid, g.ext_uid FROM station s, station_group g
+                 WHERE s.station_id = 2 AND g.station_group_id = 2",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(st_ext, "manual:2");
+        assert_eq!(
+            grp_ext,
+            format!("tcg:grp:{}", rm_core::blake3_128_hex(b"manual:2"))
+        );
+        let (gname, gsource): (String, String) = conn
+            .query_row(
+                "SELECT station_group_name, source FROM station_group_version
+                 WHERE station_group_version_id = 2",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((gname.as_str(), gsource.as_str()), ("X", "manual"));
+        let (stname, stsource): (String, String) = conn
+            .query_row(
+                "SELECT station_name, source FROM station_version WHERE station_version_id = 21",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((stname.as_str(), stsource.as_str()), ("X", "manual"));
+
+        // route re-versioning: version_no = old max + 1, PUBLISHED, open end
+        let rvs: Vec<(i64, i64, i64, Option<String>, String)> = conn
+            .prepare(
+                "SELECT route_version_id, route_id, version_no, valid_to, status
+                 FROM route_version WHERE route_version_id >= 3 ORDER BY route_version_id",
+            )
+            .unwrap()
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rvs,
+            vec![
+                (3, 1, 2, None, "PUBLISHED".into()),
+                (4, 2, 2, None, "PUBLISHED".into()),
+            ]
+        );
+
+        // subroute_version: subroute_id resolved per route, name carried
+        let svs: Vec<(i64, i64, i64, String)> = conn
+            .prepare(
+                "SELECT subroute_version_id, route_version_id, subroute_id, subroute_name
+                 FROM subroute_version WHERE subroute_version_id >= 3
+                 ORDER BY subroute_version_id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(svs, vec![(3, 3, 1, "1".into()), (4, 4, 2, "2".into())]);
+
+        // route_stop_version: sequences renumbered, the inserted row NULL on
+        // source_order_no, re-minted rows carry it, sibling direction keeps
+        // its pole version (only rsv rows are new)
+        let rsvs: Vec<(i64, i64, i64, i64, i64, Option<i64>)> = conn
+            .prepare(
+                "SELECT route_stop_version_id, subroute_version_id, stop_version_id,
+                        direction, stop_sequence, source_order_no
+                 FROM route_stop_version WHERE route_stop_version_id >= 5
+                 ORDER BY route_stop_version_id",
+            )
+            .unwrap()
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rsvs,
+            vec![
+                (5, 3, 10, 0, 1, Some(10)),  // route 1 dir 0: A kept
+                (6, 3, 14, 0, 2, None),      // inserted after '001'
+                (7, 3, 11, 0, 3, Some(20)),  // B shifted +1, same pole version
+                (8, 4, 12, 0, 1, Some(30)),  // route 2 dir 0: C kept
+                (9, 4, 15, 0, 2, None),      // appended
+                (10, 4, 13, 1, 1, Some(40)), // sibling dir re-mint, same pole
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_moves_pointer_and_bumps_revision() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let out = apply_add_stop(&conn, &golden_plan(&conn), "herry", "").unwrap();
+        let ts: String = conn
+            .query_row(
+                "SELECT ts FROM edit_log WHERE edit_id = ?1",
+                [out.edit_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_ne!(ts, T0);
+        let rows: Vec<(i64, i64, i64, String)> = conn
+            .prepare("SELECT route_id, current_route_version_id, revision, updated_at FROM route ORDER BY route_id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, 3, 2, ts.clone()), // revision 1 -> 2, pointer 1 -> 3
+                (2, 4, 2, ts),         // revision 1 -> 2, pointer 2 -> 4
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_writes_one_tagged_edit_log_row() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let out = apply_add_stop(&conn, &golden_plan(&conn), "herry", "job").unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM edit_log", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        let (entity, entity_id, action, changes, note): (
+            String,
+            i64,
+            String,
+            String,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT entity, entity_id, action, changes, note FROM edit_log WHERE edit_id = ?1",
+                [out.edit_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (entity.as_str(), entity_id, action.as_str()),
+            ("stop_add", 4, "add")
+        );
+        assert_eq!(note.as_deref(), Some("job"));
+        let v: serde_json::Value = serde_json::from_str(&changes).unwrap();
+        let mut top: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        top.sort_unstable();
+        assert_eq!(
+            top,
+            vec![
+                "group_created",
+                "kind",
+                "routes",
+                "station_created",
+                "station_id",
+                "stop_id",
+                "stop_version_ids",
+            ]
+        );
+        assert_eq!(v["kind"], "stop_add");
+        assert_eq!(v["stop_id"], 4);
+        assert_eq!(v["station_id"], 2);
+        assert_eq!(v["station_created"], true);
+        assert_eq!(v["group_created"], true);
+        assert_eq!(v["stop_version_ids"], serde_json::json!([14, 15]));
+        let routes = v["routes"].as_array().unwrap();
+        assert_eq!(routes.len(), 2);
+        let mut route_keys: Vec<&str> = routes[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        route_keys.sort_unstable();
+        assert_eq!(
+            route_keys,
+            vec![
+                "new_rsv_ids",
+                "new_rv",
+                "new_sv_id",
+                "old_revision",
+                "old_rv",
+                "old_updated_at",
+                "route_id",
+            ]
+        );
+        assert_eq!(
+            v["routes"],
+            serde_json::json!([
+                {"route_id": 1, "old_rv": 1, "new_rv": 3, "old_revision": 1,
+                 "old_updated_at": T0, "new_sv_id": 3, "new_rsv_ids": [5, 6, 7]},
+                {"route_id": 2, "old_rv": 2, "new_rv": 4, "old_revision": 1,
+                 "old_updated_at": T0, "new_sv_id": 4, "new_rsv_ids": [8, 9, 10]},
+            ])
+        );
+    }
+
+    #[test]
+    fn apply_marks_line_and_position_stale() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let out = apply_add_stop(&conn, &golden_plan(&conn), "herry", "").unwrap();
+        let rows: Vec<(String, String, i64)> = conn
+            .prepare(
+                "SELECT table_name, key, cause_edit_id FROM stale_mark ORDER BY table_name, key",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("path_stop_projection".into(), "1".into(), out.edit_id),
+                ("path_stop_projection".into(), "2".into(), out.edit_id),
+                ("seg_match".into(), "1:0".into(), out.edit_id),
+                ("seg_match".into(), "2:0".into(), out.edit_id),
+                ("station_bearing".into(), "*".into(), out.edit_id),
+                ("stop_bearing".into(), "*".into(), out.edit_id),
+            ]
+        );
+        assert_eq!(out.stale_routes, vec![1, 2]);
+    }
+
+    #[test]
+    fn apply_rejects_when_route_moved_between_plan_and_apply() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let plan = plan_add_stop(
+            &conn,
+            &cmd("X", 24.1410, 120.6857, vec![attach("1", 0, Some("001"))]),
+        )
+        .unwrap();
+        // publish-style pointer move between plan and apply
+        conn.execute(
+            "INSERT INTO route_version
+                (route_version_id, route_id, version_no, valid_from, valid_to, status, created_at, published_at)
+             VALUES (3, 1, 2, '2026-01-02T00:00:00Z', NULL, 'PUBLISHED',
+                     '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE route SET current_route_version_id = 3 WHERE route_id = 1",
+            [],
+        )
+        .unwrap();
+        let before = dump(&conn);
+        let err = apply_add_stop(&conn, &plan, "herry", "").unwrap_err();
+        match err.downcast_ref::<EditError>() {
+            Some(EditError::NotCurrent(old)) => assert_eq!(*old, 1, "carries the planned old rv"),
+            other => panic!("expected NotCurrent, got {other:?}"),
+        }
+        assert_eq!(dump(&conn), before, "rejected apply writes nothing");
+    }
+
+    #[test]
+    fn apply_rejection_leaves_db_byte_identical() {
+        let conn = open_in_memory().unwrap();
+        apply_fixture(&conn);
+        let before = dump(&conn);
+        let err = add_stop(
+            &conn,
+            cmd("X", 24.1410, 120.6857, vec![attach("1", 0, Some("ZZZ"))]),
+            "herry",
+            "job",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                err.downcast_ref::<EditError>(),
+                Some(EditError::UnknownAfterStop(_, _, _))
+            ),
+            "{err}"
+        );
+        assert_eq!(dump(&conn), before, "zero partial write");
     }
 }
