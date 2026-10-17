@@ -65,9 +65,9 @@ fn fixture_db() -> (tempfile::TempDir, PathBuf) {
 fn add_stop_cli(name: &str, attaches: &[&str], db: &Path, apply: bool) -> Cli {
     Cli {
         command: Command::AddStop {
-            name: name.to_string(),
-            lat: 24.1405,
-            lon: 120.6857,
+            name: Some(name.to_string()),
+            lat: Some(24.1405),
+            lon: Some(120.6857),
             attach: attaches.iter().map(|s| s.to_string()).collect(),
             station: None,
             db: db.to_path_buf(),
@@ -82,7 +82,7 @@ fn add_stop_cli(name: &str, attaches: &[&str], db: &Path, apply: bool) -> Cli {
 fn undo_cli(edit_id: i64, db: &Path) -> Cli {
     Cli {
         command: Command::Undo {
-            edit_id,
+            edit_id: Some(edit_id),
             db: db.to_path_buf(),
             editor: "test".to_string(),
             json: None,
@@ -290,9 +290,10 @@ fn add_stop_json_payload_matches_flags() {
     );
     let cli = Cli {
         command: Command::AddStop {
-            name: String::new(),
-            lat: 0.0,
-            lon: 0.0,
+            // payload-only: what clap sees when no flags are given
+            name: None,
+            lat: None,
+            lon: None,
             attach: vec![],
             station: None,
             db: db.clone(),
@@ -308,6 +309,45 @@ fn add_stop_json_payload_matches_flags() {
         .as_str()
         .unwrap()
         .contains("create new station"));
+}
+
+#[test]
+fn invalid_json_payload_is_rejected() {
+    // fresh path: the parse must fail before rm_db::open creates the db
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("t.db");
+    let cli = Cli {
+        command: Command::AddStop {
+            name: None,
+            lat: None,
+            lon: None,
+            attach: vec![],
+            station: None,
+            db: db.clone(),
+            editor: String::new(),
+            note: None,
+            apply: false,
+            json: Some("{oops".into()),
+        },
+    };
+    let (code, report) = run(cli);
+    assert_eq!(code, 1, "{}{}", report.out, report.err);
+    let v = envelope_of(&report);
+    assert_eq!(v["status"], "rejected");
+    assert!(
+        v["data"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("invalid --json payload"),
+        "{}",
+        report.out
+    );
+    assert!(
+        report.err.contains("invalid --json payload"),
+        "{}",
+        report.err
+    );
+    assert!(!db.exists(), "rejected payload must not create the db");
 }
 
 #[test]

@@ -37,9 +37,9 @@ AGENT USAGE:
   rm-job schema
   rm-job schema add-stop
 
-  # 2. Execute with the discovered schema (--json payload wins; clap still
-  #    requires the flags to parse, their values are ignored)
-  rm-job add-stop X --lat 24.14 --lon 120.69 --json '{\"name\":\"X\",\"lat\":24.14,\"lon\":120.69,\"attach\":[\"1:0\"],\"db\":\"data/taichung.db\"}'
+  # 2. Execute with the discovered schema (payload-only; the legacy flags
+  #    remain and are ignored when --json is given)
+  rm-job add-stop --json '{\"name\":\"X\",\"lat\":24.14,\"lon\":120.69,\"attach\":[\"1:0\"],\"db\":\"data/taichung.db\"}'
 
   # 3. Check exit code, parse stdout
   # exit 0 ok, 1 rejected, 2 no-op; stdout is exactly one envelope JSON:
@@ -62,13 +62,14 @@ pub enum Command {
     /// Add a stop and attach it to route directions (dry run unless --apply).
     AddStop {
         /// New pole's name
-        name: String,
+        #[arg(required_unless_present = "json")]
+        name: Option<String>,
         /// Latitude
-        #[arg(long)]
-        lat: f64,
+        #[arg(long, required_unless_present = "json")]
+        lat: Option<f64>,
         /// Longitude
-        #[arg(long)]
-        lon: f64,
+        #[arg(long, required_unless_present = "json")]
+        lon: Option<f64>,
         /// Attachment as XNO:DIR[@CODE] — @CODE inserts after that stop,
         /// absent appends. Repeatable.
         #[arg(long)]
@@ -96,7 +97,8 @@ pub enum Command {
     /// Undo a job edit by its edit_log id.
     Undo {
         /// The edit_log id to undo (printed by --apply)
-        edit_id: i64,
+        #[arg(required_unless_present = "json")]
+        edit_id: Option<i64>,
         /// SQLite DB path
         #[arg(long, default_value = "data/taichung.db")]
         db: PathBuf,
@@ -209,9 +211,11 @@ fn dispatch(cli: Cli) -> (&'static str, Outcome) {
                     }
                 },
                 None => params::AddStopParams {
-                    name,
-                    lat,
-                    lon,
+                    // clap requires these unless --json is present, so the
+                    // fallbacks below are unreachable from the real CLI
+                    name: name.unwrap_or_default(),
+                    lat: lat.unwrap_or(0.0),
+                    lon: lon.unwrap_or(0.0),
                     attach,
                     station,
                     db: db.display().to_string(),
@@ -236,7 +240,8 @@ fn dispatch(cli: Cli) -> (&'static str, Outcome) {
                     }
                 },
                 None => params::UndoParams {
-                    edit_id,
+                    // clap requires edit_id unless --json is present
+                    edit_id: edit_id.unwrap_or(0),
                     db: db.display().to_string(),
                     editor,
                 },
