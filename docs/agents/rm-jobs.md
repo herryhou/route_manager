@@ -42,7 +42,8 @@ direction):
   on that direction; downstream stops re-version.
 - Repeat the flag to land one stop on several directions in a single job.
 
-Coordinates come from the user: right-clicking the rm-web map copies
+Coordinates come from the user: right-clicking the rm-web map opens a small
+menu — 「複製座標 <lat>, <lon>」 — and clicking the menu item copies
 `<lat>, <lon>` (six decimals) to the clipboard. Ask the user to copy the
 spot and paste the coordinates — never invent or look them up.
 

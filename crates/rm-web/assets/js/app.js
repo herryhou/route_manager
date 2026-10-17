@@ -19,9 +19,38 @@ export const map = L.map('map', { preferCanvas: true }).fitBounds(
   { padding: [24, 24] },
 );
 
-// contextmenu → clipboard coordinates for the rm-job workflow (docs/agents/rm-jobs.md).
+// contextmenu → copy-coords menu for the rm-job workflow (docs/agents/rm-jobs.md).
+// The menu is a map-floater: opens at the pointer, one item copies "<lat>, <lon>".
+const coordsMenu = document.createElement('div');
+coordsMenu.className = 'coords-menu';
+coordsMenu.hidden = true;
+document.body.appendChild(coordsMenu);
+
+function closeCoordsMenu() {
+  coordsMenu.hidden = true;
+}
+
 map.on('contextmenu', (e) => {
-  navigator.clipboard?.writeText(`${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`);
+  e.originalEvent.preventDefault();
+  closeCoordsMenu();
+  const text = `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'coords-menu-item';
+  item.textContent = `複製座標  ${text}`;
+  item.addEventListener('click', () => {
+    navigator.clipboard?.writeText(text);
+    closeCoordsMenu();
+  });
+  coordsMenu.replaceChildren(item);
+  coordsMenu.style.left = `${e.originalEvent.clientX}px`;
+  coordsMenu.style.top = `${e.originalEvent.clientY}px`;
+  coordsMenu.hidden = false;
+});
+
+map.on('click mousedown', closeCoordsMenu);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeCoordsMenu();
 });
 
 // Basemap: MapLibre GL renders the osm-liberty style into a Leaflet tile

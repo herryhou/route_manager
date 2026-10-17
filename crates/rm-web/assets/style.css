@@ -1245,3 +1245,35 @@ table.kv td:first-child {
     transition: none;
   }
 }
+
+/* Copy-coords context menu — a map-floater opened by right-click on the map
+   (docs/agents/rm-jobs.md). Plate surface, hairline edge, --lift is allowed
+   on map-floaters. */
+.coords-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 120px;
+  padding: 4px;
+  background: var(--plate-bright);
+  border: 1px solid var(--hair);
+  border-radius: var(--control);
+  box-shadow: var(--lift);
+}
+
+.coords-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--small);
+  background: none;
+  color: var(--ink);
+  font: 500 13px/1.4 var(--font);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.coords-menu-item:hover {
+  background: var(--enamel-soft);
+}
