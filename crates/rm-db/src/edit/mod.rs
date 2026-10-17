@@ -9,8 +9,9 @@ mod station_undo;
 mod stop;
 
 pub use add_stop::{
-    qualify_station, AddStopCmd, AttachCmd, Qualification, StationCandidate,
-    QUALIFY_BEARING_TOL_DEG, QUALIFY_MAX_DIST_M,
+    plan_add_stop, qualify_station, AddStopCmd, AddStopPlan, AttachCmd, PlannedAttach,
+    Qualification, RowCounts, StationCandidate, StationVerdict, QUALIFY_BEARING_TOL_DEG,
+    QUALIFY_MAX_DIST_M,
 };
 pub use line::{edit_polyline_line, undo_polyline_line, LineEditCmd};
 pub use matched_path::{bearing_at, matched_path, project_onto_path, OFF_PATH_MAX_M};
@@ -51,6 +52,19 @@ pub enum EditError {
     EmptyNewName,
     #[error("new station name equals the current name")]
     NoOpRename,
+    #[error("route {0} has no direction {1} on its current version")]
+    UnknownDirection(String, i64),
+    #[error("route {0} direction {1} has no stop {2}")]
+    UnknownAfterStop(String, i64, String),
+    #[error("route {xno} direction {direction}: stop is {dist_m:.0} m off the matched path (max {max_m:.0} m)")]
+    OffPathStop {
+        xno: String,
+        direction: i64,
+        dist_m: f64,
+        max_m: f64,
+    },
+    #[error("duplicate attachment for route {0} direction {1}")]
+    DuplicateAttach(String, i64),
 }
 
 #[derive(Debug)]
