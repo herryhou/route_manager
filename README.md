@@ -144,7 +144,7 @@ so the basemap draws offline but labels need the network. The adapter
 only mirrors Leaflet's viewport into GL — it never zooms or pans on its
 own (CLAUDE.md whitelist holds).
 
-![rm-web browsing a Taipei route — path, bearings, stop popup with 經過路線 chips, on-map legend](assets/screenshot.jpg)
+![rm-web browsing a Taipei route — path, bearings, stop popup with 經過路線 chips, on-map legend](assets/screenshot.png)
 
 See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
 
