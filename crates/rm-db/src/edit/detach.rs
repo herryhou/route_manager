@@ -122,13 +122,14 @@ fn count_other_directions(
 /// Verdicts: `pole_orphan` counts the pole's remaining references — this
 /// direction's surviving occurrences plus every other current (route,
 /// direction) serving it across ALL routes; `serving_directions` lists
-/// this route's serving directions. Warnings: a detached first/last stop
-/// notes the neighbors' sequence shift; `--delete-pole` on a NON-orphan
-/// pole warns the flag deletes nothing yet still stamps the whole edit
-/// one-way (Decision 8); `--delete-pole` on an orphan whose versions
-/// survive on OTHER routes' chains warns how many foreign
-/// `route_stop_version` rows (and which routes) the one-way teardown
-/// deletes.
+/// this route's serving directions. Warnings: every `--delete-pole` plan
+/// carries the one-way warning (Decision 8) — on a NON-orphan pole it also
+/// says the flag deletes nothing (the pole still serves elsewhere), on an
+/// orphan that the pole itself goes; `--delete-pole` on an orphan whose
+/// versions survive on OTHER routes' chains additionally warns how many
+/// foreign `route_stop_version` rows (and which routes) the one-way
+/// teardown deletes; a detached first/last stop notes the neighbors'
+/// sequence shift.
 pub fn plan_detach_stop(conn: &Connection, cmd: &DetachCmd) -> Result<DetachPlan> {
     let (route_id, route_version_id): (i64, Option<i64>) = match conn.query_row(
         "SELECT route_id, current_route_version_id FROM route WHERE ext_uid = ?1",
@@ -264,15 +265,24 @@ pub fn plan_detach_stop(conn: &Connection, cmd: &DetachCmd) -> Result<DetachPlan
     // warnings: a detached first/last stop shifts its neighbors
     let mut warnings = Vec::new();
 
-    // --delete-pole on a non-orphan pole deletes nothing (the pole still
-    // serves elsewhere), but Decision 8 stamps the WHOLE edit one-way —
-    // say so before the user commits to it
-    if cmd.delete_pole && !pole_orphan {
-        warnings.push(format!(
-            "delete_pole has no effect — stop '{}' still serves other directions \
-             — but the edit carrying it is one-way (not undoable)",
-            cmd.stop_code
-        ));
+    // Decision 8: ANY edit carrying --delete-pole is one-way as a whole —
+    // every delete_pole plan says so, orphan or not. On a non-orphan pole
+    // the flag also deletes nothing (the pole still serves elsewhere); on
+    // an orphan the pole itself goes (the sweep below names foreign
+    // history separately)
+    if cmd.delete_pole {
+        if pole_orphan {
+            warnings.push(format!(
+                "delete_pole tears the orphaned pole '{}' down — one-way (not undoable)",
+                cmd.stop_code
+            ));
+        } else {
+            warnings.push(format!(
+                "delete_pole has no effect — stop '{}' still serves other directions \
+                 — but the edit carrying it is one-way (not undoable)",
+                cmd.stop_code
+            ));
+        }
     }
 
     // the one-way teardown sweeps EVERY chain holding the pole's versions
@@ -1514,6 +1524,15 @@ mod tests {
             "{sweep}"
         );
         assert!(sweep.contains("[2]"), "{sweep}");
+        // Decision 8: the one-way warning rides EVERY delete_pole plan —
+        // the orphan case included, alongside the sweep warning
+        assert!(
+            p.warnings
+                .iter()
+                .any(|w| w.contains("one-way") && w.contains("not undoable")),
+            "{:?}",
+            p.warnings
+        );
         // what the warning promised comes true: route 2's superseded-chain
         // row rsv 71 (→ pole D) is swept; its own current row rsv 72, the
         // chain headers, and the untouched pole A survive

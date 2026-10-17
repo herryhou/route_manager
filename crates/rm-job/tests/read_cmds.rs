@@ -464,13 +464,12 @@ fn remove_stop_dry_run_reports_plan_then_apply_roundtrips() {
     );
 }
 
-/// The one-way `--delete-pole` warning must reach the envelope: dry run
-/// with the flag on a pole still served by another direction (the merged
-/// primitive's warning fires exactly there) — status ok, never a write.
+/// The one-way `--delete-pole` warning must reach the envelope on the real
+/// one-way case: an orphan-pole stop (the fixture's only stop, served by
+/// dir 0 alone). Dry run — status ok, never a write.
 #[test]
 fn remove_stop_dry_run_warns_one_way_delete_pole() {
     let (_dir, db) = fixture_db();
-    seed_second_direction(&db);
     let b0 = dump_at(&db, &[]);
     let (code, report) = run_remove_stop(
         &db,
@@ -479,7 +478,7 @@ fn remove_stop_dry_run_warns_one_way_delete_pole() {
     assert_eq!(code, 0, "{}", report.out);
     assert_eq!(dump_at(&db, &[]), b0, "dry run must not write");
     let d = envelope_of(&report)["data"].clone();
-    assert_eq!(d["pole_orphan"], false, "{}", report.out);
+    assert_eq!(d["pole_orphan"], true, "{}", report.out);
     assert!(
         d["warnings"].as_array().unwrap().iter().any(|w| w
             .as_str()
