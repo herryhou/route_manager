@@ -426,11 +426,13 @@ pub fn stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> 
          FROM route_stop_version rsv
          JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
          JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         JOIN route r ON r.route_id = rv.route_id
          JOIN stop_version sv2 ON sv2.stop_version_id = rsv.stop_version_id
          LEFT JOIN path_stop_projection p
            ON p.route_stop_version_id = rsv.route_stop_version_id
          LEFT JOIN stop_bearing sb ON sb.stop_version_id = sv2.stop_version_id
-         WHERE rv.route_id = ?1 AND rsv.direction = ?2
+         WHERE r.route_id = ?1 AND r.current_route_version_id = rv.route_version_id
+           AND rsv.direction = ?2
          ORDER BY rsv.stop_sequence",
     )?;
     let stops = stmt
@@ -705,4 +707,105 @@ pub fn raw(conn: &Connection, route_id: i64, dir: i64) -> Result<Option<Value>> 
             updated_at: eff_updated_at,
         },
     })?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TS: &str = "2026-01-01T00:00:00Z";
+
+    /// Route 1 with two route_version chains — rm-job applies mint a new
+    /// chain (rv 2) and keep the old rows (rv 1), so a query filtered on
+    /// route_id alone merges superseded chains into the sequence.
+    fn two_chain_fixture(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO station (station_id, ext_uid, created_at) VALUES (1, 'tcg:node:1', ?1)",
+            [TS],
+        )
+        .unwrap();
+        for stop_id in [1, 2] {
+            conn.execute(
+                "INSERT INTO stop (stop_id, ext_uid, created_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![stop_id, format!("tcg:node:{stop_id}"), TS],
+            )
+            .unwrap();
+        }
+        // Chain A (superseded): stop_versions 10/11; chain B (current): 20/21.
+        for (sv_id, stop_id, code) in [(10, 1, "A1"), (11, 2, "A2"), (20, 1, "B1"), (21, 2, "B2")] {
+            conn.execute(
+                "INSERT INTO stop_version (stop_version_id, stop_id, station_id, stop_code,
+                                           stop_name, direction, latitude, longitude,
+                                           valid_from, created_at)
+                 VALUES (?1, ?2, 1, ?3, 'S', 0, 24.0, 120.0, ?4, ?4)",
+                rusqlite::params![sv_id, stop_id, code, TS],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO route (route_id, route_code, ext_uid, created_at, updated_at)
+             VALUES (1, '1', 'tcg:1', ?1, ?1)",
+            [TS],
+        )
+        .unwrap();
+        for (rv_id, vno, status) in [(1, 1, "SUPERSEDED"), (2, 2, "PUBLISHED")] {
+            conn.execute(
+                "INSERT INTO route_version (route_version_id, route_id, version_no,
+                                             valid_from, status, created_at)
+                 VALUES (?1, 1, ?2, ?3, ?4, ?3)",
+                rusqlite::params![rv_id, vno, TS, status],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "UPDATE route SET current_route_version_id = 2 WHERE route_id = 1",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO subroute (subroute_id, route_id, subroute_code, created_at)
+             VALUES (1, 1, '1-0', ?1)",
+            [TS],
+        )
+        .unwrap();
+        for (sv_id, rv_id) in [(1, 1), (2, 2)] {
+            conn.execute(
+                "INSERT INTO subroute_version (subroute_version_id, route_version_id,
+                                                subroute_id, subroute_name, created_at)
+                 VALUES (?1, ?2, 1, '1', ?3)",
+                rusqlite::params![sv_id, rv_id, TS],
+            )
+            .unwrap();
+        }
+        for (rsv_id, sv_id, stop_version_id, seq) in
+            [(1, 1, 10, 1), (2, 1, 11, 2), (3, 2, 20, 1), (4, 2, 21, 2)]
+        {
+            conn.execute(
+                "INSERT INTO route_stop_version (route_stop_version_id, subroute_version_id,
+                                                  stop_version_id, direction, stop_sequence, created_at)
+                 VALUES (?1, ?2, ?3, 0, ?4, ?5)",
+                rusqlite::params![rsv_id, sv_id, stop_version_id, seq, TS],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn stops_returns_only_the_current_route_version_chain() {
+        let conn = rm_db::open_in_memory().unwrap();
+        two_chain_fixture(&conn);
+
+        let out = stops(&conn, 1, 0).unwrap();
+        let codes: Vec<&str> = out["stops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["stop_code"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            codes,
+            ["B1", "B2"],
+            "superseded chain A rows must not merge in"
+        );
+    }
 }
