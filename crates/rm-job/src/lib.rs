@@ -7,6 +7,7 @@
 
 pub mod envelope;
 pub mod params;
+pub mod queries;
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -110,6 +111,57 @@ pub enum Command {
         #[arg(long)]
         json: Option<String>,
     },
+    /// Find current stops on one route by name substring or exact code
+    /// (read-only).
+    FindStop {
+        /// Route XNO to search within
+        #[arg(required_unless_present = "json")]
+        xno: Option<String>,
+        /// Stop-name substring (matched with SQL LIKE %q%)
+        #[arg(long)]
+        name: Option<String>,
+        /// Exact stop code
+        #[arg(long)]
+        code: Option<String>,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// find-stop`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
+    /// One route's current stops per direction and per-direction path state
+    /// (read-only).
+    ShowRoute {
+        /// Route XNO
+        #[arg(required_unless_present = "json")]
+        xno: Option<String>,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// show-route`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
+    /// One route direction's effective polyline: source, encoded, endpoints
+    /// (read-only).
+    ShowPath {
+        /// Route XNO
+        #[arg(required_unless_present = "json")]
+        xno: Option<String>,
+        /// Direction (0 = outbound, 1 = inbound)
+        #[arg(required_unless_present = "json")]
+        direction: Option<i64>,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// show-path`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
     /// Print command schemas: every command, or one --json payload schema.
     Schema {
         /// The command to describe (omit: list every command)
@@ -147,8 +199,8 @@ pub fn parse_attach(s: &str) -> Result<AttachCmd, String> {
 
 /// What one command concluded; `run` maps it to the envelope and exit code.
 enum Outcome {
-    /// Success — the command's `data` payload.
-    Ok(serde_json::Value),
+    /// Success — the command's `data` payload plus any progress logs.
+    Ok(serde_json::Value, Vec<String>),
     /// Rejected — human reason for stderr and `data.reason`; exit 1.
     Rejected(String),
     /// No-op — human reason for stderr and `data.reason`; exit 2.
@@ -162,7 +214,11 @@ pub fn run(cli: Cli) -> (i32, Report) {
     let started = Instant::now();
     let (command, outcome) = dispatch(cli);
     let (mut env, code) = match &outcome {
-        Outcome::Ok(data) => (envelope::ok(command, data.clone()), 0),
+        Outcome::Ok(data, logs) => {
+            let mut e = envelope::ok(command, data.clone());
+            e.logs = logs.clone();
+            (e, 0)
+        }
         Outcome::Rejected(reason) => envelope::rejected(command, reason),
         Outcome::Noop(reason) => envelope::noop(command, reason),
     };
@@ -172,7 +228,7 @@ pub fn run(cli: Cli) -> (i32, Report) {
         ..Report::default()
     };
     match &outcome {
-        Outcome::Ok(_) => {}
+        Outcome::Ok(..) => {}
         Outcome::Rejected(reason) => {
             let _ = writeln!(report.err, "rejected: {reason}");
         }
@@ -248,10 +304,81 @@ fn dispatch(cli: Cli) -> (&'static str, Outcome) {
             };
             undo_job(p)
         }
+        Command::FindStop {
+            xno,
+            name,
+            code,
+            db,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::FindStopParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "find-stop",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::FindStopParams {
+                    // clap requires xno unless --json is present
+                    xno: xno.unwrap_or_default(),
+                    name,
+                    code,
+                    db: db.display().to_string(),
+                },
+            };
+            find_stop_job(p)
+        }
+        Command::ShowRoute { xno, db, json } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::ShowRouteParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "show-route",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::ShowRouteParams {
+                    // clap requires xno unless --json is present
+                    xno: xno.unwrap_or_default(),
+                    db: db.display().to_string(),
+                },
+            };
+            show_route_job(p)
+        }
+        Command::ShowPath {
+            xno,
+            direction,
+            db,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::ShowPathParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "show-path",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::ShowPathParams {
+                    // clap requires xno and direction unless --json is present
+                    xno: xno.unwrap_or_default(),
+                    direction: direction.unwrap_or(0),
+                    db: db.display().to_string(),
+                },
+            };
+            show_path_job(p)
+        }
         Command::Schema { command } => match command.as_deref() {
-            None => ("schema", Outcome::Ok(schema_list())),
+            None => ("schema", Outcome::Ok(schema_list(), Vec::new())),
             Some(name) => match schema_for(name) {
-                Some(data) => ("schema", Outcome::Ok(data)),
+                Some(data) => ("schema", Outcome::Ok(data, Vec::new())),
                 None => (
                     "schema",
                     Outcome::Rejected(format!(
@@ -304,7 +431,7 @@ fn add_stop_job(p: params::AddStopParams) -> (&'static str, Outcome) {
     }
     (
         "add-stop",
-        Outcome::Ok(serde_json::json!({ "report": out })),
+        Outcome::Ok(serde_json::json!({ "report": out }), Vec::new()),
     )
 }
 
@@ -319,7 +446,71 @@ fn undo_job(p: params::UndoParams) -> (&'static str, Outcome) {
         Ok(o) => write_undo(&mut out, p.edit_id, &o),
         Err(e) => return ("undo", Outcome::Rejected(format!("{e:#}"))),
     }
-    ("undo", Outcome::Ok(serde_json::json!({ "report": out })))
+    (
+        "undo",
+        Outcome::Ok(serde_json::json!({ "report": out }), Vec::new()),
+    )
+}
+
+/// The find-stop job over one resolved payload: read-only, no side effects.
+fn find_stop_job(p: params::FindStopParams) -> (&'static str, Outcome) {
+    let conn = match rm_db::open_readonly(&PathBuf::from(&p.db)) {
+        Ok(c) => c,
+        Err(e) => return ("find-stop", Outcome::Rejected(format!("{e:#}"))),
+    };
+    match queries::find_stop(&conn, &p.xno, p.name.as_deref(), p.code.as_deref()) {
+        Ok(candidates) => (
+            "find-stop",
+            Outcome::Ok(serde_json::json!({ "candidates": candidates }), Vec::new()),
+        ),
+        Err(e) => ("find-stop", Outcome::Rejected(format!("{e:#}"))),
+    }
+}
+
+/// The show-route job over one resolved payload: read-only, no side effects.
+fn show_route_job(p: params::ShowRouteParams) -> (&'static str, Outcome) {
+    let conn = match rm_db::open_readonly(&PathBuf::from(&p.db)) {
+        Ok(c) => c,
+        Err(e) => return ("show-route", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let mut logs = Vec::new();
+    match queries::show_route(&conn, &p.xno, &mut logs) {
+        Ok(Some(v)) => (
+            "show-route",
+            Outcome::Ok(
+                serde_json::to_value(v).expect("overview always serializes"),
+                logs,
+            ),
+        ),
+        Ok(None) => (
+            "show-route",
+            Outcome::Rejected(format!("route '{}' does not exist", p.xno)),
+        ),
+        Err(e) => ("show-route", Outcome::Rejected(format!("{e:#}"))),
+    }
+}
+
+/// The show-path job over one resolved payload: read-only, no side effects.
+fn show_path_job(p: params::ShowPathParams) -> (&'static str, Outcome) {
+    let conn = match rm_db::open_readonly(&PathBuf::from(&p.db)) {
+        Ok(c) => c,
+        Err(e) => return ("show-path", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let mut logs = Vec::new();
+    match queries::show_path(&conn, &p.xno, p.direction, &mut logs) {
+        Ok(Some(v)) => (
+            "show-path",
+            Outcome::Ok(
+                serde_json::to_value(v).expect("overview always serializes"),
+                logs,
+            ),
+        ),
+        Ok(None) => (
+            "show-path",
+            Outcome::Rejected(format!("route '{}' does not exist", p.xno)),
+        ),
+        Err(e) => ("show-path", Outcome::Rejected(format!("{e:#}"))),
+    }
 }
 
 /// The `schema` command's list form: every command with its description.
@@ -333,6 +524,18 @@ pub fn schema_list() -> serde_json::Value {
             {
                 "name": "undo",
                 "description": "Undo a job edit by its edit_log id.",
+            },
+            {
+                "name": "find-stop",
+                "description": "Find current stops on one route by name substring or exact code (read-only).",
+            },
+            {
+                "name": "show-route",
+                "description": "One route's current stops per direction and per-direction path state (read-only).",
+            },
+            {
+                "name": "show-path",
+                "description": "One route direction's effective polyline: source, encoded, endpoints (read-only).",
             },
             {
                 "name": "schema",
@@ -352,6 +555,18 @@ pub fn schema_for(name: &str) -> Option<serde_json::Value> {
         "undo" => Some(serde_json::json!({
             "command": name,
             "schema": schemars::schema_for!(params::UndoParams),
+        })),
+        "find-stop" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::FindStopParams),
+        })),
+        "show-route" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::ShowRouteParams),
+        })),
+        "show-path" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::ShowPathParams),
         })),
         _ => None,
     }

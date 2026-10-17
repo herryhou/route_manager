@@ -37,6 +37,41 @@ pub struct AddStopParams {
     pub apply: bool,
 }
 
+/// `rm-job find-stop --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindStopParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Route XNO to search within
+    pub xno: String,
+    /// Stop-name substring (matched with SQL LIKE %q%)
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Exact stop code
+    #[serde(default)]
+    pub code: Option<String>,
+}
+
+/// `rm-job show-route --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ShowRouteParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Route XNO
+    pub xno: String,
+}
+
+/// `rm-job show-path --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ShowPathParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Route XNO
+    pub xno: String,
+    /// Direction (0 = outbound, 1 = inbound)
+    pub direction: i64,
+}
+
 /// `rm-job undo --json '...'`
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UndoParams {
