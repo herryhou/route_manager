@@ -4006,7 +4006,7 @@
                 ]
             ],
             "layout": {
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Condensed Italic"
                 ],
@@ -4047,7 +4047,7 @@
                 ]
             ],
             "layout": {
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Regular"
                 ],
@@ -4100,7 +4100,7 @@
                     ]
                 },
                 "text-anchor": "bottom",
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Regular"
                 ],
@@ -4134,7 +4134,7 @@
             "type": "symbol",
             "source": "openmaptiles",
             "source-layer": "place",
-            "minzoom": 5,
+            "minzoom": 1,
             "filter": [
                 "all",
                 [
@@ -4158,7 +4158,7 @@
                     ]
                 },
                 "text-anchor": "bottom",
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Medium"
                 ],
@@ -4204,7 +4204,7 @@
                 ]
             ],
             "layout": {
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Condensed Italic"
                 ],
@@ -4247,7 +4247,7 @@
                 ]
             ],
             "layout": {
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Condensed Italic"
                 ],
@@ -4292,7 +4292,7 @@
                 ]
             ],
             "layout": {
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Condensed Italic"
                 ],
@@ -4337,7 +4337,7 @@
                 ]
             ],
             "layout": {
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Condensed Italic"
                 ],
@@ -4378,7 +4378,7 @@
                 ]
             ],
             "layout": {
-                "text-field": "{name_en}",
+                "text-field": "{name}",
                 "text-font": [
                     "Roboto Condensed Italic"
                 ],
