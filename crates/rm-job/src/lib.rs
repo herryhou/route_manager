@@ -827,6 +827,15 @@ fn write_undo(out: &mut String, undone: i64, o: &UndoOutcome) {
                 "undo ok: edit {undone} reverted — stop_add rows deleted (audit edit_id {edit_id})"
             );
         }
+        UndoOutcome::StopDetach {
+            edit_id,
+            restored_route_version_id,
+        } => {
+            let _ = writeln!(
+                out,
+                "undo ok: edit {undone} reverted — route version {restored_route_version_id} restored (audit edit_id {edit_id})"
+            );
+        }
         UndoOutcome::Stop {
             edit_id,
             restored_version_id,

@@ -1,6 +1,7 @@
 //! Manual edit primitive: version-append edits + audit + staleness marks.
 
 mod add_stop;
+mod detach;
 mod line;
 mod matched_path;
 mod station_move;
@@ -12,6 +13,10 @@ pub use add_stop::{
     add_stop, apply_add_stop, plan_add_stop, qualify_station, undo_stop_add, AddStopCmd,
     AddStopOutcome, AddStopPlan, AttachCmd, PlannedAttach, Qualification, RowCounts,
     StationCandidate, StationVerdict, QUALIFY_BEARING_TOL_DEG, QUALIFY_MAX_DIST_M,
+};
+pub use detach::{
+    apply_detach_stop, detach_stop, plan_detach_stop, undo_detach_stop, DetachCmd,
+    DetachOccurrence, DetachOutcome, DetachPlan, DetachUndone,
 };
 pub use line::{edit_polyline_line, undo_polyline_line, LineEditCmd};
 pub use matched_path::{bearing_at, matched_path, project_onto_path, OFF_PATH_MAX_M};
@@ -67,6 +72,15 @@ pub enum EditError {
     },
     #[error("duplicate attachment for route {0} direction {1}")]
     DuplicateAttach(String, i64),
+    #[error("route {xno} direction {direction}: stop {stop_code} occurs {count} times — give --sequence or --all")]
+    DuplicateStopOccurrence {
+        xno: String,
+        direction: i64,
+        stop_code: String,
+        count: i64,
+    },
+    #[error("{0}; pass --delete-pole (one-way, not undoable)")]
+    OrphanPoleRefused(String),
 }
 
 #[derive(Debug)]
@@ -472,6 +486,11 @@ pub enum UndoOutcome {
     StopAdd {
         edit_id: i64,
     },
+    /// A detach undo restored the route pointer to the pre-detach version.
+    StopDetach {
+        edit_id: i64,
+        restored_route_version_id: i64,
+    },
     Station {
         edit_id: i64,
         restored_version_id: i64,
@@ -501,6 +520,13 @@ pub fn undo_edit(conn: &Connection, edit_id: i64, editor: &str, note: &str) -> R
         }
         Some("stop_add") => undo_stop_add(conn, edit_id, editor, note)
             .map(|o| UndoOutcome::StopAdd { edit_id: o.edit_id }),
+        // before the stop fallthrough — "stop_detach" is its own entity
+        Some("stop_detach") => {
+            undo_detach_stop(conn, edit_id, editor, note).map(|o| UndoOutcome::StopDetach {
+                edit_id: o.edit_id,
+                restored_route_version_id: o.restored_route_version_id,
+            })
+        }
         // "stop" and any unknown id alike — the stop service's plan guard
         // refuses foreign rows and missing rows with `NotUndoable`.
         _ => undo_stop(conn, edit_id, editor, note).map(|o| UndoOutcome::Stop {

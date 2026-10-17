@@ -17,21 +17,23 @@ pub mod stale;
 pub use allocator::mint;
 pub use batch::{create_batch, latest_batch, latest_open_batch, set_batch_status};
 pub use edit::{
-    add_stop, apply_add_stop, apply_line_edit, apply_line_undo, apply_station_move,
-    apply_station_rename, apply_station_undo, apply_stop_edit, apply_stop_regroup, apply_stop_undo,
-    bearing_at, edit_entity, edit_polyline_line, edit_stop, effective_encoded, entity_history,
-    load_polyline_edit, load_polyline_line, load_station_edit, load_station_snapshot,
-    load_stop_edit, load_stop_snapshot, matched_path, move_station, plan_add_stop,
-    preview_stop_edit, project_onto_path, qualify_station, regroup_stop, rename_station,
-    station_is_current, undo_edit, undo_polyline_line, undo_station, undo_stop, AddStopCmd,
-    AddStopOutcome, AddStopPlan, AttachCmd, EditError, EditLogRow, EditOutcome, LineApplied,
-    LineEditCmd, LineEditOp, LineSnapshot, LineUndoOp, LineUndone, OverrideRow, PlannedAttach,
-    PoleApplied, PoleOp, PoleSnapshot, PoleUndoOp, PolylineEditRow, Qualification, RegroupStop,
-    RenameLevel, RowCounts, StationCandidate, StationEdit, StationMove, StationMoveApplied,
-    StationMoveOp, StationMoveUndoOp, StationRename, StationRenameApplied, StationRenameOp,
-    StationRenameUndoOp, StationSnapshot, StationUndoOp, StationUndone, StationVerdict, StopEdit,
-    StopEditOp, StopEditPreview, StopEditRow, StopEditUndoOp, StopRegroupOp, StopSnapshot,
-    UndoOutcome, OFF_PATH_MAX_M, QUALIFY_BEARING_TOL_DEG, QUALIFY_MAX_DIST_M,
+    add_stop, apply_add_stop, apply_detach_stop, apply_line_edit, apply_line_undo,
+    apply_station_move, apply_station_rename, apply_station_undo, apply_stop_edit,
+    apply_stop_regroup, apply_stop_undo, bearing_at, detach_stop, edit_entity, edit_polyline_line,
+    edit_stop, effective_encoded, entity_history, load_polyline_edit, load_polyline_line,
+    load_station_edit, load_station_snapshot, load_stop_edit, load_stop_snapshot, matched_path,
+    move_station, plan_add_stop, plan_detach_stop, preview_stop_edit, project_onto_path,
+    qualify_station, regroup_stop, rename_station, station_is_current, undo_detach_stop, undo_edit,
+    undo_polyline_line, undo_station, undo_stop, AddStopCmd, AddStopOutcome, AddStopPlan,
+    AttachCmd, DetachCmd, DetachOccurrence, DetachOutcome, DetachPlan, DetachUndone, EditError,
+    EditLogRow, EditOutcome, LineApplied, LineEditCmd, LineEditOp, LineSnapshot, LineUndoOp,
+    LineUndone, OverrideRow, PlannedAttach, PoleApplied, PoleOp, PoleSnapshot, PoleUndoOp,
+    PolylineEditRow, Qualification, RegroupStop, RenameLevel, RowCounts, StationCandidate,
+    StationEdit, StationMove, StationMoveApplied, StationMoveOp, StationMoveUndoOp, StationRename,
+    StationRenameApplied, StationRenameOp, StationRenameUndoOp, StationSnapshot, StationUndoOp,
+    StationUndone, StationVerdict, StopEdit, StopEditOp, StopEditPreview, StopEditRow,
+    StopEditUndoOp, StopRegroupOp, StopSnapshot, UndoOutcome, OFF_PATH_MAX_M,
+    QUALIFY_BEARING_TOL_DEG, QUALIFY_MAX_DIST_M,
 };
 pub use migrate::migrate;
 pub use stale::{StaleMark, StaleTable};
