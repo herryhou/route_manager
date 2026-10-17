@@ -123,7 +123,12 @@ fn count_other_directions(
 /// direction's surviving occurrences plus every other current (route,
 /// direction) serving it across ALL routes; `serving_directions` lists
 /// this route's serving directions. Warnings: a detached first/last stop
-/// notes the neighbors' sequence shift.
+/// notes the neighbors' sequence shift; `--delete-pole` on a NON-orphan
+/// pole warns the flag deletes nothing yet still stamps the whole edit
+/// one-way (Decision 8); `--delete-pole` on an orphan whose versions
+/// survive on OTHER routes' chains warns how many foreign
+/// `route_stop_version` rows (and which routes) the one-way teardown
+/// deletes.
 pub fn plan_detach_stop(conn: &Connection, cmd: &DetachCmd) -> Result<DetachPlan> {
     let (route_id, route_version_id): (i64, Option<i64>) = match conn.query_row(
         "SELECT route_id, current_route_version_id FROM route WHERE ext_uid = ?1",
@@ -258,6 +263,50 @@ pub fn plan_detach_stop(conn: &Connection, cmd: &DetachCmd) -> Result<DetachPlan
 
     // warnings: a detached first/last stop shifts its neighbors
     let mut warnings = Vec::new();
+
+    // --delete-pole on a non-orphan pole deletes nothing (the pole still
+    // serves elsewhere), but Decision 8 stamps the WHOLE edit one-way —
+    // say so before the user commits to it
+    if cmd.delete_pole && !pole_orphan {
+        warnings.push(format!(
+            "delete_pole has no effect — stop '{}' still serves other directions \
+             — but the edit carrying it is one-way (not undoable)",
+            cmd.stop_code
+        ));
+    }
+
+    // the one-way teardown sweeps EVERY chain holding the pole's versions
+    // — other routes' superseded history included. Count the doomed
+    // foreign rows (route_id order, deterministic) so the blast radius is
+    // on the plan before the user commits
+    if cmd.delete_pole && pole_orphan {
+        let mut stmt = conn.prepare(
+            "SELECT r.route_code, COUNT(*)
+             FROM route_stop_version rsv
+             JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
+             JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+             JOIN route r ON r.route_id = rv.route_id
+             WHERE rsv.stop_version_id IN
+                   (SELECT stop_version_id FROM stop_version WHERE stop_id = ?1)
+               AND rv.route_id != ?2
+             GROUP BY r.route_id
+             ORDER BY r.route_id",
+        )?;
+        let foreign: Vec<(String, i64)> = stmt
+            .query_map(params![stop_id, route_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let total: i64 = foreign.iter().map(|f| f.1).sum();
+        if total > 0 {
+            let names: Vec<&str> = foreign.iter().map(|f| f.0.as_str()).collect();
+            warnings.push(format!(
+                "delete_pole also deletes {} history route_stop_version row(s) \
+                 on other route(s) [{}] — their superseded chains held this pole",
+                total,
+                names.join(", ")
+            ));
+        }
+    }
+
     let first_seq = rows[0].1;
     let last_seq = rows[rows.len() - 1].1;
     for occ in &occurrences {
@@ -852,6 +901,32 @@ mod tests {
         .unwrap();
     }
 
+    /// base_fixture + route 2 ('tcg:2') whose SUPERSEDED version 21 once
+    /// served pole D (sv 13, rsv 71) and whose current version 22 no longer
+    /// does (rsv 72 → sv 10). Route 1 detaching D with --delete-pole sweeps
+    /// route 2's history row — another route's versioned past.
+    fn foreign_history_fixture(conn: &Connection) {
+        base_fixture(conn);
+        conn.execute_batch(&format!(
+            "INSERT INTO route (route_id, route_code, ext_uid, revision, created_at, updated_at)
+                 VALUES (2, '2', 'tcg:2', 1, '{T0}', '{T0}');
+             INSERT INTO route_version (route_version_id, route_id, version_no, status, valid_from, created_at) VALUES
+                 (21, 2, 1, 'SUPERSEDED', '{T0}', '{T0}'),
+                 (22, 2, 2, 'PUBLISHED', '{T0}', '{T0}');
+             UPDATE route SET current_route_version_id = 22 WHERE route_id = 2;
+             INSERT INTO subroute (subroute_id, route_id, subroute_code, created_at)
+                 VALUES (21, 2, '2', '{T0}');
+             INSERT INTO subroute_version (subroute_version_id, route_version_id, subroute_id, subroute_name, created_at) VALUES
+                 (21, 21, 21, 'old', '{T0}'), (22, 22, 21, 'now', '{T0}');
+             INSERT INTO route_stop_version (route_stop_version_id, subroute_version_id, stop_version_id, direction, stop_sequence, created_at) VALUES
+                 (71, 21, 13, 0, 4, '{T0}'), (72, 22, 10, 0, 1, '{T0}');
+             UPDATE id_sequence SET next_value = 23 WHERE table_name = 'route_version';
+             UPDATE id_sequence SET next_value = 23 WHERE table_name = 'subroute_version';
+             UPDATE id_sequence SET next_value = 73 WHERE table_name = 'route_stop_version';"
+        ))
+        .unwrap();
+    }
+
     fn cmd(xno: &str, direction: i64, stop_code: &str) -> DetachCmd {
         DetachCmd {
             xno: xno.into(),
@@ -946,6 +1021,15 @@ mod tests {
         assert_eq!(p.serving_directions, vec![0]);
         assert_eq!(p.warnings.len(), 1, "{:?}", p.warnings);
         assert!(p.warnings[0].contains("last stop"), "{:?}", p.warnings);
+        // --delete-pole on a NON-orphan pole (B still serves dir 1): the
+        // flag deletes nothing, but the edit carrying it is one-way — the
+        // plan must say both (Finding 1)
+        let mut c = cmd("1", 0, "002");
+        c.delete_pole = true;
+        let p = plan_detach_stop(&conn, &c).unwrap();
+        assert_eq!(p.warnings.len(), 1, "{:?}", p.warnings);
+        assert!(p.warnings[0].contains("no effect"), "{:?}", p.warnings);
+        assert!(p.warnings[0].contains("not undoable"), "{:?}", p.warnings);
         // unknown route / direction / stop code
         let err = plan_detach_stop(&conn, &cmd("9", 0, "002")).unwrap_err();
         assert!(
@@ -1405,6 +1489,56 @@ mod tests {
         match err.downcast_ref::<EditError>() {
             Some(EditError::NotUndoable(id)) => assert_eq!(*id, out.edit_id),
             other => panic!("expected NotUndoable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_pole_plan_warns_and_apply_sweeps_foreign_history() {
+        let conn = open_in_memory().unwrap();
+        foreign_history_fixture(&conn);
+        // orphan pole D + --delete-pole: the plan must surface the foreign
+        // history the one-way teardown will destroy (Finding 2)
+        let c = DetachCmd {
+            delete_pole: true,
+            ..cmd("1", 0, "004")
+        };
+        let p = plan_detach_stop(&conn, &c).unwrap();
+        assert!(p.pole_orphan);
+        let sweep = p
+            .warnings
+            .iter()
+            .find(|w| w.contains("history route_stop_version"))
+            .expect("foreign-history warning on the plan");
+        assert!(
+            sweep.contains("1 history route_stop_version row"),
+            "{sweep}"
+        );
+        assert!(sweep.contains("[2]"), "{sweep}");
+        // what the warning promised comes true: route 2's superseded-chain
+        // row rsv 71 (→ pole D) is swept; its own current row rsv 72, the
+        // chain headers, and the untouched pole A survive
+        let out = apply_detach_stop(&conn, &p, "herry", "job").unwrap();
+        assert!(out.pole_deleted);
+        for (sql, want) in [
+            (
+                "SELECT COUNT(*) FROM route_stop_version WHERE route_stop_version_id = 71",
+                0i64,
+            ),
+            (
+                "SELECT COUNT(*) FROM route_stop_version WHERE route_stop_version_id = 72",
+                1,
+            ),
+            (
+                "SELECT COUNT(*) FROM route_version WHERE route_version_id = 21",
+                1,
+            ),
+            (
+                "SELECT COUNT(*) FROM stop_version WHERE stop_version_id = 13",
+                0,
+            ),
+        ] {
+            let n: i64 = conn.query_row(sql, [], |r| r.get(0)).unwrap();
+            assert_eq!(n, want, "{sql}");
         }
     }
 
