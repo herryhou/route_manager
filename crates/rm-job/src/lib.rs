@@ -662,11 +662,22 @@ fn add_stop_job(p: params::AddStopParams) -> (&'static str, Outcome) {
     )
 }
 
+/// Open the DB by mode: apply legs read-write (`rm_db::open` — migrations
+/// run, a missing file is created), dry runs read-only — a dry run must
+/// neither migrate an old DB nor create a stray file on a typo'd path.
+fn open_conn(apply: bool, db: &str) -> anyhow::Result<rusqlite::Connection> {
+    if apply {
+        rm_db::open(&PathBuf::from(db))
+    } else {
+        rm_db::open_readonly(&PathBuf::from(db))
+    }
+}
+
 /// The move-stop job over one resolved payload: resolve the target pole
 /// (`stop_version_id` if given, else `xno`+`code` must match exactly one
 /// current pole), then preview (dry run) or apply.
 fn move_stop_job(p: params::MoveStopParams) -> (&'static str, Outcome) {
-    let conn = match rm_db::open(&PathBuf::from(&p.db)) {
+    let conn = match open_conn(p.apply, &p.db) {
         Ok(c) => c,
         Err(e) => return ("move-stop", Outcome::Rejected(format!("{e:#}"))),
     };
@@ -813,7 +824,7 @@ impl From<&DetachPlan> for PlanData {
 /// detach (apply) through rm_db's detach primitive. Rejections carry the
 /// `EditError` text.
 fn remove_stop_job(p: params::RemoveStopParams) -> (&'static str, Outcome) {
-    let conn = match rm_db::open(&PathBuf::from(&p.db)) {
+    let conn = match open_conn(p.apply, &p.db) {
         Ok(c) => c,
         Err(e) => return ("remove-stop", Outcome::Rejected(format!("{e:#}"))),
     };
@@ -871,16 +882,9 @@ fn extend_path_job(p: params::ExtendPathParams) -> (&'static str, Outcome) {
             )),
         );
     }
-    let conn = if p.apply {
-        match rm_db::open(&PathBuf::from(&p.db)) {
-            Ok(c) => c,
-            Err(e) => return ("extend-path", Outcome::Rejected(format!("{e:#}"))),
-        }
-    } else {
-        match rm_db::open_readonly(&PathBuf::from(&p.db)) {
-            Ok(c) => c,
-            Err(e) => return ("extend-path", Outcome::Rejected(format!("{e:#}"))),
-        }
+    let conn = match open_conn(p.apply, &p.db) {
+        Ok(c) => c,
+        Err(e) => return ("extend-path", Outcome::Rejected(format!("{e:#}"))),
     };
     let mut logs = Vec::new();
     let (candidate, extensions, source) =

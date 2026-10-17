@@ -175,7 +175,7 @@ pub fn show_route(
         .collect::<Result<_, _>>()?;
     let mut directions = Vec::with_capacity(dirs.len());
     for direction in dirs {
-        let stops = route_stops(conn, route_id, direction)?;
+        let stops = route_stops(conn, route_version_id, direction)?;
         let path = path_source(conn, xno, direction, logs)?;
         directions.push(DirectionOverview {
             direction,
@@ -191,20 +191,22 @@ pub fn show_route(
 }
 
 /// The direction's ordered current stops — rm-web `routes::stops()`'s join
-/// minus the projection QA columns.
-fn route_stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Vec<StopRow>> {
+/// minus the projection QA columns. Pinned to the resolved current
+/// `route_version_id` (the find_stop pattern): applies mint a new chain
+/// and keep the old rows, so filtering on route_id alone would merge
+/// superseded chains into the sequence.
+fn route_stops(conn: &Connection, route_version_id: i64, direction: i64) -> Result<Vec<StopRow>> {
     let mut stmt = conn.prepare(
         "SELECT rsv.stop_sequence, sv2.stop_code, sv2.stop_name, \
                 sv2.stop_version_id, sv2.station_id \
          FROM route_stop_version rsv \
          JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id \
-         JOIN route_version rv ON rv.route_version_id = sv.route_version_id \
          JOIN stop_version sv2 ON sv2.stop_version_id = rsv.stop_version_id \
-         WHERE rv.route_id = ?1 AND rsv.direction = ?2 \
+         WHERE sv.route_version_id = ?1 AND rsv.direction = ?2 \
          ORDER BY rsv.stop_sequence",
     )?;
     let stops = stmt
-        .query_map(params![route_id, direction], |r| {
+        .query_map(params![route_version_id, direction], |r| {
             Ok(StopRow {
                 sequence: r.get(0)?,
                 stop_code: r.get(1)?,

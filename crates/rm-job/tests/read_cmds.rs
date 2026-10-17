@@ -170,6 +170,24 @@ fn show_route_lists_stops_and_path_state() {
     assert_eq!(v["directions"][0]["path"], "src");
 }
 
+/// show-route's `path_source` "none" arm: dir 1 has rsv rows but neither
+/// a src polyline nor an override → path "none" (whole-branch review
+/// parked coverage — the arm had no test).
+#[test]
+fn show_route_path_none_when_no_src_or_override() {
+    let (_dir, db) = fixture_db();
+    seed_second_direction(&db);
+    let v = show_route_ok(&db, "1");
+    let d1 = v["directions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["direction"].as_i64() == Some(1))
+        .expect("dir 1 is seeded");
+    assert_eq!(d1["path"], "none");
+    assert_eq!(d1["stops"].as_array().unwrap().len(), 1);
+}
+
 #[test]
 fn show_path_reports_source_and_endpoints() {
     let (_dir, db) = fixture_db();
@@ -462,6 +480,101 @@ fn remove_stop_dry_run_reports_plan_then_apply_roundtrips() {
         b0,
         "apply+undo byte-identical (B2==B0)"
     );
+}
+
+/// Three poles on dir 0 (001/002/003, sequences 1-3) with 002 also
+/// serving dir 1: detaching 002 from dir 0 leaves it serving dir 1, so
+/// the apply is no orphan refusal. The explicit ids move the allocators
+/// past them (apply mints stop/rsv rows).
+fn seed_three_stops_dir0(db: &Path) {
+    let conn = rm_db::open(db).unwrap();
+    conn.execute_batch(
+        "INSERT INTO stop (stop_id, ext_uid, created_at) VALUES
+         (2, 'tcg:stop:2', '2026-01-01T00:00:00Z'),
+         (3, 'tcg:stop:3', '2026-01-01T00:00:00Z');
+         INSERT INTO stop_version (stop_version_id, stop_id, station_id, stop_code, stop_name, direction, latitude, longitude, valid_from, created_at) VALUES
+         (11, 2, 1, '002', 'Mid', 0, 24.0, 120.0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+         (12, 3, 1, '003', 'Last', 0, 24.0, 120.0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+         INSERT INTO route_stop_version (route_stop_version_id, subroute_version_id, stop_version_id, direction, stop_sequence, created_at) VALUES
+         (2, 1, 11, 0, 2, '2026-01-01T00:00:00Z'),
+         (3, 1, 12, 0, 3, '2026-01-01T00:00:00Z'),
+         (4, 1, 11, 1, 1, '2026-01-01T00:00:00Z');
+         UPDATE id_sequence SET next_value = 13 WHERE table_name = 'stop_version';
+         UPDATE id_sequence SET next_value = 5 WHERE table_name = 'route_stop_version';",
+    )
+    .unwrap();
+}
+
+/// Post-edit regression (whole-branch review Critical): a detach apply
+/// mints a NEW route_version chain and keeps the old rows (version-chain
+/// design), so show-route must pin the route's CURRENT route_version —
+/// filtering on route_id alone merged old+new rows into the sequence
+/// (A,A,B,C,C) exactly when an agent verifies its edit.
+#[test]
+fn show_route_pins_current_route_version_after_detach_apply() {
+    let (_dir, db) = fixture_db();
+    seed_three_stops_dir0(&db);
+    let (code, report) = run_remove_stop(
+        &db,
+        serde_json::json!({"xno":"1","direction":0,"code":"002","apply":true,"db":db.display().to_string()}),
+    );
+    assert_eq!(code, 0, "{}{}", report.out, report.err);
+
+    // two chains now: the pointer moved off version 1, whose dir-0 rows
+    // (001, 002, 003) all survive as history
+    let conn = rm_db::open(&db).unwrap();
+    let current: i64 = conn
+        .query_row(
+            "SELECT current_route_version_id FROM route WHERE route_id = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_ne!(current, 1, "apply minted a new current chain");
+    let old_dir0: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM route_stop_version rsv
+             JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
+             WHERE sv.route_version_id = 1 AND rsv.direction = 0",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(old_dir0, 3, "the superseded chain keeps its rows");
+
+    // show-route reads only the current chain: dir 0 = 001,003 (002
+    // detached, no merged duplicates), dir 1 = 002
+    let v = show_route_ok(&db, "1");
+    let dirs = v["directions"].as_array().unwrap();
+    assert_eq!(dirs.len(), 2);
+    let codes = |d: &serde_json::Value| {
+        d["stops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["stop_code"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(dirs[0]["direction"], 0);
+    assert_eq!(codes(&dirs[0]), ["001", "003"]);
+    assert_eq!(dirs[1]["direction"], 1);
+    assert_eq!(codes(&dirs[1]), ["002"]);
+}
+
+/// A dry run opens the DB read-only (the extend-path pattern): against a
+/// path that doesn't exist it rejects and creates nothing — `rm_db::open`
+/// would have created a stray empty DB there (whole-branch review
+/// Important).
+#[test]
+fn remove_stop_dry_run_rejects_missing_db_without_creating_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("nope.db");
+    let (code, report) = run_remove_stop(
+        &db,
+        serde_json::json!({"xno":"1","direction":0,"code":"001","db":db.display().to_string()}),
+    );
+    assert_eq!(code, 1, "{}{}", report.out, report.err);
+    assert!(!db.exists(), "dry run must not create the db file");
 }
 
 /// The one-way `--delete-pole` warning must reach the envelope on the real

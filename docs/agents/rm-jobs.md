@@ -10,11 +10,12 @@ one-way exception below) undoable. Always release mode:
 
 The default DB is `data/taichung.db` — for another city pass
 `--db data/<city>.db` (e.g. `--db data/taipei.db`) on every command; in a
-`--json` payload the `"db"` field is required — always state it. A typo'd
-DB path never errors: `rm_db::open` creates a new empty DB there. The
-read commands and extend-path dry runs open the DB read-only;
-add-stop/move-stop/remove-stop open read-write even for a dry run, so a
-dry run against an older DB applies pending migrations.
+`--json` payload the `"db"` field is required — always state it. The
+read commands and the move-stop/remove-stop/extend-path dry runs open
+the DB read-only: they apply no migrations, and a typo'd path rejects
+instead of creating a stray DB file. Only `--apply` opens read-write —
+`rm_db::open` runs pending migrations and creates the file when the
+path doesn't exist (add-stop's dry run and `undo` open read-write too).
 
 ## Commands
 
