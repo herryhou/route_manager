@@ -1025,6 +1025,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rm-job"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rm-db",
+ "rusqlite",
+ "tempfile",
+]
+
+[[package]]
 name = "rm-osm-match"
 version = "0.1.0"
 dependencies = [

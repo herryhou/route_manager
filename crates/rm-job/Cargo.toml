@@ -1,0 +1,14 @@
+[package]
+name = "rm-job"
+description = "Dry-run-first job CLI for add-stop jobs over rm_db::edit"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+rm-db.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
+tempfile = "3"
