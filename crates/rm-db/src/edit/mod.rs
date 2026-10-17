@@ -1,12 +1,14 @@
 //! Manual edit primitive: version-append edits + audit + staleness marks.
 
 mod line;
+mod matched_path;
 mod station_move;
 mod station_rename;
 mod station_undo;
 mod stop;
 
 pub use line::{edit_polyline_line, undo_polyline_line, LineEditCmd};
+pub use matched_path::{bearing_at, matched_path, project_onto_path, OFF_PATH_MAX_M};
 pub use station_move::{move_station, StationMove};
 pub use station_rename::{rename_station, RenameLevel, StationRename};
 pub use station_undo::undo_station;
