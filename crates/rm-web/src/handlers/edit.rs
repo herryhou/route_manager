@@ -5,7 +5,7 @@ use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::Json;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::error::ApiError;
@@ -147,6 +147,164 @@ pub async fn edit_stop(
     Ok(Json(json!({
         "edit_id": out.edit_id,
         "new_stop_version_id": out.new_version_id,
+        "stale_routes": out.stale_routes,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct AddStopBody {
+    name: String,
+    lat: f64,
+    lon: f64,
+    station: Option<i64>,
+    attach: Vec<String>,
+    note: Option<String>,
+    apply: Option<bool>,
+}
+
+/// Serialize mirrors of the add-stop plan types — `rm_db`'s structs carry
+/// no serde derives by design, and the response contract is the rm_db
+/// struct's field names verbatim.
+#[derive(Serialize)]
+pub struct AddStopPlanData {
+    name: String,
+    lat: f64,
+    lon: f64,
+    station: StationVerdictData,
+    attachments: Vec<PlannedAttachData>,
+    row_counts: RowCountsData,
+    stale_routes: Vec<i64>,
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub enum StationVerdictData {
+    UseExisting { station_id: i64, name: String },
+    CreateNew,
+    Pinned { station_id: i64, name: String },
+}
+
+#[derive(Serialize)]
+pub struct PlannedAttachData {
+    xno: String,
+    direction: i64,
+    route_id: i64,
+    route_version_id: i64,
+    insert_after_stop_code: Option<String>,
+    neighbor_before: Option<String>,
+    neighbor_after: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct RowCountsData {
+    stop: u32,
+    stop_version: u32,
+    station: u32,
+    station_version: u32,
+    station_group: u32,
+    station_group_version: u32,
+    route_version: u32,
+    subroute_version: u32,
+    route_stop_version: u32,
+    stale_mark: u32,
+}
+
+impl From<rm_db::AddStopPlan> for AddStopPlanData {
+    fn from(p: rm_db::AddStopPlan) -> Self {
+        Self {
+            name: p.name,
+            lat: p.lat,
+            lon: p.lon,
+            station: match p.station {
+                rm_db::StationVerdict::UseExisting { station_id, name } => {
+                    StationVerdictData::UseExisting { station_id, name }
+                }
+                rm_db::StationVerdict::CreateNew => StationVerdictData::CreateNew,
+                rm_db::StationVerdict::Pinned { station_id, name } => {
+                    StationVerdictData::Pinned { station_id, name }
+                }
+            },
+            attachments: p
+                .attachments
+                .into_iter()
+                .map(|a| PlannedAttachData {
+                    xno: a.xno,
+                    direction: a.direction,
+                    route_id: a.route_id,
+                    route_version_id: a.route_version_id,
+                    insert_after_stop_code: a.insert_after_stop_code,
+                    neighbor_before: a.neighbor_before,
+                    neighbor_after: a.neighbor_after,
+                })
+                .collect(),
+            row_counts: RowCountsData {
+                stop: p.row_counts.stop,
+                stop_version: p.row_counts.stop_version,
+                station: p.row_counts.station,
+                station_version: p.row_counts.station_version,
+                station_group: p.row_counts.station_group,
+                station_group_version: p.row_counts.station_group_version,
+                route_version: p.row_counts.route_version,
+                subroute_version: p.row_counts.subroute_version,
+                route_stop_version: p.row_counts.route_stop_version,
+                stale_mark: p.row_counts.stale_mark,
+            },
+            stale_routes: p.stale_routes,
+            warnings: p.warnings,
+        }
+    }
+}
+
+/// POST /api/edit/stop — add a new pole to one or more directions. The
+/// default (and `apply: false`) answers the read-only dry-run plan;
+/// `apply: true` performs the write. Attach strings parse before any
+/// connection opens and an empty attach list is a 400 — both mirror
+/// rm-job's add-stop job, this endpoint's CLI sibling.
+pub async fn add_stop(
+    State(state): State<AppState>,
+    Editor(editor): Editor,
+    ApiJson(b): ApiJson<AddStopBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !(-90.0..=90.0).contains(&b.lat) {
+        return Err(ApiError::bad_request("lat out of range"));
+    }
+    if !(-180.0..=180.0).contains(&b.lon) {
+        return Err(ApiError::bad_request("lon out of range"));
+    }
+    // parse before open: a rejected attach string must not touch the db
+    let mut attachments = Vec::with_capacity(b.attach.len());
+    for a in &b.attach {
+        attachments.push(rm_db::parse_attach(a).map_err(|e| ApiError::bad_request(&e))?);
+    }
+    if attachments.is_empty() {
+        return Err(ApiError::bad_request(
+            "nothing to attach — give at least one attach XNO:DIR[@CODE]",
+        ));
+    }
+    let cmd = rm_db::AddStopCmd {
+        name: b.name,
+        lat: b.lat,
+        lon: b.lon,
+        station_id: b.station,
+        attachments,
+    };
+    if !b.apply.unwrap_or(false) {
+        let plan = run_db(state, move |conn| rm_db::plan_add_stop(conn, &cmd))
+            .await
+            .map_err(edit_conflict)?;
+        return Ok(Json(serde_json::to_value(AddStopPlanData::from(plan))?));
+    }
+    let out = run_db_write(state, move |conn| {
+        rm_db::add_stop(conn, cmd, &editor, b.note.as_deref().unwrap_or(""))
+    })
+    .await
+    .map_err(edit_conflict)?;
+    Ok(Json(json!({
+        "edit_id": out.edit_id,
+        "stop_id": out.stop_id,
+        "stop_version_ids": out.stop_version_ids,
+        "station_id": out.station_id,
+        "station_created": out.station_created,
         "stale_routes": out.stale_routes,
     })))
 }

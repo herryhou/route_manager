@@ -55,6 +55,10 @@ pub fn router_with(state: AppState) -> Router {
     let r = handlers::router();
     if state.edit_enabled() {
         r.route(
+            "/api/edit/stop",
+            axum::routing::post(handlers::edit::add_stop),
+        )
+        .route(
             "/api/edit/stop/{stop_version_id}",
             axum::routing::post(handlers::edit::edit_stop),
         )

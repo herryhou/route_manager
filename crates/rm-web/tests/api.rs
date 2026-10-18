@@ -1,9 +1,12 @@
 //! Integration tests for the rm-web API, driven through the router.
 
+use std::collections::HashMap;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use rm_web::router_with;
 use rm_web::state::AppState;
+use serde_json::json;
 use tower::ServiceExt;
 
 fn app() -> axum::Router {
@@ -825,4 +828,208 @@ async fn raw_endpoint_survives_missing_override_table() {
         !v["effective"]["points"].as_array().unwrap().is_empty(),
         "effective line falls back to src points: {v}"
     );
+}
+
+// ---------- POST /api/edit/stop (add-stop) ----------
+
+/// Edit-mode router over one fixture DB: editor "herry", token "sekrit"
+/// (same direction as main.rs parse_tokens "herry:sekrit").
+fn edit_app(db: &std::path::Path) -> axum::Router {
+    let mut tokens = HashMap::new();
+    tokens.insert("herry".to_string(), "sekrit".to_string());
+    router_with(AppState::with_edit(db.to_path_buf(), None, tokens))
+}
+
+async fn body_json(res: axum::response::Response) -> serde_json::Value {
+    let b = axum::body::to_bytes(res.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    serde_json::from_slice(&b).unwrap()
+}
+
+/// POST JSON with the editor bearer header (`None` = no header).
+async fn post_edit(
+    app: &axum::Router,
+    uri: &str,
+    token: Option<&str>,
+    body: serde_json::Value,
+) -> axum::response::Response {
+    let mut b = Request::builder().method("POST").uri(uri);
+    if let Some(t) = token {
+        b = b.header("authorization", format!("Bearer {t}"));
+    }
+    app.clone()
+        .oneshot(
+            b.header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+/// Every direction's stop count across the routes list, in list order —
+/// the plan-must-not-write probe.
+async fn direction_stop_counts(app: &axum::Router) -> Vec<i64> {
+    let v = get_json(app, "/api/routes").await;
+    v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["directions"].as_array().unwrap().iter())
+        .map(|d| d["stops"].as_i64().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn add_stop_plan_defaults_to_dry_run_and_writes_nothing() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let before = direction_stop_counts(&app).await;
+
+    let res = post_edit(
+        &app,
+        "/api/edit/stop",
+        Some("sekrit"),
+        json!({ "name": "測試新增站", "lat": 24.141, "lon": 120.6857, "attach": ["1:0"] }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    let atts = v["attachments"]
+        .as_array()
+        .unwrap_or_else(|| panic!("attachments array: {v}"));
+    assert_eq!(atts.len(), 1);
+    assert!(v["row_counts"].is_object(), "row_counts present: {v}");
+    assert!(v["warnings"].is_array(), "warnings present: {v}");
+    assert!(v.get("edit_id").is_none(), "plan carries no edit_id: {v}");
+
+    let after = direction_stop_counts(&app).await;
+    assert_eq!(after, before, "plan leg must not write");
+}
+
+#[tokio::test]
+async fn add_stop_apply_false_is_also_a_plan() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let before = direction_stop_counts(&app).await;
+
+    let res = post_edit(
+        &app,
+        "/api/edit/stop",
+        Some("sekrit"),
+        json!({
+            "name": "測試新增站", "lat": 24.141, "lon": 120.6857,
+            "attach": ["1:0"], "apply": false
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["attachments"].as_array().unwrap().len(), 1);
+    assert!(v["row_counts"].is_object(), "row_counts present: {v}");
+    assert!(v.get("edit_id").is_none(), "apply:false is a plan: {v}");
+
+    let after = direction_stop_counts(&app).await;
+    assert_eq!(after, before, "apply:false must not write");
+}
+
+#[tokio::test]
+async fn add_stop_apply_then_undo_restores_stop_counts() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let routes = get_json(&app, "/api/routes").await;
+    let id1 = routes["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route_code"] == json!("1"))
+        .unwrap()["route_id"]
+        .as_i64()
+        .unwrap();
+
+    let res = post_edit(
+        &app,
+        "/api/edit/stop",
+        Some("sekrit"),
+        json!({
+            "name": "測試新增站", "lat": 24.141, "lon": 120.6857,
+            "attach": ["1:0"], "apply": true, "note": "web add"
+        }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    let edit_id = v["edit_id"]
+        .as_i64()
+        .unwrap_or_else(|| panic!("edit_id present: {v}"));
+    assert_eq!(v["station_created"], json!(true));
+    assert!(v["stop_id"].is_i64(), "{v}");
+    assert!(v["station_id"].is_i64(), "{v}");
+
+    // applied: the direction now serves three stops
+    let stops = get_json(&app, &format!("/api/routes/{id1}/directions/0/stops")).await;
+    assert_eq!(stops["stops"].as_array().unwrap().len(), 3, "{stops}");
+
+    // undo deletes the add's own rows — back to two
+    let res = post_edit(
+        &app,
+        &format!("/api/edit/undo/{edit_id}"),
+        Some("sekrit"),
+        json!({ "note": "revert" }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let stops = get_json(&app, &format!("/api/routes/{id1}/directions/0/stops")).await;
+    assert_eq!(
+        stops["stops"].as_array().unwrap().len(),
+        2,
+        "undo restores: {stops}"
+    );
+}
+
+#[tokio::test]
+async fn add_stop_rejects_empty_or_bad_attach_and_bad_coords() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+
+    // empty attach → 400 with the exact message
+    let res = post_edit(
+        &app,
+        "/api/edit/stop",
+        Some("sekrit"),
+        json!({ "name": "X", "lat": 24.141, "lon": 120.6857, "attach": [] }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let v = body_json(res).await;
+    assert_eq!(
+        v["error"],
+        json!("nothing to attach — give at least one attach XNO:DIR[@CODE]"),
+        "{v}"
+    );
+
+    // bad attach string → 400 with parse_attach's message
+    let res = post_edit(
+        &app,
+        "/api/edit/stop",
+        Some("sekrit"),
+        json!({ "name": "X", "lat": 24.141, "lon": 120.6857, "attach": ["1:x"] }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let v = body_json(res).await;
+    assert!(
+        v["error"].as_str().unwrap().contains("invalid --attach"),
+        "{v}"
+    );
+
+    // lat/lon out of range → 400 (same convention as the other edit endpoints)
+    for body in [
+        json!({ "name": "X", "lat": 91.0, "lon": 120.6857, "attach": ["1:0"] }),
+        json!({ "name": "X", "lat": 24.141, "lon": 181.0, "attach": ["1:0"] }),
+    ] {
+        let res = post_edit(&app, "/api/edit/stop", Some("sekrit"), body.clone()).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "body {body}");
+    }
 }
