@@ -1222,7 +1222,7 @@ fn rename_station_job(p: params::RenameStationParams) -> (&'static str, Outcome)
                     Vec::new(),
                 ),
             ),
-            Err(e) => return ("rename-station", Outcome::Rejected(format!("{e:#}"))),
+            Err(e) => ("rename-station", Outcome::Rejected(format!("{e:#}"))),
         }
     } else {
         match plan_rename_station(&conn, cmd) {
@@ -1249,7 +1249,7 @@ fn rename_station_job(p: params::RenameStationParams) -> (&'static str, Outcome)
                     Vec::new(),
                 ),
             ),
-            Err(e) => return ("rename-station", Outcome::Rejected(format!("{e:#}"))),
+            Err(e) => ("rename-station", Outcome::Rejected(format!("{e:#}"))),
         }
     }
 }
@@ -1299,7 +1299,7 @@ fn move_station_job(p: params::MoveStationParams) -> (&'static str, Outcome) {
                     Vec::new(),
                 ),
             ),
-            Err(e) => return ("move-station", Outcome::Rejected(format!("{e:#}"))),
+            Err(e) => ("move-station", Outcome::Rejected(format!("{e:#}"))),
         }
     } else {
         match plan_move_station(&conn, cmd) {
@@ -1318,7 +1318,7 @@ fn move_station_job(p: params::MoveStationParams) -> (&'static str, Outcome) {
                     Vec::new(),
                 ),
             ),
-            Err(e) => return ("move-station", Outcome::Rejected(format!("{e:#}"))),
+            Err(e) => ("move-station", Outcome::Rejected(format!("{e:#}"))),
         }
     }
 }
@@ -1354,7 +1354,7 @@ fn set_line_job(p: params::SetLineParams) -> (&'static str, Outcome) {
                     Vec::new(),
                 ),
             ),
-            Err(e) => return ("set-line", Outcome::Rejected(format!("{e:#}"))),
+            Err(e) => ("set-line", Outcome::Rejected(format!("{e:#}"))),
         }
     } else {
         match plan_polyline_line(&conn, cmd) {
@@ -1375,7 +1375,7 @@ fn set_line_job(p: params::SetLineParams) -> (&'static str, Outcome) {
                     Vec::new(),
                 ),
             ),
-            Err(e) => return ("set-line", Outcome::Rejected(format!("{e:#}"))),
+            Err(e) => ("set-line", Outcome::Rejected(format!("{e:#}"))),
         }
     }
 }
