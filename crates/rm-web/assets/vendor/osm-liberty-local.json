@@ -3785,7 +3785,8 @@
             "paint": {
                 "text-color": "#765",
                 "text-halo-blur": 0.5,
-                "text-halo-width": 1
+                "text-halo-width": 1,
+                "text-halo-color": "#ffffff"
             }
         },
         {
