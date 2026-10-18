@@ -1,6 +1,6 @@
 ---
 name: rm-web-jobs
-description: Bus route/stop correction jobs through the rm-web edit HTTP API — add a stop, move or rename a stop, remove a stop from a direction, extend or replace a route path, regroup/rename/move a station, run the stale-mark refresh, undo a previous edit. Use when the user asks to fix bus data in a route_manger city database (a pole is misplaced, a stop was deleted from the source, a route's drawn path is too short or drawn wrong, a station moved or got a new name, the map is stale after an edit).
+description: Bus route/stop correction jobs through the rm-web edit HTTP API — add a stop, move or rename a stop, remove a stop from a direction, extend or replace a route path, regroup/rename/move a station, run the stale-mark refresh, undo a previous edit. This skill should be used when the user asks to fix bus data in a route_manger city database (a pole is misplaced, a stop was deleted from the source, a route's drawn path is too short or drawn wrong, a station moved or got a new name, the map is stale after an edit).
 ---
 
 # rm-web-jobs
