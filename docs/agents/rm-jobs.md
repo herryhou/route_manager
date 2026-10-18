@@ -5,7 +5,8 @@ and B on route 12", "extend route 1's path past its end") run through the
 `rm-job` CLI — a thin dry-run-first wrapper over `rm_db`'s manual-edit
 primitives. Every run prints exactly one JSON envelope to stdout; every
 write is planned before it happens, audited in `edit_log`, and (barring the
-one-way exception below) undoable. Always release mode:
+one-way exception below) undoable — `refresh` is the exception, it runs
+the pipeline rather than making an edit. Always release mode:
 `cargo run -r -p rm-job -- ...`.
 
 The default DB is `data/taichung.db` — for another city pass
@@ -26,6 +27,7 @@ Read (no side effects, open the DB read-only):
 | `find-stop` | Current poles on one route matching a name substring / exact code |
 | `show-route` | One route's current stops per direction + each direction's path source |
 | `show-path` | One direction's effective polyline: source, encoded, endpoints |
+| `edit-log` | One entity's audit rows from `edit_log`, newest first (`entity` = stop/station/polyline/stop_add/stop_detach) |
 
 Write (dry run by default; `--apply` / `"apply": true` writes):
 
@@ -35,6 +37,11 @@ Write (dry run by default; `--apply` / `"apply": true` writes):
 | `move-stop` | Move/rename one existing pole (writes a new stop version) |
 | `remove-stop` | Detach a stop occurrence from one route direction |
 | `extend-path` | Walk the OSM road graph outward from a direction's path ends; writes a polyline override |
+| `set-line` | Replace one direction's whole polyline with given points; writes a polyline override |
+| `regroup-stop` | Move one pole to a different station (writes a new stop version) |
+| `rename-station` | Rename a station, optionally dragging matching poles with it |
+| `move-station` | Move a station's coordinates |
+| `refresh` | Run the stale-mark pipeline chain (match → segments → registry); not an edit — no audit row, not undoable |
 | `undo` | Revert one applied job edit by its `edit_log` id |
 
 Field lists live in the binary, not in this page: `rm-job schema` lists
@@ -88,11 +95,12 @@ no-op.
 
 - The user asks in natural language for a route/stop correction on the
   published data: a **new stop**, a stop **moved or renamed**, a stop
-  **removed from a direction**, a path **extended** past its ends, or an
-  **undo** of a previous job. `rm-job` is the only write path — never
-  hand-write SQL against the published tables.
-- Free-form station surgery (regrouping, splitting, merging stations) is
-  not an rm-job job: those go through rm-web's edit UI (backed by the same
+  **removed from a direction**, a station **regrouped / renamed / moved**,
+  a path **extended or replaced**, or an **undo** of a previous job.
+  `rm-job` is the only write path — never hand-write SQL against the
+  published tables.
+- Station surgery that is still rm-web-only: splitting and merging
+  stations (those go through rm-web's edit UI, backed by the same
   `rm_db::edit` primitives).
 
 ## Warnings that matter
@@ -157,6 +165,32 @@ without them the dry run rejects with a "run rm-osm-prepare" message. A
 dry run that returns empty `new_vertices` means the graph offers no
 extension within the requested distance.
 
+## Station and set-line specifics
+
+Station commands address the **stable `station_id`** (what `show-route`
+and the station lookups print), never the `station_version_id` — the id
+resolves to the current version per invocation.
+
+`regroup-stop` resolves its pole exactly like `move-stop`:
+`stop_version_id` or `xno` + `code`, with the same two "cannot resolve
+stop" rejections. The dry run shows both stations by id and name. It
+stales `station_bearing` only.
+
+`rename-station` takes `--level station|matching|all` (default
+`matching`): `station` renames the station alone, `matching` also renames
+poles whose name byte-equals the old station name, `all` renames every
+pole of the station. The dry run lists exactly which poles would follow.
+`rename-station` and `move-station` write no stale marks — names and
+coordinates are read live.
+
+`set-line` replaces a direction's whole polyline and uses a
+**concurrency-token loop**: the dry run returns `override_updated_at`;
+pass it back as `expected_updated_at` on the apply. Once an override
+exists the token is mandatory — an apply without it rejects with
+"edited by someone else — reload and retry", and the recovery is simply
+re-dry and take the fresh token. (The overwrite dry run wants the token
+too — it guards identically.)
+
 ## Undo
 
 `--apply` prints `edit_id <N>`; keep it and report it to the user.
@@ -168,8 +202,16 @@ used `--delete-pole`.
 
 ## The refresh rule
 
-**The job ends at stale marks and a report — a human presses refresh.**
-Apply writes the edit plus `stale_mark` rows and reports the stale routes;
-it never runs the pipeline. Tell the user to press rm-web's refresh
-(chain: match → segments → registry — registry is the step that rebuilds
-the edited stops' bearings), then check the result on the map.
+**An apply ends at stale marks; the map stays stale until the refresh
+chain runs (match → segments → registry — registry rebuilds the edited
+stops' bearings).** Two ways to run it:
+
+- `rm-job refresh` — the agent path. Dry run prints the pending-mark
+  report (per-table counts, up to 50 marks, never writes); `--apply`
+  runs the whole chain synchronously and reports per-step counts.
+  Safe to rerun: marks carry their causing `edit_id`, and a mid-chain
+  failure rejects with the step logs preserved.
+- rm-web's refresh button — the human path.
+
+Either is fine; pick one, don't interleave. `refresh --apply` holds a
+write connection for minutes on a big DB while it works.
