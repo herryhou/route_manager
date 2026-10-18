@@ -1,7 +1,7 @@
 //! Integration tests for POST /api/edit/polyline/{xno}/{direction}/extend,
 //! driven through the router. Graph fixtures (line_db / graphless_db and
-//! their seeds) are copied verbatim from rm-job's extend tests — same
-//! walk, same DB shape.
+//! their seeds) are copied verbatim from the retired job CLI's extend
+//! tests — same walk, same DB shape.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

@@ -720,7 +720,7 @@ mod tests {
 
     const TS: &str = "2026-01-01T00:00:00Z";
 
-    /// Route 1 with two route_version chains — rm-job applies mint a new
+    /// Route 1 with two route_version chains — edit applies mint a new
     /// chain (rv 2) and keep the old rows (rv 1), so a query filtered on
     /// route_id alone merges superseded chains into the sequence.
     fn two_chain_fixture(conn: &Connection) {

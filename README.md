@@ -148,26 +148,29 @@ own (CLAUDE.md whitelist holds).
 
 See `docs/pipeline_guide.md` § *Browsing the result: rm-web* for what it shows.
 
-## Agent data jobs (rm-job)
+## Agent data jobs (rm-web edit API)
 
 LLM agents run route/stop corrections (add, move, remove stops; extend
-paths; undo) through `rm-job`: every command prints one JSON envelope to
-stdout, every write is dry-run by default and undoable. Never apply before
-the human has seen the dry-run output; `remove-stop --delete-pole` is
-one-way. Runbook: `docs/agents/rm-jobs.md` (agents: skill `rm-jobs`).
+paths; undo) through rm-web's edit HTTP API: every write is planned before
+it happens (`apply: false`) and undoable. Never apply before the human has
+seen the plan; `detach`'s `delete_pole` is one-way. Start the server with
+`--edit --edit-tokens <editor>:<token>`; POSTs carry
+`Authorization: Bearer <token>`. Runbook: `docs/agents/rm-web-jobs.md`
+(agents: skill `rm-web-jobs`).
 
 ```sh
-# 1. discover commands / one command's JSON payload schema
-cargo run -r -p rm-job -- schema
-cargo run -r -p rm-job -- schema move-stop
+# server up (release mode), edit endpoints on
+cargo run -r -p rm-web -- --db data/taichung.db --edit --edit-tokens agent:secret
 
-# 2. dry-run: plan a stop move, write nothing
-cargo run -r -p rm-job -- move-stop --json \
-    '{"db":"data/taichung.db","xno":"1","code":"51","lat":24.1776,"lon":120.7395}'
+# 1. dry-run: plan a stop move, write nothing
+curl -s localhost:8787/api/edit/stop/101 \
+  -H "Authorization: Bearer secret" -H 'Content-Type: application/json' \
+  -d '{"lat":24.1776,"lon":120.7395,"apply":false}'
 
-# 3. apply: identical command + "apply": true, after the human approved
-cargo run -r -p rm-job -- move-stop --json \
-    '{"db":"data/taichung.db","xno":"1","code":"51","lat":24.1776,"lon":120.7395,"apply":true}'
+# 2. apply: identical request + "apply": true, after the human approved
+curl -s localhost:8787/api/edit/stop/101 \
+  -H "Authorization: Bearer secret" -H 'Content-Type: application/json' \
+  -d '{"lat":24.1776,"lon":120.7395,"apply":true}'
 ```
 
 ## Data model notes

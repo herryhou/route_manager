@@ -1,5 +1,5 @@
 //! Detach-stop edit primitive: version-chain stop removal with
-//! pointer-restore undo (spec decisions 7-9 of the rm-job agent CLI).
+//! pointer-restore undo (spec decisions 7-9 of the agent-edit plan).
 //!
 //! Detach NEVER deletes versioned rows: it mints a new route_version +
 //! subroute_version with the detached occurrence(s) left out and moves

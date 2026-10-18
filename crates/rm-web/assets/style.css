@@ -1247,8 +1247,8 @@ table.kv td:first-child {
 }
 
 /* Copy-coords context menu — a map-floater opened by right-click on the map
-   (docs/agents/rm-jobs.md). Plate surface, hairline edge, --lift is allowed
-   on map-floaters. */
+   (docs/agents/rm-web-jobs.md). Plate surface, hairline edge, --lift is
+   allowed on map-floaters. */
 .coords-menu {
   position: fixed;
   z-index: 10000;

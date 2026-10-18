@@ -1,6 +1,6 @@
 //! rm-osm-match's extend walk over a real DB: the fixture helpers and the
-//! graph-behaviour tests copied from rm-job's tests/extend.rs, planned
-//! through `rm_osm_match::extend::plan_extension` directly.
+//! graph-behaviour tests copied from the retired job CLI's tests/extend.rs,
+//! planned through `rm_osm_match::extend::plan_extension` directly.
 
 use std::path::PathBuf;
 

@@ -19,7 +19,7 @@ export const map = L.map('map', { preferCanvas: true }).fitBounds(
   { padding: [24, 24] },
 );
 
-// contextmenu → copy-coords menu for the rm-job workflow (docs/agents/rm-jobs.md).
+// contextmenu → copy-coords menu for the agent-edit workflow (docs/agents/rm-web-jobs.md).
 // The menu is a map-floater: opens at the pointer, one item copies "<lat>, <lon>".
 const coordsMenu = document.createElement('div');
 coordsMenu.className = 'coords-menu';

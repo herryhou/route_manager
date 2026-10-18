@@ -319,8 +319,8 @@ impl From<rm_db::AddStopPlan> for AddStopPlanData {
 /// POST /api/edit/stop — add a new pole to one or more directions. The
 /// default (and `apply: false`) answers the read-only dry-run plan;
 /// `apply: true` performs the write. Attach strings parse before any
-/// connection opens and an empty attach list is a 400 — both mirror
-/// rm-job's add-stop job, this endpoint's CLI sibling.
+/// connection opens and an empty attach list is a 400 — both carried
+/// over from the retired job CLI's add-stop.
 pub async fn add_stop(
     State(state): State<AppState>,
     Editor(editor): Editor,
@@ -383,7 +383,7 @@ pub struct DetachStopBody {
 }
 
 /// Serialize mirror of rm_db's `DetachPlan` (which intentionally stays
-/// non-`Serialize`) — same shape as rm-job's `PlanData`/`PlanOccurrence`.
+/// non-`Serialize`) — same shape as the retired job CLI's `PlanData`/`PlanOccurrence`.
 #[derive(Serialize)]
 pub struct DetachPlanData {
     xno: String,

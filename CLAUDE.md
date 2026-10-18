@@ -121,5 +121,5 @@ Single-context: root `GLOSSARY.md` + `docs/adr/` (created lazily). See `docs/age
 
 ### AI-assist jobs
 
-rm-job CLI for natural-language data jobs — dry-run first, never `--apply`
-without showing the plan. See `docs/agents/rm-jobs.md`.
+rm-web edit API for natural-language data jobs — dry-run first, never
+`apply: true` without showing the plan. See `docs/agents/rm-web-jobs.md`.
