@@ -39,7 +39,9 @@ The agent configures two env vars (shell profile or per session):
 Every POST to `/api/edit/...` carries
 `Authorization: Bearer $RM_EDIT_TOKEN`: missing ⇒ 401, unknown token ⇒ 403.
 GETs — the reads and `GET /api/edit/log` — need no auth (the log is not
-secret; notes are for the team).
+secret; notes are for the team). The one GET exception:
+`GET /api/edit/refresh` (the refresh poll) takes the bearer like the
+POSTs.
 
 ## Endpoints
 
@@ -198,13 +200,16 @@ that would change.
 `POST /api/edit/stop/detach` identifies the occurrence by `xno` +
 `direction` + `code`. When the code occurs more than once in the direction
 the plan says so — disambiguate with `sequence` (the `stop_sequence` to
-take) or `all`. The plan reports `pole_orphan` / `serving_directions`:
-without `delete_pole` an orphaned pole survives, detached but present.
+take) or `all`. The plan reports `pole_orphan` / `serving_directions`;
+if applying would orphan the pole, the apply is refused with a 400 naming
+`delete_pole` — nothing detaches and the pole keeps serving as before.
+Decide `delete_pole` only then (one-way; explicit human yes required).
 
 ## extend and set-line specifics
 
 `extend` snaps the direction's path ends to the OSM road graph and walks
-outward `meters` on `end` = `both` (default), `first` or `last`. The apply
+outward `meters` from the chosen end. `end` is required (`both`, `first`
+or `last`) — there is no default; omitting it is a 400. The apply
 writes the whole extended polyline as a polyline override, so it needs the
 OSM graph tables in the DB (`rm-osm-prepare`) — without them the plan
 rejects with a 400 telling you to run rm-osm-prepare. A plan whose
@@ -254,7 +259,8 @@ stops' bearings).** Two ways to run it:
   (202; single-flight — a second POST while running is 409) and
   `GET /api/edit/refresh` reports `{state, step, pending_marks, ...}`;
   poll until `state` is `done`, or `failed` (the error lands in the
-  status). Safe to rerun after a failure: marks carry their causing
+  status). The poll GET is authed — carry the bearer on it, unlike the
+  other GETs. Safe to rerun after a failure: marks carry their causing
   `edit_id`, so a rerun clears what is still stale and leaves the rest.
 - rm-web's refresh button — the human path.
 

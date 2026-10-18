@@ -36,7 +36,8 @@ Write endpoints — POST, JSON body, bearer
 - `POST /api/edit/undo/{edit_id}` — `{note?}`.
 - `POST /api/edit/refresh` — start the stale-mark chain (409 if one is
   already running); `GET /api/edit/refresh` polls `{state, step?,
-  pending_marks}` until `state` is `done`/`failed`.
+  pending_marks}` until `state` is `done`/`failed`. Bearer required on
+  both (the poll is the one authed GET).
 
 Reads (GET, no auth): `/api/stations?q=` + `/api/stations/{id}` (find a
 station/pole), `/api/routes` + `/api/routes/{id}/directions/{dir}/stops`
