@@ -129,7 +129,7 @@ To browse the result, use the web UI. It is read-only unless you pass
 it next to the pipeline:
 
 ```sh
-cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
+cargo run -r -p rm-web -- --db data/taichung.db
 ```
 
 The basemap is vector tiles rendered in-browser by vendored MapLibre GL

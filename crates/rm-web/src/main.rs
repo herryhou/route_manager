@@ -12,7 +12,7 @@ struct Args {
     db: PathBuf,
 
     /// Listen address
-    #[arg(long, default_value = "127.0.0.1:8787")]
+    #[arg(long, default_value = "0.0.0.0:8787")]
     addr: SocketAddr,
 
     /// Tile URL template override (default: OpenStreetMap raster tiles; needs internet)

@@ -8,13 +8,13 @@ stay running while the pipeline writes.
 ## How to run
 
 ```sh
-cargo run -r -p rm-web -- --db data/taichung.db --addr 127.0.0.1:8787
+cargo run -r -p rm-web -- --db data/taichung.db
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--db` | `data/taichung.db` | pipeline database to view |
-| `--addr` | `127.0.0.1:8787` | listen address |
+| `--addr` | `0.0.0.0:8787` | listen address |
 | `--tiles` | OpenStreetMap raster tiles | basemap URL template override |
 
 The default basemap needs internet; every other layer is offline. Web
