@@ -17,6 +17,14 @@ fn default_end() -> String {
     "both".to_string()
 }
 
+fn default_level() -> String {
+    "matching".to_string()
+}
+
+fn default_outlier_m() -> f64 {
+    50.0
+}
+
 /// `rm-job add-stop --json '...'`
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct AddStopParams {
@@ -181,4 +189,126 @@ pub struct UndoParams {
     /// Editor name recorded on the undo's audit row
     #[serde(default = "default_editor")]
     pub editor: String,
+}
+
+/// `rm-job regroup-stop --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RegroupStopParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Target pole's stop_version_id (else resolve xno + code)
+    #[serde(default)]
+    pub stop_version_id: Option<i64>,
+    /// Route XNO to resolve the pole on (with code, when stop_version_id is absent)
+    #[serde(default)]
+    pub xno: Option<String>,
+    /// Exact stop code to resolve the pole (with xno, when stop_version_id is absent)
+    #[serde(default)]
+    pub code: Option<String>,
+    /// Destination station_id (the id rm-job read commands print)
+    pub station: i64,
+    /// Editor name recorded on the audit row
+    #[serde(default = "default_editor")]
+    pub editor: String,
+    /// Note recorded on the audit row
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Write the edit (default: dry run)
+    #[serde(default)]
+    pub apply: bool,
+}
+
+/// `rm-job rename-station --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RenameStationParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Station_id (the id rm-job read commands print)
+    pub station: i64,
+    /// New station name
+    pub new_name: String,
+    /// How far the rename spreads: station, matching or all
+    #[serde(default = "default_level")]
+    pub level: String,
+    /// Editor name recorded on the audit row
+    #[serde(default = "default_editor")]
+    pub editor: String,
+    /// Note recorded on the audit row
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Write the edit (default: dry run)
+    #[serde(default)]
+    pub apply: bool,
+}
+
+/// `rm-job move-station --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MoveStationParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Station_id (the id rm-job read commands print)
+    pub station: i64,
+    /// New latitude
+    pub lat: f64,
+    /// New longitude
+    pub lon: f64,
+    /// Editor name recorded on the audit row
+    #[serde(default = "default_editor")]
+    pub editor: String,
+    /// Note recorded on the audit row
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Write the edit (default: dry run)
+    #[serde(default)]
+    pub apply: bool,
+}
+
+/// `rm-job set-line --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetLineParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Route XNO
+    pub xno: String,
+    /// Direction (0 = outbound, 1 = inbound)
+    pub direction: i64,
+    /// The whole direction's polyline, in order, [lat, lon] pairs
+    pub points: Vec<[f64; 2]>,
+    /// Concurrency token: the override's updated_at from show-path — required
+    /// once an override exists, rejected as "edited by someone else" otherwise
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
+    /// Editor name recorded on the audit row
+    #[serde(default = "default_editor")]
+    pub editor: String,
+    /// Note recorded on the audit row
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Write the override (default: dry run)
+    #[serde(default)]
+    pub apply: bool,
+}
+
+/// `rm-job edit-log --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EditLogParams {
+    /// SQLite DB path
+    pub db: String,
+    /// Entity kind: stop, station, polyline, stop_add or stop_detach
+    pub entity: String,
+    /// The entity's id
+    pub entity_id: i64,
+}
+
+/// `rm-job refresh --json '...'`
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RefreshParams {
+    /// SQLite DB path
+    pub db: String,
+    /// rm-segments outlier threshold (m)
+    #[serde(default = "default_outlier_m")]
+    pub outlier_m: f64,
+    /// Run the match → segments → registry chain (default: dry run)
+    #[serde(default)]
+    pub apply: bool,
 }

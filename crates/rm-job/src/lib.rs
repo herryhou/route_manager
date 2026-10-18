@@ -18,9 +18,11 @@ use clap::{Parser, Subcommand};
 use serde::Serialize;
 
 use rm_db::{
-    add_stop, detach_stop, edit_polyline_line, edit_stop, plan_add_stop, plan_detach_stop,
-    preview_stop_edit, undo_edit, AddStopCmd, AddStopOutcome, AddStopPlan, AttachCmd, DetachCmd,
-    DetachPlan, LineEditCmd, StationVerdict, StopEdit, UndoOutcome,
+    add_stop, detach_stop, edit_polyline_line, edit_stop, entity_history, move_station,
+    plan_add_stop, plan_detach_stop, plan_move_station, plan_polyline_line, plan_regroup_stop,
+    plan_rename_station, preview_stop_edit, regroup_stop, rename_station, undo_edit, AddStopCmd,
+    AddStopOutcome, AddStopPlan, AttachCmd, DetachCmd, DetachPlan, LineEditCmd, RegroupStop,
+    RenameLevel, StationMove, StationRename, StationVerdict, StopEdit, UndoOutcome,
 };
 
 /// Everything one run wrote: `out` is the envelope JSON (the only stdout
@@ -208,6 +210,128 @@ pub enum Command {
         #[arg(long)]
         json: Option<String>,
     },
+    /// Move one stop pole to another station (dry run unless --apply).
+    RegroupStop {
+        /// Target pole's stop_version_id (else resolve --xno + --code)
+        #[arg(long)]
+        stop_version_id: Option<i64>,
+        /// Route XNO to resolve the pole on (with --code)
+        #[arg(long)]
+        xno: Option<String>,
+        /// Exact stop code to resolve the pole (with --xno)
+        #[arg(long)]
+        code: Option<String>,
+        /// Destination station_id
+        #[arg(long, required_unless_present = "json")]
+        station: Option<i64>,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Editor name recorded on the audit row
+        #[arg(long, default_value = "rm-job")]
+        editor: String,
+        /// Note recorded on the audit row
+        #[arg(long)]
+        note: Option<String>,
+        /// Write the edit (default: dry run)
+        #[arg(long)]
+        apply: bool,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// regroup-stop`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
+    /// Rename a station, optionally spreading to its poles (dry run unless
+    /// --apply).
+    RenameStation {
+        /// The station's station_id (rm-job read commands print it)
+        #[arg(long, required_unless_present = "json")]
+        station: Option<i64>,
+        /// New station name
+        #[arg(long, required_unless_present = "json")]
+        new_name: Option<String>,
+        /// How far the rename spreads: station, matching or all
+        #[arg(long, default_value = "matching")]
+        level: String,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Editor name recorded on the audit row
+        #[arg(long, default_value = "rm-job")]
+        editor: String,
+        /// Note recorded on the audit row
+        #[arg(long)]
+        note: Option<String>,
+        /// Write the edit (default: dry run)
+        #[arg(long)]
+        apply: bool,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// rename-station`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
+    /// Move a station's reference point; poles follow their own coords
+    /// (dry run unless --apply).
+    MoveStation {
+        /// The station's station_id (rm-job read commands print it)
+        #[arg(long, required_unless_present = "json")]
+        station: Option<i64>,
+        /// New latitude
+        #[arg(long, required_unless_present = "json")]
+        lat: Option<f64>,
+        /// New longitude
+        #[arg(long, required_unless_present = "json")]
+        lon: Option<f64>,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Editor name recorded on the audit row
+        #[arg(long, default_value = "rm-job")]
+        editor: String,
+        /// Note recorded on the audit row
+        #[arg(long)]
+        note: Option<String>,
+        /// Write the edit (default: dry run)
+        #[arg(long)]
+        apply: bool,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// move-station`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
+    /// Replace a direction's polyline with a whole-line override (dry run
+    /// unless --apply).
+    SetLine {
+        /// Route XNO
+        #[arg(required_unless_present = "json")]
+        xno: Option<String>,
+        /// Direction (0 = outbound, 1 = inbound)
+        #[arg(required_unless_present = "json")]
+        direction: Option<i64>,
+        /// Path point as LAT,LON — repeatable, in path order
+        #[arg(long = "point")]
+        point: Vec<String>,
+        /// Concurrency token: the current override's updated_at (show-path
+        /// prints it); required once an override exists
+        #[arg(long)]
+        expected_updated_at: Option<String>,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Editor name recorded on the audit row
+        #[arg(long, default_value = "rm-job")]
+        editor: String,
+        /// Note recorded on the audit row
+        #[arg(long)]
+        note: Option<String>,
+        /// Write the override (default: dry run)
+        #[arg(long)]
+        apply: bool,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// set-line`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
     /// Undo a job edit by its edit_log id.
     Undo {
         /// The edit_log id to undo (printed by --apply)
@@ -275,6 +399,22 @@ pub enum Command {
         #[arg(long)]
         json: Option<String>,
     },
+    /// One entity's edit_log rows, newest first (read-only).
+    EditLog {
+        /// Entity kind: stop, station, polyline, stop_add or stop_detach
+        #[arg(required_unless_present = "json")]
+        entity: Option<String>,
+        /// The entity's id
+        #[arg(required_unless_present = "json")]
+        entity_id: Option<i64>,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// edit-log`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
     /// Print command schemas: every command, or one --json payload schema.
     Schema {
         /// The command to describe (omit: list every command)
@@ -308,6 +448,38 @@ pub fn parse_attach(s: &str) -> Result<AttachCmd, String> {
         direction,
         after_stop_code: after.map(str::to_string),
     })
+}
+
+const LEVEL_USAGE: &str = "usage: --level station|matching|all";
+
+/// Parse `--level`: rm-web's three rename spreads — the flag spellings are
+/// lowercase, rm_db's `RenameLevel::as_str` (the audit row + plan JSON)
+/// uses the PascalCase variants.
+pub fn parse_level(s: &str) -> Result<RenameLevel, String> {
+    match s {
+        "station" => Ok(RenameLevel::StationOnly),
+        "matching" => Ok(RenameLevel::MatchingPoles),
+        "all" => Ok(RenameLevel::AllPoles),
+        _ => Err(format!(
+            "invalid --level '{s}': expected station, matching or all; {LEVEL_USAGE}"
+        )),
+    }
+}
+
+const POINT_USAGE: &str = "usage: --point LAT,LON (repeatable, in path order)";
+
+/// Parse one `--point LAT,LON`.
+pub fn parse_point(s: &str) -> Result<[f64; 2], String> {
+    let (lat, lon) = s
+        .split_once(',')
+        .ok_or_else(|| format!("invalid --point '{s}': expected LAT,LON; {POINT_USAGE}"))?;
+    let lat = lat.trim().parse::<f64>().map_err(|_| {
+        format!("invalid --point '{s}': latitude '{lat}' is not a number; {POINT_USAGE}")
+    })?;
+    let lon = lon.trim().parse::<f64>().map_err(|_| {
+        format!("invalid --point '{s}': longitude '{lon}' is not a number; {POINT_USAGE}")
+    })?;
+    Ok([lat, lon])
 }
 
 /// What one command concluded; `run` maps it to the envelope and exit code.
@@ -509,6 +681,150 @@ fn dispatch(cli: Cli) -> (&'static str, Outcome) {
             };
             extend_path_job(p)
         }
+        Command::RegroupStop {
+            stop_version_id,
+            xno,
+            code,
+            station,
+            db,
+            editor,
+            note,
+            apply,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::RegroupStopParams>(&payload)
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "regroup-stop",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::RegroupStopParams {
+                    stop_version_id,
+                    xno,
+                    code,
+                    // clap requires station unless --json is present
+                    station: station.unwrap_or(0),
+                    db: db.display().to_string(),
+                    editor,
+                    note,
+                    apply,
+                },
+            };
+            regroup_stop_job(p)
+        }
+        Command::RenameStation {
+            station,
+            new_name,
+            level,
+            db,
+            editor,
+            note,
+            apply,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::RenameStationParams>(&payload)
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "rename-station",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::RenameStationParams {
+                    // clap requires station and new_name unless --json is present
+                    station: station.unwrap_or(0),
+                    new_name: new_name.unwrap_or_default(),
+                    level,
+                    db: db.display().to_string(),
+                    editor,
+                    note,
+                    apply,
+                },
+            };
+            rename_station_job(p)
+        }
+        Command::MoveStation {
+            station,
+            lat,
+            lon,
+            db,
+            editor,
+            note,
+            apply,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::MoveStationParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "move-station",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::MoveStationParams {
+                    // clap requires station, lat and lon unless --json is present
+                    station: station.unwrap_or(0),
+                    lat: lat.unwrap_or(0.0),
+                    lon: lon.unwrap_or(0.0),
+                    db: db.display().to_string(),
+                    editor,
+                    note,
+                    apply,
+                },
+            };
+            move_station_job(p)
+        }
+        Command::SetLine {
+            xno,
+            direction,
+            point,
+            expected_updated_at,
+            db,
+            editor,
+            note,
+            apply,
+            json,
+        } => {
+            // parse the flag points before anything else — a bad LAT,LON
+            // must reject without touching the DB ("parse before open")
+            let points = match point.iter().map(|s| parse_point(s)).collect() {
+                Ok(points) => points,
+                Err(e) => return ("set-line", Outcome::Rejected(e)),
+            };
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::SetLineParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "set-line",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::SetLineParams {
+                    // clap requires xno and direction unless --json is present
+                    xno: xno.unwrap_or_default(),
+                    direction: direction.unwrap_or(0),
+                    points,
+                    expected_updated_at,
+                    db: db.display().to_string(),
+                    editor,
+                    note,
+                    apply,
+                },
+            };
+            set_line_job(p)
+        }
         Command::Undo {
             edit_id,
             db,
@@ -602,6 +918,31 @@ fn dispatch(cli: Cli) -> (&'static str, Outcome) {
             };
             show_path_job(p)
         }
+        Command::EditLog {
+            entity,
+            entity_id,
+            db,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::EditLogParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "edit-log",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::EditLogParams {
+                    // clap requires entity and entity_id unless --json is present
+                    entity: entity.unwrap_or_default(),
+                    entity_id: entity_id.unwrap_or(0),
+                    db: db.display().to_string(),
+                },
+            };
+            edit_log_job(p)
+        }
         Command::Schema { command } => match command.as_deref() {
             None => ("schema", Outcome::Ok(schema_list(), Vec::new())),
             Some(name) => match schema_for(name) {
@@ -673,6 +1014,42 @@ fn open_conn(apply: bool, db: &str) -> anyhow::Result<rusqlite::Connection> {
     }
 }
 
+/// Resolve the target pole for a stop-level edit: `stop_version_id` if
+/// given, else `xno`+`code` must match exactly one current pole. `Err`
+/// carries the CLI rejection reason. Shared by move-stop and regroup-stop.
+fn resolve_stop_svi(
+    conn: &rusqlite::Connection,
+    stop_version_id: Option<i64>,
+    xno: Option<&str>,
+    code: Option<&str>,
+) -> Result<i64, String> {
+    match stop_version_id {
+        Some(svi) => Ok(svi),
+        None => match (xno, code) {
+            (Some(xno), Some(code)) => match queries::find_stop(conn, xno, None, Some(code)) {
+                Ok(candidates) if candidates.len() == 1 => Ok(candidates[0].stop_version_id),
+                Ok(candidates) if candidates.is_empty() => Err(format!(
+                    "cannot resolve stop: route '{xno}' has no current stop with code '{code}'"
+                )),
+                Ok(candidates) => {
+                    let ids = candidates
+                        .iter()
+                        .map(|c| c.stop_version_id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    Err(format!(
+                        "cannot resolve stop: {} current poles on route '{xno}' match \
+                         code '{code}' — pass stop_version_id ({ids})",
+                        candidates.len()
+                    ))
+                }
+                Err(e) => Err(format!("{e:#}")),
+            },
+            _ => Err("cannot resolve stop: give stop_version_id, or both xno and code".into()),
+        },
+    }
+}
+
 /// The move-stop job over one resolved payload: resolve the target pole
 /// (`stop_version_id` if given, else `xno`+`code` must match exactly one
 /// current pole), then preview (dry run) or apply.
@@ -681,45 +1058,14 @@ fn move_stop_job(p: params::MoveStopParams) -> (&'static str, Outcome) {
         Ok(c) => c,
         Err(e) => return ("move-stop", Outcome::Rejected(format!("{e:#}"))),
     };
-    let svi = match p.stop_version_id {
-        Some(svi) => svi,
-        None => match (p.xno.as_deref(), p.code.as_deref()) {
-            (Some(xno), Some(code)) => match queries::find_stop(&conn, xno, None, Some(code)) {
-                Ok(candidates) if candidates.len() == 1 => candidates[0].stop_version_id,
-                Ok(candidates) if candidates.is_empty() => {
-                    return (
-                        "move-stop",
-                        Outcome::Rejected(format!(
-                        "cannot resolve stop: route '{xno}' has no current stop with code '{code}'"
-                    )),
-                    )
-                }
-                Ok(candidates) => {
-                    let ids = candidates
-                        .iter()
-                        .map(|c| c.stop_version_id.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return (
-                        "move-stop",
-                        Outcome::Rejected(format!(
-                            "cannot resolve stop: {} current poles on route '{xno}' match \
-                             code '{code}' — pass stop_version_id ({ids})",
-                            candidates.len()
-                        )),
-                    );
-                }
-                Err(e) => return ("move-stop", Outcome::Rejected(format!("{e:#}"))),
-            },
-            _ => {
-                return (
-                    "move-stop",
-                    Outcome::Rejected(
-                        "cannot resolve stop: give stop_version_id, or both xno and code".into(),
-                    ),
-                )
-            }
-        },
+    let svi = match resolve_stop_svi(
+        &conn,
+        p.stop_version_id,
+        p.xno.as_deref(),
+        p.code.as_deref(),
+    ) {
+        Ok(svi) => svi,
+        Err(e) => return ("move-stop", Outcome::Rejected(e)),
     };
     let cmd = StopEdit {
         lat: p.lat,
@@ -760,6 +1106,276 @@ fn move_stop_job(p: params::MoveStopParams) -> (&'static str, Outcome) {
                 ),
             ),
             Err(e) => return ("move-stop", Outcome::Rejected(format!("{e:#}"))),
+        }
+    }
+}
+
+/// The regroup-stop job: resolve the target pole like move-stop, then plan.
+/// The plan runs on --apply too — its station ids feed the outcome — and the
+/// apply leg re-validates currency inside its tx.
+fn regroup_stop_job(p: params::RegroupStopParams) -> (&'static str, Outcome) {
+    let conn = match open_conn(p.apply, &p.db) {
+        Ok(c) => c,
+        Err(e) => return ("regroup-stop", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let svi = match resolve_stop_svi(
+        &conn,
+        p.stop_version_id,
+        p.xno.as_deref(),
+        p.code.as_deref(),
+    ) {
+        Ok(svi) => svi,
+        Err(e) => return ("regroup-stop", Outcome::Rejected(e)),
+    };
+    let cmd = || RegroupStop {
+        stop_version_id: svi,
+        new_station_id: p.station,
+    };
+    let plan = match plan_regroup_stop(&conn, cmd()) {
+        Ok(plan) => plan,
+        Err(e) => return ("regroup-stop", Outcome::Rejected(format!("{e:#}"))),
+    };
+    if !p.apply {
+        return (
+            "regroup-stop",
+            Outcome::Ok(
+                serde_json::json!({
+                    "stop_id": plan.stop_id,
+                    "stop_version_id": plan.stop_version_id,
+                    "stop_code": plan.stop_code,
+                    "stop_name": plan.stop_name,
+                    "old_station_id": plan.old_station_id,
+                    "old_station_name": plan.old_station_name,
+                    "new_station_id": plan.new_station_id,
+                    "new_station_name": plan.new_station_name,
+                }),
+                Vec::new(),
+            ),
+        );
+    }
+    let out = match regroup_stop(&conn, cmd(), &p.editor, p.note.as_deref().unwrap_or("")) {
+        Ok(o) => o,
+        Err(e) => return ("regroup-stop", Outcome::Rejected(format!("{e:#}"))),
+    };
+    (
+        "regroup-stop",
+        Outcome::Ok(
+            serde_json::json!({
+                "edit_id": out.edit_id,
+                "new_stop_version_id": out.new_version_id,
+                "old_station_id": plan.old_station_id,
+                "new_station_id": plan.new_station_id,
+            }),
+            Vec::new(),
+        ),
+    )
+}
+
+/// The rename-station job: parse the level, resolve the station's current
+/// version from its stable station_id, then plan (dry run) or apply. Apply
+/// reports the churned poles with their new versions.
+fn rename_station_job(p: params::RenameStationParams) -> (&'static str, Outcome) {
+    let level = match parse_level(&p.level) {
+        Ok(l) => l,
+        Err(e) => return ("rename-station", Outcome::Rejected(e)),
+    };
+    let conn = match open_conn(p.apply, &p.db) {
+        Ok(c) => c,
+        Err(e) => return ("rename-station", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let svi = match queries::resolve_station(&conn, p.station) {
+        Ok(Some((svi, _))) => svi,
+        Ok(None) => {
+            return (
+                "rename-station",
+                Outcome::Rejected(format!(
+                    "station {} does not exist or is not current",
+                    p.station
+                )),
+            )
+        }
+        Err(e) => return ("rename-station", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let cmd = StationRename {
+        station_version_id: svi,
+        new_name: p.new_name,
+        level,
+    };
+    if p.apply {
+        match rename_station(&conn, cmd, &p.editor, p.note.as_deref().unwrap_or("")) {
+            Ok(o) => (
+                "rename-station",
+                Outcome::Ok(
+                    serde_json::json!({
+                        "edit_id": o.edit_id,
+                        "new_station_version_id": o.new_station_version_id,
+                        "poles_follow": o.poles.len(),
+                        "poles": o.poles
+                            .iter()
+                            .map(|pl| serde_json::json!({
+                                "stop_id": pl.stop_id,
+                                "old_stop_version_id": pl.old_svi,
+                                "new_stop_version_id": pl.new_svi,
+                            }))
+                            .collect::<Vec<_>>(),
+                    }),
+                    Vec::new(),
+                ),
+            ),
+            Err(e) => return ("rename-station", Outcome::Rejected(format!("{e:#}"))),
+        }
+    } else {
+        match plan_rename_station(&conn, cmd) {
+            Ok(plan) => (
+                "rename-station",
+                Outcome::Ok(
+                    serde_json::json!({
+                        "station_id": plan.station_id,
+                        "station_version_id": plan.station_version_id,
+                        "old_name": plan.old_name,
+                        "new_name": plan.new_name,
+                        "level": plan.level,
+                        "poles_follow": plan.poles.len(),
+                        "poles": plan.poles
+                            .iter()
+                            .map(|pl| serde_json::json!({
+                                "stop_id": pl.stop_id,
+                                "stop_version_id": pl.stop_version_id,
+                                "old_name": pl.old_name,
+                                "new_name": pl.new_name,
+                            }))
+                            .collect::<Vec<_>>(),
+                    }),
+                    Vec::new(),
+                ),
+            ),
+            Err(e) => return ("rename-station", Outcome::Rejected(format!("{e:#}"))),
+        }
+    }
+}
+
+/// The move-station job: range-check the coords before the DB opens (same
+/// check as rm-web's endpoint), resolve the station's current version, then
+/// plan (dry run) or apply. Poles keep their own coords — the station point
+/// is the reference only.
+fn move_station_job(p: params::MoveStationParams) -> (&'static str, Outcome) {
+    if !(-90.0..=90.0).contains(&p.lat) {
+        return ("move-station", Outcome::Rejected("lat out of range".into()));
+    }
+    if !(-180.0..=180.0).contains(&p.lon) {
+        return ("move-station", Outcome::Rejected("lon out of range".into()));
+    }
+    let conn = match open_conn(p.apply, &p.db) {
+        Ok(c) => c,
+        Err(e) => return ("move-station", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let svi = match queries::resolve_station(&conn, p.station) {
+        Ok(Some((svi, _))) => svi,
+        Ok(None) => {
+            return (
+                "move-station",
+                Outcome::Rejected(format!(
+                    "station {} does not exist or is not current",
+                    p.station
+                )),
+            )
+        }
+        Err(e) => return ("move-station", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let cmd = StationMove {
+        station_version_id: svi,
+        latitude: p.lat,
+        longitude: p.lon,
+    };
+    if p.apply {
+        match move_station(&conn, cmd, &p.editor, p.note.as_deref().unwrap_or("")) {
+            Ok(o) => (
+                "move-station",
+                Outcome::Ok(
+                    serde_json::json!({
+                        "edit_id": o.edit_id,
+                        "new_station_version_id": o.new_station_version_id,
+                    }),
+                    Vec::new(),
+                ),
+            ),
+            Err(e) => return ("move-station", Outcome::Rejected(format!("{e:#}"))),
+        }
+    } else {
+        match plan_move_station(&conn, cmd) {
+            Ok(plan) => (
+                "move-station",
+                Outcome::Ok(
+                    serde_json::json!({
+                        "station_id": plan.station_id,
+                        "station_version_id": plan.station_version_id,
+                        "station_name": plan.station_name,
+                        "old_lat": plan.old_latitude,
+                        "old_lon": plan.old_longitude,
+                        "new_lat": plan.new_latitude,
+                        "new_lon": plan.new_longitude,
+                    }),
+                    Vec::new(),
+                ),
+            ),
+            Err(e) => return ("move-station", Outcome::Rejected(format!("{e:#}"))),
+        }
+    }
+}
+
+/// The set-line job over one resolved payload (points already parsed): plan
+/// the whole-line override (dry run) or apply it. The dry run reports
+/// `override_updated_at` — the concurrency token agents pass back as
+/// `expected_updated_at`; overwriting an existing override without it
+/// rejects as "edited by someone else".
+fn set_line_job(p: params::SetLineParams) -> (&'static str, Outcome) {
+    let n = p.points.len();
+    let conn = match open_conn(p.apply, &p.db) {
+        Ok(c) => c,
+        Err(e) => return ("set-line", Outcome::Rejected(format!("{e:#}"))),
+    };
+    let cmd = LineEditCmd {
+        xno: p.xno.clone(),
+        direction: p.direction,
+        points: p.points,
+        expected_updated_at: p.expected_updated_at,
+    };
+    if p.apply {
+        match edit_polyline_line(&conn, cmd, &p.editor, p.note.as_deref().unwrap_or("")) {
+            Ok(o) => (
+                "set-line",
+                Outcome::Ok(
+                    serde_json::json!({
+                        "edit_id": o.edit_id,
+                        "created": o.created,
+                        "updated_at": o.updated_at,
+                        "points": n,
+                    }),
+                    Vec::new(),
+                ),
+            ),
+            Err(e) => return ("set-line", Outcome::Rejected(format!("{e:#}"))),
+        }
+    } else {
+        match plan_polyline_line(&conn, cmd) {
+            Ok(plan) => (
+                "set-line",
+                Outcome::Ok(
+                    serde_json::json!({
+                        "route_id": plan.route_id,
+                        "route_version_id": plan.route_version_id,
+                        "xno": plan.xno,
+                        "direction": plan.direction,
+                        "replaces": plan.replaces,
+                        "created": plan.created,
+                        "points": plan.points,
+                        "encoded": plan.encoded,
+                        "override_updated_at": plan.expected_updated_at,
+                    }),
+                    Vec::new(),
+                ),
+            ),
+            Err(e) => return ("set-line", Outcome::Rejected(format!("{e:#}"))),
         }
     }
 }
@@ -1024,6 +1640,23 @@ fn show_path_job(p: params::ShowPathParams) -> (&'static str, Outcome) {
     }
 }
 
+/// The edit-log job: one entity's audit rows, newest first. Unknown entity
+/// kinds and ids are an empty list — the log is a fact, not a lookup with
+/// a miss.
+fn edit_log_job(p: params::EditLogParams) -> (&'static str, Outcome) {
+    let conn = match rm_db::open_readonly(&PathBuf::from(&p.db)) {
+        Ok(c) => c,
+        Err(e) => return ("edit-log", Outcome::Rejected(format!("{e:#}"))),
+    };
+    match entity_history(&conn, &p.entity, p.entity_id) {
+        Ok(rows) => (
+            "edit-log",
+            Outcome::Ok(serde_json::json!({ "rows": rows }), Vec::new()),
+        ),
+        Err(e) => ("edit-log", Outcome::Rejected(format!("{e:#}"))),
+    }
+}
+
 /// The `schema` command's list form: every command with its description.
 pub fn schema_list() -> serde_json::Value {
     serde_json::json!({
@@ -1045,6 +1678,22 @@ pub fn schema_list() -> serde_json::Value {
                 "description": "Extend a direction's polyline outward along the OSM road graph, written as a polyline override (dry run unless --apply).",
             },
             {
+                "name": "regroup-stop",
+                "description": "Move one stop pole to another station (dry run unless --apply).",
+            },
+            {
+                "name": "rename-station",
+                "description": "Rename a station, optionally spreading to its poles (dry run unless --apply).",
+            },
+            {
+                "name": "move-station",
+                "description": "Move a station's reference point; poles follow their own coords (dry run unless --apply).",
+            },
+            {
+                "name": "set-line",
+                "description": "Replace a direction's polyline with a whole-line override (dry run unless --apply).",
+            },
+            {
                 "name": "undo",
                 "description": "Undo a job edit by its edit_log id.",
             },
@@ -1059,6 +1708,10 @@ pub fn schema_list() -> serde_json::Value {
             {
                 "name": "show-path",
                 "description": "One route direction's effective polyline: source, encoded, endpoints (read-only).",
+            },
+            {
+                "name": "edit-log",
+                "description": "One entity's edit_log rows, newest first (read-only).",
             },
             {
                 "name": "schema",
@@ -1087,6 +1740,22 @@ pub fn schema_for(name: &str) -> Option<serde_json::Value> {
             "command": name,
             "schema": schemars::schema_for!(params::ExtendPathParams),
         })),
+        "regroup-stop" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::RegroupStopParams),
+        })),
+        "rename-station" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::RenameStationParams),
+        })),
+        "move-station" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::MoveStationParams),
+        })),
+        "set-line" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::SetLineParams),
+        })),
         "undo" => Some(serde_json::json!({
             "command": name,
             "schema": schemars::schema_for!(params::UndoParams),
@@ -1102,6 +1771,10 @@ pub fn schema_for(name: &str) -> Option<serde_json::Value> {
         "show-path" => Some(serde_json::json!({
             "command": name,
             "schema": schemars::schema_for!(params::ShowPathParams),
+        })),
+        "edit-log" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::EditLogParams),
         })),
         _ => None,
     }

@@ -80,6 +80,23 @@ fn resolve_route(conn: &Connection, xno: &str) -> Result<Option<(i64, i64)>> {
     Ok(route_version_id.map(|rv| (route_id, rv)))
 }
 
+/// A station's current version: `(station_version_id, station_name)`.
+/// `None` when the station_id has no current version (unknown id or
+/// superseded). Same SQL spelling as the station lookup in rm_db's
+/// add-stop service — station commands resolve the stable station_id per
+/// invocation; the apply leg re-validates currency inside its tx.
+pub fn resolve_station(conn: &Connection, station_id: i64) -> Result<Option<(i64, String)>> {
+    Ok(conn
+        .query_row(
+            "SELECT station_version_id, station_name FROM station_version
+             WHERE station_id = ?1 AND valid_to IS NULL
+             ORDER BY station_version_id LIMIT 1",
+            [station_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?)
+}
+
 /// Current poles on one route matching the name substring / exact code —
 /// both filters are ANDed; neither given returns every stop. An unknown
 /// route is an error (the CLI rejects); a known route with no match is an
