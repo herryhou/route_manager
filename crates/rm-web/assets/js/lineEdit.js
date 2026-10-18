@@ -119,7 +119,12 @@ function followInsertDrag(s, i) {
 export function startLineEdit(routeId, dir, xno, raw, onSaved) {
   const coords = raw?.path?.geometry?.coordinates ?? [];
   const eff = raw?.effective;
-  if (coords.length < 2 || (eff?.points?.length ?? 0) < 2) return;
+  if (coords.length < 2 || (eff?.points?.length ?? 0) < 2) {
+    // Say why instead of dying silently — a degenerate payload here reads
+    // as "修線壞了" (a short full-line override + 更新 produces exactly this).
+    window.__rmStatus?.('無法修線：此方向的有效線少於 2 點');
+    return;
+  }
   stopLineEdit();
   const map = window.__rmMap;
   const src = coords.map(([lon, lat]) => [lat, lon]); // GeoJSON lon-first → bus [lat,lon], once
