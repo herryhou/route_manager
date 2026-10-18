@@ -196,3 +196,30 @@ fn empty_osm_tables_rejected_with_prepare_hint() {
         "prepare hint surfaced verbatim: {err}"
     );
 }
+
+/// Pre-0013 DB degrade (the /raw incident rule): with `polyline_override`
+/// dropped, planning still works — the snapshot falls back to the manual
+/// src queries, the source reports src, and `logs` names the missing table
+/// instead of erroring.
+#[test]
+fn plan_extension_degrades_without_override_table() {
+    let (_dir, db) = line_db();
+    {
+        let conn = rm_db::open(&db).unwrap();
+        conn.execute("DROP TABLE polyline_override", []).unwrap();
+    }
+    let conn = rm_db::open_readonly(&db).unwrap();
+    let mut logs = Vec::new();
+    let (_candidate, exts, source) =
+        plan_extension(&conn, "1", 0, 15.0, "last", &mut logs).unwrap();
+    assert_eq!(source, "src", "degraded snapshot loads the src polyline");
+    assert!(
+        logs.iter()
+            .any(|l| l.contains("polyline_override table missing")),
+        "degrade entry names the missing table: {logs:?}"
+    );
+    assert!(
+        !exts[0].new_vertices.is_empty(),
+        "walk still extends off the src path"
+    );
+}

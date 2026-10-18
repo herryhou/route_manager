@@ -4,7 +4,7 @@
 //! Dijkstra until `meters` of graph distance, preferring the
 //! straightest continuation at every fan-out. All read-only; the write
 //! (a whole-line polyline override) is `rm_db::edit_polyline_line`,
-//! driven from the dispatch in `lib.rs`.
+//! driven from rm-web's polyline extend endpoint.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
