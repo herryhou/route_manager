@@ -1,5 +1,6 @@
 //! Viterbi map matching of direction polylines onto OSM ways.
 
+pub mod extend;
 pub mod graph;
 pub mod models;
 pub mod viterbi;
