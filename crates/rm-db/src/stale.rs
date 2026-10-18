@@ -121,8 +121,17 @@ pub fn clear_all_if_unchanged(tx: &Connection, tokens: &[(i64, i64)]) -> Result<
 }
 
 /// Marks waiting for a refresh run — the UI's stale counter.
+/// Pending work for the rm-web 更新 badge: the number of distinct
+/// cause edits, not raw mark rows — one stop move inserts several unit
+/// rows (bearings + projections) that would read as "3 pending edits".
+/// Re-marking the same unit supersedes the old cause (PK merge), so this
+/// is a lower bound on the edits behind the pending units.
 pub fn pending_count(conn: &Connection) -> Result<i64> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM stale_mark", [], |r| r.get(0))?)
+    Ok(conn.query_row(
+        "SELECT COUNT(DISTINCT cause_edit_id) FROM stale_mark",
+        [],
+        |r| r.get(0),
+    )?)
 }
 
 /// `seg_match` key: one direction of one route. Writers and the match
@@ -428,6 +437,30 @@ mod tests {
         let routes = mark_position_stale(&conn, 999, 5, "t").unwrap();
         assert!(routes.is_empty());
         assert_eq!(pending_count(&conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn pending_count_counts_cause_edits_not_mark_rows() {
+        let conn = open_in_memory().unwrap();
+        seed_edit(&conn, 5);
+        seed_edit(&conn, 6);
+        // one edit marks several units — one pending edit, not three
+        mark(&conn, StaleTable::StopBearing, "*", 5, "t").unwrap();
+        mark(&conn, StaleTable::StationBearing, "*", 5, "t").unwrap();
+        mark(&conn, StaleTable::PathStopProjection, "7", 5, "t").unwrap();
+        assert_eq!(pending_count(&conn).unwrap(), 1);
+        // a second edit joins — two
+        mark(&conn, StaleTable::SegMatch, "7:1", 6, "t").unwrap();
+        assert_eq!(pending_count(&conn).unwrap(), 2);
+        // re-marking every unit of edit 5 under edit 6 supersedes the cause
+        mark(&conn, StaleTable::StopBearing, "*", 6, "t").unwrap();
+        mark(&conn, StaleTable::StationBearing, "*", 6, "t").unwrap();
+        mark(&conn, StaleTable::PathStopProjection, "7", 6, "t").unwrap();
+        assert_eq!(
+            pending_count(&conn).unwrap(),
+            1,
+            "superseded cause drops out"
+        );
     }
 
     #[test]

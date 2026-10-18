@@ -956,7 +956,7 @@ async function boot() {
             rbtn.disabled = false;
             setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
             if (v.state === 'failed') status(`更新失敗: ${v.error}`);
-            else status(v.pending_marks > 0 ? `更新完成，保留 ${v.pending_marks} 筆待標` : '更新完成');
+            else status(v.pending_marks > 0 ? `更新完成，尚有 ${v.pending_marks} 筆編輯待更新` : '更新完成');
             // Derived data changed server-side (failed runs may still have
             // committed earlier steps): drop the piece-panel way-run cache
             // and redraw what's on screen.
