@@ -38,9 +38,29 @@ map.on('contextmenu', (e) => {
   item.type = 'button';
   item.className = 'coords-menu-item';
   item.textContent = `複製座標  ${text}`;
-  item.addEventListener('click', () => {
-    navigator.clipboard?.writeText(text);
+  item.addEventListener('click', async () => {
+    // navigator.clipboard exists only in secure contexts (localhost/HTTPS);
+    // over a LAN IP it is undefined, so fall back to execCommand. Surface
+    // failure — a silent no-op reads as "the button did nothing".
+    let ok = false;
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch { /* rejected (focus/permission) — try execCommand */ }
+    if (!ok) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      ta.remove();
+    }
     closeCoordsMenu();
+    if (!ok) status(`複製失敗，請手動複製: ${text}`);
   });
   coordsMenu.replaceChildren(item);
   coordsMenu.style.left = `${e.originalEvent.clientX}px`;
