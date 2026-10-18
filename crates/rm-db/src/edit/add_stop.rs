@@ -47,6 +47,39 @@ pub struct AttachCmd {
     pub after_stop_code: Option<String>,
 }
 
+const ATTACH_USAGE: &str =
+    "usage: --attach XNO:DIR[@CODE] (repeatable; @CODE inserts after that stop code)";
+
+/// Parse one `--attach` value: split `'@'` (insert-after code) then `':'`
+/// → `(xno, direction)`.
+pub fn parse_attach(s: &str) -> Result<AttachCmd, String> {
+    let (body, after) = match s.split_once('@') {
+        Some((body, code)) => (body, Some(code)),
+        None => (s, None),
+    };
+    if after == Some("") {
+        return Err(format!(
+            "invalid --attach '{s}': empty code after '@'; {ATTACH_USAGE}"
+        ));
+    }
+    let (xno, dir) = body
+        .split_once(':')
+        .ok_or_else(|| format!("invalid --attach '{s}': expected XNO:DIR; {ATTACH_USAGE}"))?;
+    if xno.is_empty() {
+        return Err(format!(
+            "invalid --attach '{s}': empty route xno; {ATTACH_USAGE}"
+        ));
+    }
+    let direction = dir.parse::<i64>().map_err(|_| {
+        format!("invalid --attach '{s}': direction '{dir}' is not a number; {ATTACH_USAGE}")
+    })?;
+    Ok(AttachCmd {
+        xno: xno.to_string(),
+        direction,
+        after_stop_code: after.map(str::to_string),
+    })
+}
+
 /// A current station version that passed qualification.
 #[derive(Debug, Clone)]
 pub struct StationCandidate {
@@ -2365,5 +2398,23 @@ mod tests {
             run(),
             "same cmd on two fresh dbs: identical end state incl. audit rows"
         );
+    }
+
+    #[test]
+    fn parse_attach_plain_and_with_code() {
+        let a = parse_attach("12:0").unwrap();
+        assert_eq!(a.xno, "12");
+        assert_eq!(a.direction, 0);
+        assert_eq!(a.after_stop_code, None);
+        let b = parse_attach("12:0@2249").unwrap();
+        assert_eq!(b.after_stop_code.as_deref(), Some("2249"));
+    }
+
+    #[test]
+    fn parse_attach_rejects_garbage_with_message() {
+        for s in ["12", "12:x", "12:0@", ":0"] {
+            let err = parse_attach(s).unwrap_err();
+            assert!(!err.is_empty(), "reject '{s}' with a non-empty message");
+        }
     }
 }

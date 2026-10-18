@@ -10,8 +10,8 @@ mod station_undo;
 mod stop;
 
 pub use add_stop::{
-    add_stop, apply_add_stop, plan_add_stop, qualify_station, undo_stop_add, AddStopCmd,
-    AddStopOutcome, AddStopPlan, AttachCmd, PlannedAttach, Qualification, RowCounts,
+    add_stop, apply_add_stop, parse_attach, plan_add_stop, qualify_station, undo_stop_add,
+    AddStopCmd, AddStopOutcome, AddStopPlan, AttachCmd, PlannedAttach, Qualification, RowCounts,
     StationCandidate, StationVerdict, QUALIFY_BEARING_TOL_DEG, QUALIFY_MAX_DIST_M,
 };
 pub use detach::{

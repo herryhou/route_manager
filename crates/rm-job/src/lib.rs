@@ -21,8 +21,8 @@ use rm_db::{
     add_stop, detach_stop, edit_polyline_line, edit_stop, entity_history, move_station,
     plan_add_stop, plan_detach_stop, plan_move_station, plan_polyline_line, plan_regroup_stop,
     plan_rename_station, preview_stop_edit, regroup_stop, rename_station, undo_edit, AddStopCmd,
-    AddStopOutcome, AddStopPlan, AttachCmd, DetachCmd, DetachPlan, LineEditCmd, RegroupStop,
-    RenameLevel, StationMove, StationRename, StationVerdict, StopEdit, UndoOutcome,
+    AddStopOutcome, AddStopPlan, DetachCmd, DetachPlan, LineEditCmd, RegroupStop, RenameLevel,
+    StationMove, StationRename, StationVerdict, StopEdit, UndoOutcome,
 };
 
 /// Everything one run wrote: `out` is the envelope JSON (the only stdout
@@ -440,33 +440,9 @@ pub enum Command {
     },
 }
 
-const ATTACH_USAGE: &str =
-    "usage: --attach XNO:DIR[@CODE] (repeatable; @CODE inserts after that stop code)";
-
 /// Parse one `--attach` value: split `'@'` (insert-after code) then `':'`
 /// → `(xno, direction)`.
-pub fn parse_attach(s: &str) -> Result<AttachCmd, String> {
-    let (body, after) = match s.split_once('@') {
-        Some((body, code)) => (body, Some(code)),
-        None => (s, None),
-    };
-    if after == Some("") {
-        return Err(format!(
-            "invalid --attach '{s}': empty code after '@'; {ATTACH_USAGE}"
-        ));
-    }
-    let (xno, dir) = body
-        .split_once(':')
-        .ok_or_else(|| format!("invalid --attach '{s}': expected XNO:DIR; {ATTACH_USAGE}"))?;
-    let direction = dir.parse::<i64>().map_err(|_| {
-        format!("invalid --attach '{s}': direction '{dir}' is not a number; {ATTACH_USAGE}")
-    })?;
-    Ok(AttachCmd {
-        xno: xno.to_string(),
-        direction,
-        after_stop_code: after.map(str::to_string),
-    })
-}
+pub use rm_db::parse_attach;
 
 const LEVEL_USAGE: &str = "usage: --level station|matching|all";
 
