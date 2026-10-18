@@ -1,6 +1,6 @@
 ---
 name: rm-jobs
-description: Bus route/stop correction jobs through the rm-job CLI — add a stop, move or rename a stop, remove a stop from a direction, extend a route path, undo a previous job edit. Use when the user asks to fix bus data in a route_manger city database (a pole is misplaced, a stop was deleted from the source, a route's drawn path is too short).
+description: Bus route/stop correction jobs through the rm-job CLI — add a stop, move or rename a stop, remove a stop from a direction, extend or replace a route path, regroup/rename/move a station, run the stale-mark refresh, undo a previous job edit. Use when the user asks to fix bus data in a route_manger city database (a pole is misplaced, a stop was deleted from the source, a route's drawn path is too short or drawn wrong, a station moved or got a new name, the map is stale after an edit).
 ---
 
 # rm-jobs
@@ -24,7 +24,9 @@ Full runbook: `docs/agents/rm-jobs.md`. Parameter reference:
 5. Re-run identically with `--apply` (`"apply": true`); report the
    `edit_id` it returns.
 6. Tell the human the map stays stale until the refresh chain runs
-   (match → segments → registry — or rm-web's refresh button).
+   (match → segments → registry). Run it yourself with `rm-job refresh`
+   (dry run first — pending-mark report — then `--apply`), or let the
+   human press rm-web's refresh button. Pick one; don't interleave.
 7. Wrong? `rm-job undo <edit_id>` — newest edit first (LIFO).
 
 ## Hard rules
