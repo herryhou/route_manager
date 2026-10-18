@@ -87,9 +87,8 @@ fn edit_conflict(err: ApiError) -> ApiError {
             | rm_db::EditError::UnknownAfterStop(_, _, _)
             | rm_db::EditError::OffPathStop { .. }
             | rm_db::EditError::DuplicateAttach(_, _)
-            // rm-job detach verdicts (unused by rm-web today, but the match
-            // must stay exhaustive): both ask the caller to adjust the
-            // request (--sequence/--all, --delete-pole), not retry later.
+            // detach verdicts: both ask the caller to adjust the request
+            // (--sequence/--all, --delete-pole), not retry later.
             | rm_db::EditError::DuplicateStopOccurrence { .. }
             | rm_db::EditError::OrphanPoleRefused(_) => ApiError::bad_request(&e.to_string()),
             rm_db::EditError::NotCurrent(_)
@@ -305,6 +304,112 @@ pub async fn add_stop(
         "stop_version_ids": out.stop_version_ids,
         "station_id": out.station_id,
         "station_created": out.station_created,
+        "stale_routes": out.stale_routes,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct DetachStopBody {
+    xno: String,
+    direction: i64,
+    code: String,
+    sequence: Option<i64>,
+    all: Option<bool>,
+    delete_pole: Option<bool>,
+    note: Option<String>,
+    apply: Option<bool>,
+}
+
+/// Serialize mirror of rm_db's `DetachPlan` (which intentionally stays
+/// non-`Serialize`) — same shape as rm-job's `PlanData`/`PlanOccurrence`.
+#[derive(Serialize)]
+pub struct DetachPlanData {
+    xno: String,
+    direction: i64,
+    route_id: i64,
+    route_version_id: i64,
+    stop_id: i64,
+    stop_version_id: i64,
+    stop_code: String,
+    stop_name: String,
+    occurrences: Vec<PlanOccurrence>,
+    pole_orphan: bool,
+    serving_directions: Vec<i64>,
+    delete_pole: bool,
+    stale_routes: Vec<i64>,
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct PlanOccurrence {
+    route_stop_version_id: i64,
+    sequence: i64,
+}
+
+impl From<&rm_db::DetachPlan> for DetachPlanData {
+    fn from(p: &rm_db::DetachPlan) -> Self {
+        Self {
+            xno: p.xno.clone(),
+            direction: p.direction,
+            route_id: p.route_id,
+            route_version_id: p.route_version_id,
+            stop_id: p.stop_id,
+            stop_version_id: p.stop_version_id,
+            stop_code: p.stop_code.clone(),
+            stop_name: p.stop_name.clone(),
+            occurrences: p
+                .occurrences
+                .iter()
+                .map(|o| PlanOccurrence {
+                    route_stop_version_id: o.route_stop_version_id,
+                    sequence: o.sequence,
+                })
+                .collect(),
+            pole_orphan: p.pole_orphan,
+            serving_directions: p.serving_directions.clone(),
+            delete_pole: p.delete_pole,
+            stale_routes: p.stale_routes.clone(),
+            warnings: p.warnings.clone(),
+        }
+    }
+}
+
+/// POST /api/edit/stop/detach — remove stop `code` from a route direction
+/// by re-versioning (never deleting history). The default (and
+/// `apply: false`) answers the read-only dry-run plan; `apply: true`
+/// performs the write. The orphan guard lives in rm_db: an apply that
+/// would drop the pole's last serving direction is refused unless the
+/// request carries `delete_pole` — whose teardown is one-way (the whole
+/// edit is not undoable).
+pub async fn detach_stop(
+    State(state): State<AppState>,
+    Editor(editor): Editor,
+    ApiJson(b): ApiJson<DetachStopBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let cmd = rm_db::DetachCmd {
+        xno: b.xno,
+        direction: b.direction,
+        stop_code: b.code,
+        sequence: b.sequence,
+        all: b.all.unwrap_or(false),
+        delete_pole: b.delete_pole.unwrap_or(false),
+    };
+    if !b.apply.unwrap_or(false) {
+        let plan = run_db(state, move |conn| rm_db::plan_detach_stop(conn, &cmd))
+            .await
+            .map_err(edit_conflict)?;
+        return Ok(Json(serde_json::to_value(DetachPlanData::from(&plan))?));
+    }
+    let out = run_db_write(state, move |conn| {
+        rm_db::detach_stop(conn, cmd, &editor, b.note.as_deref().unwrap_or(""))
+    })
+    .await
+    .map_err(edit_conflict)?;
+    Ok(Json(json!({
+        "edit_id": out.edit_id,
+        "old_route_version_id": out.old_route_version_id,
+        "new_route_version_id": out.new_route_version_id,
+        "pole_deleted": out.pole_deleted,
         "stale_routes": out.stale_routes,
     })))
 }

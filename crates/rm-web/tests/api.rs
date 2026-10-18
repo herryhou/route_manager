@@ -1033,3 +1033,162 @@ async fn add_stop_rejects_empty_or_bad_attach_and_bad_coords() {
         assert_eq!(res.status(), StatusCode::BAD_REQUEST, "body {body}");
     }
 }
+
+// ---------- POST /api/edit/stop/detach (remove-stop) ----------
+
+/// Route id for a fixture route_code.
+async fn route_id(app: &axum::Router, code: &str) -> i64 {
+    let v = get_json(app, "/api/routes").await;
+    v["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["route_code"] == json!(code))
+        .unwrap()["route_id"]
+        .as_i64()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn detach_stop_plan_defaults_to_dry_run_and_writes_nothing() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let id2 = route_id(&app, "2").await;
+    let before = direction_stop_counts(&app).await;
+
+    let res = post_edit(
+        &app,
+        "/api/edit/stop/detach",
+        Some("sekrit"),
+        json!({ "xno": "2", "direction": 0, "code": "21" }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    let occ = v["occurrences"]
+        .as_array()
+        .unwrap_or_else(|| panic!("occurrences array: {v}"));
+    assert_eq!(occ.len(), 1);
+    assert!(occ[0]["route_stop_version_id"].is_i64(), "{v}");
+    // fixture poles are per-occurrence (tcg:xno:dir:sid): the direction's
+    // only stop, so the detach orphans the pole
+    assert_eq!(v["pole_orphan"], json!(true), "{v}");
+    assert_eq!(v["serving_directions"], json!([0]), "{v}");
+    assert!(v["warnings"].is_array(), "{v}");
+    assert!(v.get("edit_id").is_none(), "plan carries no edit_id: {v}");
+
+    let after = direction_stop_counts(&app).await;
+    assert_eq!(after, before, "plan leg must not write");
+    let stops = get_json(&app, &format!("/api/routes/{id2}/directions/0/stops")).await;
+    assert_eq!(stops["stops"].as_array().unwrap().len(), 1, "{stops}");
+}
+
+#[tokio::test]
+async fn detach_stop_delete_pole_plan_warns_on_orphan() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+
+    let res = post_edit(
+        &app,
+        "/api/edit/stop/detach",
+        Some("sekrit"),
+        json!({ "xno": "2", "direction": 0, "code": "21", "delete_pole": true }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["pole_orphan"], json!(true), "{v}");
+    let w = v["warnings"]
+        .as_array()
+        .unwrap_or_else(|| panic!("warnings array: {v}"));
+    assert!(
+        !w.is_empty(),
+        "delete_pole plan on an orphan must warn: {v}"
+    );
+    assert!(
+        w.iter()
+            .any(|x| x.as_str().unwrap().contains("delete_pole")),
+        "one-way teardown named on the plan: {v}"
+    );
+}
+
+#[tokio::test]
+async fn detach_stop_orphan_apply_refused_without_delete_pole() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let id2 = route_id(&app, "2").await;
+
+    let res = post_edit(
+        &app,
+        "/api/edit/stop/detach",
+        Some("sekrit"),
+        json!({ "xno": "2", "direction": 0, "code": "21", "apply": true }),
+    )
+    .await;
+    // edit_conflict: OrphanPoleRefused asks for a request change → 400
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let v = body_json(res).await;
+    assert!(
+        v["error"].as_str().unwrap().contains("--delete-pole"),
+        "refusal names the flag: {v}"
+    );
+
+    // refused apply writes nothing: the stop is still listed
+    let stops = get_json(&app, &format!("/api/routes/{id2}/directions/0/stops")).await;
+    let arr = stops["stops"].as_array().unwrap();
+    assert_eq!(arr.len(), 1, "{stops}");
+    assert_eq!(arr[0]["stop_code"], json!("21"), "{stops}");
+}
+
+#[tokio::test]
+async fn detach_stop_apply_removes_stop_from_direction() {
+    let (_dir, db) = fixture_db();
+    // seed pole "12" onto route 1 dir 1 as well, so detaching it from dir 0
+    // does not orphan the pole (rm_db's shared-pole fixture shape). Explicit
+    // out-of-band id + allocator bump: a plain INSERT would take rowid ==
+    // id_sequence.next_value and the apply's first mint would collide.
+    {
+        let conn = rm_db::open(&db).unwrap();
+        conn.execute_batch(
+            "INSERT INTO route_stop_version
+                (route_stop_version_id, subroute_version_id, stop_version_id, direction, stop_sequence, created_at)
+             SELECT 9001, sv.subroute_version_id, rsv.stop_version_id, 1, 2, '2026-01-01T00:00:00Z'
+             FROM route_stop_version rsv
+             JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
+             JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+             JOIN route r ON r.route_id = rv.route_id
+                  AND r.current_route_version_id = rv.route_version_id
+             JOIN stop_version s ON s.stop_version_id = rsv.stop_version_id
+             WHERE r.ext_uid = 'tcg:1' AND rsv.direction = 0 AND s.stop_code = '12';
+             UPDATE id_sequence SET next_value = 9002 WHERE table_name = 'route_stop_version';",
+        )
+        .unwrap();
+    }
+    let app = edit_app(&db);
+    let id1 = route_id(&app, "1").await;
+
+    let res = post_edit(
+        &app,
+        "/api/edit/stop/detach",
+        Some("sekrit"),
+        json!({ "xno": "1", "direction": 0, "code": "12", "apply": true, "note": "web detach" }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert!(v["edit_id"].is_i64(), "{v}");
+    assert_eq!(v["pole_deleted"], json!(false), "{v}");
+    assert!(
+        v["old_route_version_id"].is_i64() && v["new_route_version_id"].is_i64(),
+        "{v}"
+    );
+    assert_eq!(v["stale_routes"], json!([id1]), "{v}");
+
+    // gone from dir 0's stops; dir 1 still serves the pole
+    let stops = get_json(&app, &format!("/api/routes/{id1}/directions/0/stops")).await;
+    let arr = stops["stops"].as_array().unwrap();
+    assert_eq!(arr.len(), 1, "{stops}");
+    assert_eq!(arr[0]["stop_code"], json!("11"), "{stops}");
+    let stops1 = get_json(&app, &format!("/api/routes/{id1}/directions/1/stops")).await;
+    assert_eq!(stops1["stops"].as_array().unwrap().len(), 2, "{stops1}");
+}

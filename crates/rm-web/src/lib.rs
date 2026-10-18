@@ -59,6 +59,12 @@ pub fn router_with(state: AppState) -> Router {
             axum::routing::post(handlers::edit::add_stop),
         )
         .route(
+            // static sibling of /{stop_version_id} — matchit resolves
+            // static segments first
+            "/api/edit/stop/detach",
+            axum::routing::post(handlers::edit::detach_stop),
+        )
+        .route(
             "/api/edit/stop/{stop_version_id}",
             axum::routing::post(handlers::edit::edit_stop),
         )
