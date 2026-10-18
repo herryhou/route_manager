@@ -415,6 +415,24 @@ pub enum Command {
         #[arg(long)]
         json: Option<String>,
     },
+    /// Run the stale refresh chain — match → segments → registry (dry run
+    /// reports the pending marks; --apply runs the chain synchronously and
+    /// exits when the map is live).
+    Refresh {
+        /// rm-segments outlier threshold (m)
+        #[arg(long, default_value_t = 50.0)]
+        outlier_m: f64,
+        /// SQLite DB path
+        #[arg(long, default_value = "data/taichung.db")]
+        db: PathBuf,
+        /// Run the chain (default: dry run — the pending-mark report)
+        #[arg(long)]
+        apply: bool,
+        /// Full invocation as one JSON object (schema: `rm-job schema
+        /// refresh`); flags are ignored when given
+        #[arg(long)]
+        json: Option<String>,
+    },
     /// Print command schemas: every command, or one --json payload schema.
     Schema {
         /// The command to describe (omit: list every command)
@@ -488,6 +506,9 @@ enum Outcome {
     Ok(serde_json::Value, Vec<String>),
     /// Rejected — human reason for stderr and `data.reason`; exit 1.
     Rejected(String),
+    /// Rejected with the progress logs kept in the envelope — the refresh
+    /// chain: a mid-run failure must still report the steps that ran.
+    RejectedWithLogs(String, Vec<String>),
     /// No-op — human reason for stderr and `data.reason`; exit 2.
     Noop(String),
 }
@@ -505,6 +526,16 @@ pub fn run(cli: Cli) -> (i32, Report) {
             (e, 0)
         }
         Outcome::Rejected(reason) => envelope::rejected(command, reason),
+        Outcome::RejectedWithLogs(reason, logs) => {
+            let (e, code) = envelope::rejected(command, reason);
+            (
+                envelope::Envelope {
+                    logs: logs.clone(),
+                    ..e
+                },
+                code,
+            )
+        }
         Outcome::Noop(reason) => envelope::noop(command, reason),
     };
     env.duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -514,7 +545,7 @@ pub fn run(cli: Cli) -> (i32, Report) {
     };
     match &outcome {
         Outcome::Ok(..) => {}
-        Outcome::Rejected(reason) => {
+        Outcome::Rejected(reason) | Outcome::RejectedWithLogs(reason, _) => {
             let _ = writeln!(report.err, "rejected: {reason}");
         }
         Outcome::Noop(reason) => {
@@ -942,6 +973,30 @@ fn dispatch(cli: Cli) -> (&'static str, Outcome) {
                 },
             };
             edit_log_job(p)
+        }
+        Command::Refresh {
+            outlier_m,
+            db,
+            apply,
+            json,
+        } => {
+            let p = match json {
+                Some(payload) => match serde_json::from_str::<params::RefreshParams>(&payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (
+                            "refresh",
+                            Outcome::Rejected(format!("invalid --json payload: {e}")),
+                        )
+                    }
+                },
+                None => params::RefreshParams {
+                    outlier_m,
+                    db: db.display().to_string(),
+                    apply,
+                },
+            };
+            refresh_job(p)
         }
         Command::Schema { command } => match command.as_deref() {
             None => ("schema", Outcome::Ok(schema_list(), Vec::new())),
@@ -1657,6 +1712,201 @@ fn edit_log_job(p: params::EditLogParams) -> (&'static str, Outcome) {
     }
 }
 
+/// The tables a refresh run consumes, in the report's fixed order — never
+/// derived from HashMap iteration (DB determinism invariant).
+const REFRESH_TABLES: [rm_db::StaleTable; 4] = [
+    rm_db::StaleTable::StopBearing,
+    rm_db::StaleTable::StationBearing,
+    rm_db::StaleTable::PathStopProjection,
+    rm_db::StaleTable::SegMatch,
+];
+
+/// How many pending marks the dry-run report lists before capping.
+const MARKS_SHOWN: usize = 50;
+
+/// The refresh dry run: the pending-mark report over a read-only
+/// connection — latest batch, per-table counts (fixed order), the marks
+/// themselves in rowid order. Zero writes.
+fn refresh_report(conn: &rusqlite::Connection) -> anyhow::Result<(serde_json::Value, Vec<String>)> {
+    let mut logs = Vec::new();
+    let batch = rm_db::latest_batch(conn)?;
+    if batch.is_none() {
+        logs.push("no import batch — apply will reject; run rm-ingest first".into());
+    }
+    let pending = rm_db::stale::pending_count(conn)?;
+    let marks = rm_db::stale::snapshot(conn, &REFRESH_TABLES)?;
+    // BTreeMap-backed: alphabetical, but deterministic — the invariant is
+    // never HashMap order, and the enum order lives in `marks` anyway
+    let mut tables = serde_json::Map::new();
+    for t in REFRESH_TABLES {
+        tables.insert(
+            t.as_str().to_string(),
+            marks.iter().filter(|m| m.table == t).count().into(),
+        );
+    }
+    let shown: Vec<_> = marks
+        .iter()
+        .take(MARKS_SHOWN)
+        .map(|m| {
+            serde_json::json!({
+                "table": m.table.as_str(),
+                "key": m.key,
+                "cause_edit_id": m.cause_edit_id,
+            })
+        })
+        .collect();
+    if marks.len() > MARKS_SHOWN {
+        logs.push(format!(
+            "{} more marks not shown",
+            marks.len() - MARKS_SHOWN
+        ));
+    }
+    Ok((
+        serde_json::json!({
+            "latest_batch": batch,
+            "pending_marks": pending,
+            "tables": tables,
+            "marks": shown,
+        }),
+        logs,
+    ))
+}
+
+/// The refresh job: dry run = the pending-mark report; --apply = the
+/// match → segments → registry chain on one mutable connection. No outer
+/// transaction (each crate manages its own txs; the `cause_edit_id` guards
+/// make a rerun after a mid-chain failure safe) and no single-flight —
+/// that is rm-web's AppState's job. A mid-chain failure preserves the
+/// steps' logs in the envelope.
+fn refresh_job(p: params::RefreshParams) -> (&'static str, Outcome) {
+    let conn = match open_conn(p.apply, &p.db) {
+        Ok(c) => c,
+        Err(e) => return ("refresh", Outcome::Rejected(format!("{e:#}"))),
+    };
+    if !p.apply {
+        return (
+            "refresh",
+            match refresh_report(&conn) {
+                Ok((data, logs)) => Outcome::Ok(data, logs),
+                Err(e) => Outcome::Rejected(format!("{e:#}")),
+            },
+        );
+    }
+    let batch = match rm_db::latest_batch(&conn) {
+        Ok(Some(batch)) => batch,
+        Ok(None) => {
+            return (
+                "refresh",
+                Outcome::Rejected("no import batch; run rm-ingest first".into()),
+            )
+        }
+        Err(e) => return ("refresh", Outcome::Rejected(format!("{e:#}"))),
+    };
+    match rm_db::stale::pending_count(&conn) {
+        Ok(0) => {
+            return (
+                "refresh",
+                Outcome::Noop("nothing to refresh — 0 pending stale marks".into()),
+            )
+        }
+        Ok(_) => {}
+        Err(e) => return ("refresh", Outcome::Rejected(format!("{e:#}"))),
+    }
+    let mut logs = Vec::new();
+    let mut steps = serde_json::Map::new();
+    match rm_osm_match::run_stale(&conn, batch) {
+        Ok(Some(o)) => {
+            logs.push(format!(
+                "refresh: match: {} directions, {} cleared, {} kept",
+                o.summary.directions, o.cleared, o.kept
+            ));
+            steps.insert(
+                "match".into(),
+                serde_json::json!({
+                    "ran": true,
+                    "directions": o.summary.directions,
+                    "cleared": o.cleared,
+                    "kept": o.kept,
+                }),
+            );
+        }
+        Ok(None) => {
+            logs.push("refresh: match: nothing stale".into());
+            steps.insert("match".into(), serde_json::json!({ "ran": false }));
+        }
+        Err(e) => {
+            return (
+                "refresh",
+                Outcome::RejectedWithLogs(format!("match step failed: {e:#}"), logs),
+            )
+        }
+    }
+    match rm_segments::run_stale(&conn, batch, p.outlier_m) {
+        Ok(Some(o)) => {
+            logs.push(format!(
+                "refresh: segments: {} directions, {} cleared, {} kept",
+                o.summary.directions, o.cleared, o.kept
+            ));
+            steps.insert(
+                "segments".into(),
+                serde_json::json!({
+                    "ran": true,
+                    "directions": o.summary.directions,
+                    "cleared": o.cleared,
+                    "kept": o.kept,
+                }),
+            );
+        }
+        Ok(None) => {
+            logs.push("refresh: segments: nothing stale".into());
+            steps.insert("segments".into(), serde_json::json!({ "ran": false }));
+        }
+        Err(e) => {
+            return (
+                "refresh",
+                Outcome::RejectedWithLogs(format!("segments step failed: {e:#}"), logs),
+            )
+        }
+    }
+    match rm_registry::run_stale(&conn, batch) {
+        Ok(Some(_)) => {
+            logs.push("refresh: registry: bearing + split rebuild done".into());
+            steps.insert("registry".into(), serde_json::json!({ "ran": true }));
+        }
+        Ok(None) => {
+            logs.push("refresh: registry: nothing stale".into());
+            steps.insert("registry".into(), serde_json::json!({ "ran": false }));
+        }
+        Err(e) => {
+            return (
+                "refresh",
+                Outcome::RejectedWithLogs(format!("registry step failed: {e:#}"), logs),
+            )
+        }
+    }
+    let pending = match rm_db::stale::pending_count(&conn) {
+        Ok(n) => n,
+        Err(e) => {
+            return (
+                "refresh",
+                Outcome::RejectedWithLogs(format!("pending count failed: {e:#}"), logs),
+            )
+        }
+    };
+    logs.push(format!("refresh: done — {pending} marks pending"));
+    (
+        "refresh",
+        Outcome::Ok(
+            serde_json::json!({
+                "batch_id": batch,
+                "steps": steps,
+                "pending_marks": pending,
+            }),
+            logs,
+        ),
+    )
+}
+
 /// The `schema` command's list form: every command with its description.
 pub fn schema_list() -> serde_json::Value {
     serde_json::json!({
@@ -1692,6 +1942,10 @@ pub fn schema_list() -> serde_json::Value {
             {
                 "name": "set-line",
                 "description": "Replace a direction's polyline with a whole-line override (dry run unless --apply).",
+            },
+            {
+                "name": "refresh",
+                "description": "Run the stale refresh chain — match → segments → registry (dry run reports the pending marks; --apply runs the chain synchronously and exits when the map is live).",
             },
             {
                 "name": "undo",
@@ -1775,6 +2029,10 @@ pub fn schema_for(name: &str) -> Option<serde_json::Value> {
         "edit-log" => Some(serde_json::json!({
             "command": name,
             "schema": schemars::schema_for!(params::EditLogParams),
+        })),
+        "refresh" => Some(serde_json::json!({
+            "command": name,
+            "schema": schemars::schema_for!(params::RefreshParams),
         })),
         _ => None,
     }

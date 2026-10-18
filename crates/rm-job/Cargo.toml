@@ -8,6 +8,8 @@ version.workspace = true
 rm-db.workspace = true
 rm-core.workspace = true
 rm-osm-match = { path = "../rm-osm-match" }
+rm-segments = { path = "../rm-segments" }
+rm-registry = { path = "../rm-registry" }
 clap.workspace = true
 anyhow.workspace = true
 rusqlite.workspace = true

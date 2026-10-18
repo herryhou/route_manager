@@ -1059,6 +1059,8 @@ dependencies = [
  "rm-core",
  "rm-db",
  "rm-osm-match",
+ "rm-registry",
+ "rm-segments",
  "rusqlite",
  "schemars",
  "serde",
