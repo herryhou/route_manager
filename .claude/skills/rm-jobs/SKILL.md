@@ -10,6 +10,9 @@ undoable. Always release mode, from the repo root:
 `cargo run -r -p rm-job -- ...`. Another city than Taichung: pass
 `--db data/<city>.db` (or `"db"` in the payload) on every command.
 
+Commands — read: `find-stop`, `show-route`, `show-path`, `edit-log`;
+write: `add-stop`, `move-stop`, `remove-stop`, `extend-path`, `set-line`,
+`regroup-stop`, `rename-station`, `move-station`, `refresh`, `undo`.
 Full runbook: `docs/agents/rm-jobs.md`. Parameter reference:
 `rm-job schema <cmd>` — never guess field names.
 
@@ -17,17 +20,22 @@ Full runbook: `docs/agents/rm-jobs.md`. Parameter reference:
 
 1. `rm-job schema <cmd>` — the command's payload schema (names, types,
    defaults, required fields).
-2. `find-stop` / `show-route` / `show-path` — confirm the target pole,
-   direction and current path state.
+2. `find-stop` / `show-route` / `show-path` / `edit-log` — confirm the
+   target pole, direction, current path state, prior edits.
 3. Dry run — the same command without `--apply` (`"apply": false`).
 4. Quote the plan to the human; wait for a yes.
-5. Re-run identically with `--apply` (`"apply": true`); report the
-   `edit_id` it returns.
+5. Re-run with `--apply` (`"apply": true`); report the `edit_id` it
+   returns. `set-line` exception: pass the dry run's
+   `override_updated_at` back as `expected_updated_at` — mandatory once
+   an override exists; the "edited by someone else" rejection means
+   re-dry and take the fresh token.
 6. Tell the human the map stays stale until the refresh chain runs
    (match → segments → registry). Run it yourself with `rm-job refresh`
    (dry run first — pending-mark report — then `--apply`), or let the
    human press rm-web's refresh button. Pick one; don't interleave.
-7. Wrong? `rm-job undo <edit_id>` — newest edit first (LIFO).
+7. Wrong? `rm-job undo <edit_id>` — newest edit first (LIFO); undo
+   refuses (NotUndoable) when later edits interleave or the edit used
+   `--delete-pole`.
 
 ## Hard rules
 
