@@ -68,6 +68,47 @@ pub struct StopEditBody {
     lon: Option<f64>,
     stop_name: Option<String>,
     note: Option<String>,
+    apply: Option<bool>,
+}
+
+/// Serialize mirror of rm_db's `StopEditPreview` (non-`Serialize` by
+/// design) — field names verbatim, nested `op` included.
+#[derive(Serialize)]
+pub struct StopEditPreviewData {
+    stop_id: i64,
+    stop_version_id: i64,
+    current_stop_name: String,
+    current_lat: f64,
+    current_lon: f64,
+    op: StopEditOpData,
+}
+
+#[derive(Serialize)]
+pub struct StopEditOpData {
+    stop_id: i64,
+    stop_version_id: i64,
+    stop_name: Option<String>,
+    lat: Option<f64>,
+    lon: Option<f64>,
+}
+
+impl From<&rm_db::StopEditPreview> for StopEditPreviewData {
+    fn from(p: &rm_db::StopEditPreview) -> Self {
+        Self {
+            stop_id: p.stop_id,
+            stop_version_id: p.stop_version_id,
+            current_stop_name: p.current_stop_name.clone(),
+            current_lat: p.current_lat,
+            current_lon: p.current_lon,
+            op: StopEditOpData {
+                stop_id: p.op.stop_id,
+                stop_version_id: p.op.stop_version_id,
+                stop_name: p.op.stop_name.clone(),
+                lat: p.op.lat,
+                lon: p.op.lon,
+            },
+        }
+    }
 }
 
 /// `rm_db::EditError` splits into request problems (400: empty/no-op
@@ -102,6 +143,8 @@ fn edit_conflict(err: ApiError) -> ApiError {
 }
 
 /// POST /api/edit/stop/{stop_version_id} — append a manual stop version.
+/// The default (and `apply: true`) performs the write; `apply: false`
+/// answers the read-only preview (`preview_stop_edit`).
 pub async fn edit_stop(
     Path(stop_version_id): Path<i64>,
     State(state): State<AppState>,
@@ -113,6 +156,7 @@ pub async fn edit_stop(
         lon,
         stop_name,
         note,
+        apply,
     } = b;
     if lat.is_none() && lon.is_none() && stop_name.is_none() {
         return Err(ApiError::bad_request("no fields to edit"));
@@ -126,6 +170,24 @@ pub async fn edit_stop(
         if !(-180.0..=180.0).contains(&lon) {
             return Err(ApiError::bad_request("lon out of range"));
         }
+    }
+    if apply == Some(false) {
+        let plan = run_db(state, move |conn| {
+            rm_db::preview_stop_edit(
+                conn,
+                stop_version_id,
+                rm_db::StopEdit {
+                    lat,
+                    lon,
+                    stop_name,
+                },
+            )
+        })
+        .await
+        .map_err(edit_conflict)?;
+        return Ok(Json(serde_json::to_value(StopEditPreviewData::from(
+            &plan,
+        ))?));
     }
     let note = note.unwrap_or_default();
     let out = run_db_write(state, move |conn| {
@@ -574,16 +636,73 @@ pub struct UndoBody {
 pub struct RegroupBody {
     new_station_id: i64,
     note: Option<String>,
+    apply: Option<bool>,
+}
+
+/// Serialize mirror of rm_db's `RegroupStopPlan` (non-`Serialize` by
+/// design) — field names verbatim, nested `op` included.
+#[derive(Serialize)]
+pub struct RegroupStopPlanData {
+    stop_id: i64,
+    stop_version_id: i64,
+    stop_code: String,
+    stop_name: String,
+    old_station_id: i64,
+    old_station_name: String,
+    new_station_id: i64,
+    new_station_name: String,
+    op: StopRegroupOpData,
+}
+
+#[derive(Serialize)]
+pub struct StopRegroupOpData {
+    stop_id: i64,
+    stop_version_id: i64,
+    new_station_id: i64,
+}
+
+impl From<&rm_db::RegroupStopPlan> for RegroupStopPlanData {
+    fn from(p: &rm_db::RegroupStopPlan) -> Self {
+        Self {
+            stop_id: p.stop_id,
+            stop_version_id: p.stop_version_id,
+            stop_code: p.stop_code.clone(),
+            stop_name: p.stop_name.clone(),
+            old_station_id: p.old_station_id,
+            old_station_name: p.old_station_name.clone(),
+            new_station_id: p.new_station_id,
+            new_station_name: p.new_station_name.clone(),
+            op: StopRegroupOpData {
+                stop_id: p.op.stop_id,
+                stop_version_id: p.op.stop_version_id,
+                new_station_id: p.op.new_station_id,
+            },
+        }
+    }
 }
 
 /// POST /api/edit/stop/{stop_version_id}/regroup — move a stop to another
-/// station. The regroup primitive writes `action='move_station'`.
+/// station. The default (and `apply: true`) performs the write;
+/// `apply: false` answers the read-only plan (`plan_regroup_stop`). The
+/// regroup primitive writes `action='move_station'`.
 pub async fn regroup(
     Path(stop_version_id): Path<i64>,
     State(state): State<AppState>,
     Editor(editor): Editor,
     ApiJson(b): ApiJson<RegroupBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    if b.apply == Some(false) {
+        let cmd = rm_db::RegroupStop {
+            stop_version_id,
+            new_station_id: b.new_station_id,
+        };
+        let plan = run_db(state, move |conn| rm_db::plan_regroup_stop(conn, cmd))
+            .await
+            .map_err(edit_conflict)?;
+        return Ok(Json(serde_json::to_value(RegroupStopPlanData::from(
+            &plan,
+        ))?));
+    }
     let out = run_db_write(state, move |conn| {
         rm_db::regroup_stop(
             conn,
@@ -640,10 +759,91 @@ pub struct StationRenameBody {
     new_name: String,
     level: String,
     note: Option<String>,
+    apply: Option<bool>,
+}
+
+/// Serialize mirrors of rm_db's `StationRenamePlan` / `PoleRenamePlan` /
+/// `StationRenameOp` / `PoleOp` (non-`Serialize` by design) — field names
+/// verbatim.
+#[derive(Serialize)]
+pub struct StationRenamePlanData {
+    station_id: i64,
+    station_version_id: i64,
+    old_name: String,
+    new_name: String,
+    level: String,
+    poles: Vec<PoleRenamePlanData>,
+    op: StationRenameOpData,
+}
+
+#[derive(Serialize)]
+pub struct PoleRenamePlanData {
+    stop_id: i64,
+    stop_version_id: i64,
+    old_name: String,
+    new_name: String,
+}
+
+#[derive(Serialize)]
+pub struct StationRenameOpData {
+    station_id: i64,
+    old_station_version_id: i64,
+    old_station_name: String,
+    new_station_name: String,
+    level: String,
+    poles: Vec<PoleOpData>,
+}
+
+#[derive(Serialize)]
+pub struct PoleOpData {
+    stop_id: i64,
+    old_stop_version_id: i64,
+    new_stop_name: String,
+}
+
+impl From<&rm_db::StationRenamePlan> for StationRenamePlanData {
+    fn from(p: &rm_db::StationRenamePlan) -> Self {
+        Self {
+            station_id: p.station_id,
+            station_version_id: p.station_version_id,
+            old_name: p.old_name.clone(),
+            new_name: p.new_name.clone(),
+            level: p.level.clone(),
+            poles: p
+                .poles
+                .iter()
+                .map(|pole| PoleRenamePlanData {
+                    stop_id: pole.stop_id,
+                    stop_version_id: pole.stop_version_id,
+                    old_name: pole.old_name.clone(),
+                    new_name: pole.new_name.clone(),
+                })
+                .collect(),
+            op: StationRenameOpData {
+                station_id: p.op.station_id,
+                old_station_version_id: p.op.old_station_version_id,
+                old_station_name: p.op.old_station_name.clone(),
+                new_station_name: p.op.new_station_name.clone(),
+                level: p.op.level.clone(),
+                poles: p
+                    .op
+                    .poles
+                    .iter()
+                    .map(|pole| PoleOpData {
+                        stop_id: pole.stop_id,
+                        old_stop_version_id: pole.old_stop_version_id,
+                        new_stop_name: pole.new_stop_name.clone(),
+                    })
+                    .collect(),
+            },
+        }
+    }
 }
 
 /// POST /api/edit/station/{station_version_id} — rename the station, with
 /// an editor-chosen level for how far the rename reaches into pole names.
+/// The default (and `apply: true`) performs the write; `apply: false`
+/// answers the read-only plan (`plan_rename_station`).
 pub async fn rename_station(
     Path(station_version_id): Path<i64>,
     State(state): State<AppState>,
@@ -656,6 +856,19 @@ pub async fn rename_station(
         "all" => rm_db::RenameLevel::AllPoles,
         other => return Err(ApiError::bad_request(&format!("unknown level {other:?}"))),
     };
+    if b.apply == Some(false) {
+        let cmd = rm_db::StationRename {
+            station_version_id,
+            new_name: b.new_name,
+            level,
+        };
+        let plan = run_db(state, move |conn| rm_db::plan_rename_station(conn, cmd))
+            .await
+            .map_err(edit_conflict)?;
+        return Ok(Json(serde_json::to_value(StationRenamePlanData::from(
+            &plan,
+        ))?));
+    }
     let out = run_db_write(state, move |conn| {
         rm_db::rename_station(
             conn,
@@ -681,11 +894,56 @@ pub struct StationMoveBody {
     lat: f64,
     lon: f64,
     note: Option<String>,
+    apply: Option<bool>,
+}
+
+/// Serialize mirror of rm_db's `StationMovePlan` (non-`Serialize` by
+/// design) — field names verbatim, nested `op` included.
+#[derive(Serialize)]
+pub struct StationMovePlanData {
+    station_id: i64,
+    station_version_id: i64,
+    station_name: String,
+    old_latitude: f64,
+    old_longitude: f64,
+    new_latitude: f64,
+    new_longitude: f64,
+    op: StationMoveOpData,
+}
+
+#[derive(Serialize)]
+pub struct StationMoveOpData {
+    station_id: i64,
+    old_station_version_id: i64,
+    new_latitude: f64,
+    new_longitude: f64,
+}
+
+impl From<&rm_db::StationMovePlan> for StationMovePlanData {
+    fn from(p: &rm_db::StationMovePlan) -> Self {
+        Self {
+            station_id: p.station_id,
+            station_version_id: p.station_version_id,
+            station_name: p.station_name.clone(),
+            old_latitude: p.old_latitude,
+            old_longitude: p.old_longitude,
+            new_latitude: p.new_latitude,
+            new_longitude: p.new_longitude,
+            op: StationMoveOpData {
+                station_id: p.op.station_id,
+                old_station_version_id: p.op.old_station_version_id,
+                new_latitude: p.op.new_latitude,
+                new_longitude: p.op.new_longitude,
+            },
+        }
+    }
 }
 
 /// POST /api/edit/station/{station_version_id}/move — move the station's
-/// own coords. Poles stay where they are; nothing derives from station
-/// coords, so no stale marks fire.
+/// own coords. The default (and `apply: true`) performs the write;
+/// `apply: false` answers the read-only plan (`plan_move_station`). Poles
+/// stay where they are; nothing derives from station coords, so no stale
+/// marks fire.
 pub async fn move_station(
     Path(station_version_id): Path<i64>,
     State(state): State<AppState>,
@@ -697,6 +955,19 @@ pub async fn move_station(
     }
     if !(-180.0..=180.0).contains(&b.lon) {
         return Err(ApiError::bad_request("lon out of range"));
+    }
+    if b.apply == Some(false) {
+        let cmd = rm_db::StationMove {
+            station_version_id,
+            latitude: b.lat,
+            longitude: b.lon,
+        };
+        let plan = run_db(state, move |conn| rm_db::plan_move_station(conn, cmd))
+            .await
+            .map_err(edit_conflict)?;
+        return Ok(Json(serde_json::to_value(StationMovePlanData::from(
+            &plan,
+        ))?));
     }
     let out = run_db_write(state, move |conn| {
         rm_db::move_station(
@@ -723,6 +994,54 @@ pub struct PolylineBody {
     points: Vec<[f64; 2]>,
     expected_updated_at: Option<String>,
     note: Option<String>,
+    apply: Option<bool>,
+}
+
+/// Serialize mirror of rm_db's `LineEditPlan` (non-`Serialize` by design) —
+/// field names verbatim, nested `op` included (`replaces` stays the
+/// static "override"/"src" tag).
+#[derive(Serialize)]
+pub struct LineEditPlanData {
+    route_id: i64,
+    route_version_id: Option<i64>,
+    xno: String,
+    direction: i64,
+    replaces: &'static str,
+    created: bool,
+    points: usize,
+    encoded: String,
+    expected_updated_at: Option<String>,
+    op: LineEditOpData,
+}
+
+#[derive(Serialize)]
+pub struct LineEditOpData {
+    xno: String,
+    direction: i64,
+    encoded: String,
+    expected_updated_at: Option<String>,
+}
+
+impl From<&rm_db::LineEditPlan> for LineEditPlanData {
+    fn from(p: &rm_db::LineEditPlan) -> Self {
+        Self {
+            route_id: p.route_id,
+            route_version_id: p.route_version_id,
+            xno: p.xno.clone(),
+            direction: p.direction,
+            replaces: p.replaces,
+            created: p.created,
+            points: p.points,
+            encoded: p.encoded.clone(),
+            expected_updated_at: p.expected_updated_at.clone(),
+            op: LineEditOpData {
+                xno: p.op.xno.clone(),
+                direction: p.op.direction,
+                encoded: p.op.encoded.clone(),
+                expected_updated_at: p.op.expected_updated_at.clone(),
+            },
+        }
+    }
 }
 
 fn coord_ok(pt: [f64; 2]) -> bool {
@@ -730,8 +1049,10 @@ fn coord_ok(pt: [f64; 2]) -> bool {
 }
 
 /// POST /api/edit/polyline/{xno}/{direction}/line — store a whole-line
-/// override (effective = override ?? src). Server encodes via rm-core; the
-/// client sends plain coordinates.
+/// override (effective = override ?? src). The default (and `apply: true`)
+/// performs the write; `apply: false` answers the read-only plan
+/// (`plan_polyline_line`). Server encodes via rm-core; the client sends
+/// plain coordinates.
 pub async fn edit_polyline_line(
     Path((xno, direction)): Path<(String, i64)>,
     State(state): State<AppState>,
@@ -740,6 +1061,18 @@ pub async fn edit_polyline_line(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     if b.points.iter().any(|p| !coord_ok(*p)) {
         return Err(ApiError::bad_request("coordinate out of range"));
+    }
+    if b.apply == Some(false) {
+        let cmd = rm_db::LineEditCmd {
+            xno,
+            direction,
+            points: b.points,
+            expected_updated_at: b.expected_updated_at,
+        };
+        let plan = run_db(state, move |conn| rm_db::plan_polyline_line(conn, cmd))
+            .await
+            .map_err(edit_conflict)?;
+        return Ok(Json(serde_json::to_value(LineEditPlanData::from(&plan))?));
     }
     let out = run_db_write(state, move |conn| {
         rm_db::edit_polyline_line(

@@ -1192,3 +1192,330 @@ async fn detach_stop_apply_removes_stop_from_direction() {
     let stops1 = get_json(&app, &format!("/api/routes/{id1}/directions/1/stops")).await;
     assert_eq!(stops1["stops"].as_array().unwrap().len(), 2, "{stops1}");
 }
+
+// ---------- apply:false plan legs on the five pre-existing write handlers ----------
+//
+// These endpoints predate the apply field, so their default is the OPPOSITE
+// of add-stop/detach/extend: `apply` absent ⇒ apply (today's behavior);
+// `apply: false` ⇒ read-only plan; `apply: true` ⇒ apply.
+
+/// Route 1 dir 0's current stop rows (fixture: nodes 44 + 46, both 干城站,
+/// two distinct stations in one group).
+async fn apply_field_route1_stops(app: &axum::Router) -> Vec<serde_json::Value> {
+    let id1 = route_id(app, "1").await;
+    let v = get_json(app, &format!("/api/routes/{id1}/directions/0/stops")).await;
+    v["stops"].as_array().unwrap().clone()
+}
+
+// --- POST /api/edit/stop/{stop_version_id} ---
+
+#[tokio::test]
+async fn apply_field_stop_edit_plan_writes_nothing() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stops = apply_field_route1_stops(&app).await;
+    let sv = stops[0]["stop_version_id"].as_i64().unwrap();
+    let before = get_json(&app, &format!("/api/stops/{sv}")).await;
+
+    let res = post_edit(
+        &app,
+        &format!("/api/edit/stop/{sv}"),
+        Some("sekrit"),
+        json!({ "stop_name": "改名站", "apply": false }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["stop_version_id"], json!(sv), "{v}");
+    assert_eq!(v["current_stop_name"], before["stop"]["stop_name"], "{v}");
+    assert_eq!(v["op"]["stop_name"], json!("改名站"), "{v}");
+    assert!(v.get("edit_id").is_none(), "plan carries no edit_id: {v}");
+
+    let after = get_json(&app, &format!("/api/stops/{sv}")).await;
+    assert_eq!(after["stop"], before["stop"], "apply:false must not write");
+}
+
+#[tokio::test]
+async fn apply_field_stop_edit_default_still_applies() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stops = apply_field_route1_stops(&app).await;
+    let sv = stops[0]["stop_version_id"].as_i64().unwrap();
+
+    // no `apply` field: today's behavior — the write happens
+    let res = post_edit(
+        &app,
+        &format!("/api/edit/stop/{sv}"),
+        Some("sekrit"),
+        json!({ "stop_name": "改名站" }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    let new_sv = v["new_stop_version_id"].as_i64().unwrap();
+    assert!(new_sv > sv, "apply minted a new version: {v}");
+    let after = get_json(&app, &format!("/api/stops/{new_sv}")).await;
+    assert_eq!(after["stop"]["stop_name"], json!("改名站"), "{after}");
+}
+
+// --- POST /api/edit/stop/{stop_version_id}/regroup ---
+
+#[tokio::test]
+async fn apply_field_regroup_plan_writes_nothing() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stops = apply_field_route1_stops(&app).await;
+    let sv0 = stops[0]["stop_version_id"].as_i64().unwrap();
+    let sv1 = stops[1]["stop_version_id"].as_i64().unwrap();
+    // target: the direction's other stop's station (node 46's)
+    let other = get_json(&app, &format!("/api/stops/{sv1}")).await;
+    let target = other["station"]["station_id"].as_i64().unwrap();
+    let before = get_json(&app, &format!("/api/stops/{sv0}")).await;
+    assert_ne!(
+        before["station"]["station_id"].as_i64().unwrap(),
+        target,
+        "fixture: two distinct stations"
+    );
+
+    let res = post_edit(
+        &app,
+        &format!("/api/edit/stop/{sv0}/regroup"),
+        Some("sekrit"),
+        json!({ "new_station_id": target, "apply": false }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["stop_version_id"], json!(sv0), "{v}");
+    assert_eq!(v["old_station_id"], before["station"]["station_id"], "{v}");
+    assert_eq!(v["new_station_id"], json!(target), "{v}");
+    assert!(v.get("edit_id").is_none(), "plan carries no edit_id: {v}");
+
+    let after = get_json(&app, &format!("/api/stops/{sv0}")).await;
+    assert_eq!(
+        after["station"], before["station"],
+        "apply:false must not write"
+    );
+}
+
+#[tokio::test]
+async fn apply_field_regroup_default_still_applies() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stops = apply_field_route1_stops(&app).await;
+    let sv0 = stops[0]["stop_version_id"].as_i64().unwrap();
+    let other = get_json(
+        &app,
+        &format!(
+            "/api/stops/{}",
+            stops[1]["stop_version_id"].as_i64().unwrap()
+        ),
+    )
+    .await;
+    let target = other["station"]["station_id"].as_i64().unwrap();
+
+    let res = post_edit(
+        &app,
+        &format!("/api/edit/stop/{sv0}/regroup"),
+        Some("sekrit"),
+        json!({ "new_station_id": target }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    let new_sv = v["new_stop_version_id"].as_i64().unwrap();
+    assert!(new_sv > sv0, "apply minted a new version: {v}");
+    let after = get_json(&app, &format!("/api/stops/{new_sv}")).await;
+    assert_eq!(after["station"]["station_id"], json!(target), "{after}");
+}
+
+// --- POST /api/edit/station/{station_version_id} ---
+
+#[tokio::test]
+async fn apply_field_rename_station_plan_writes_nothing() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stops = apply_field_route1_stops(&app).await;
+    let sv0 = stops[0]["stop_version_id"].as_i64().unwrap();
+    let d = get_json(&app, &format!("/api/stops/{sv0}")).await;
+    let st = d["station"]["station_id"].as_i64().unwrap();
+    let before = get_json(&app, &format!("/api/stations/{st}")).await;
+    let svi = before["station"]["station_version_id"].as_i64().unwrap();
+
+    let res = post_edit(
+        &app,
+        &format!("/api/edit/station/{svi}"),
+        Some("sekrit"),
+        json!({ "new_name": "新站名", "level": "station", "apply": false }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["station_version_id"], json!(svi), "{v}");
+    assert_eq!(v["old_name"], before["station"]["station_name"], "{v}");
+    assert_eq!(v["new_name"], json!("新站名"), "{v}");
+    assert_eq!(v["level"], json!("StationOnly"), "{v}");
+    assert!(v["poles"].as_array().unwrap().is_empty(), "{v}");
+    assert!(v.get("edit_id").is_none(), "plan carries no edit_id: {v}");
+
+    let after = get_json(&app, &format!("/api/stations/{st}")).await;
+    assert_eq!(
+        after["station"], before["station"],
+        "apply:false must not write"
+    );
+}
+
+#[tokio::test]
+async fn apply_field_rename_station_default_still_applies() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stops = apply_field_route1_stops(&app).await;
+    let sv0 = stops[0]["stop_version_id"].as_i64().unwrap();
+    let d = get_json(&app, &format!("/api/stops/{sv0}")).await;
+    let st = d["station"]["station_id"].as_i64().unwrap();
+    let before = get_json(&app, &format!("/api/stations/{st}")).await;
+    let svi = before["station"]["station_version_id"].as_i64().unwrap();
+
+    let res = post_edit(
+        &app,
+        &format!("/api/edit/station/{svi}"),
+        Some("sekrit"),
+        json!({ "new_name": "新站名", "level": "station" }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert!(
+        v["new_station_version_id"].as_i64().unwrap() > svi,
+        "apply minted a new version: {v}"
+    );
+    let after = get_json(&app, &format!("/api/stations/{st}")).await;
+    assert_eq!(after["station"]["station_name"], json!("新站名"), "{after}");
+}
+
+// --- POST /api/edit/station/{station_version_id}/move ---
+
+#[tokio::test]
+async fn apply_field_move_station_plan_writes_nothing() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stops = apply_field_route1_stops(&app).await;
+    let sv0 = stops[0]["stop_version_id"].as_i64().unwrap();
+    let d = get_json(&app, &format!("/api/stops/{sv0}")).await;
+    let st = d["station"]["station_id"].as_i64().unwrap();
+    let before = get_json(&app, &format!("/api/stations/{st}")).await;
+    let svi = before["station"]["station_version_id"].as_i64().unwrap();
+
+    let res = post_edit(
+        &app,
+        &format!("/api/edit/station/{svi}/move"),
+        Some("sekrit"),
+        json!({ "lat": 24.141, "lon": 120.686, "apply": false }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["station_version_id"], json!(svi), "{v}");
+    assert_eq!(v["old_latitude"], before["station"]["lat"], "{v}");
+    assert_eq!(v["old_longitude"], before["station"]["lon"], "{v}");
+    assert_eq!(v["new_latitude"], json!(24.141), "{v}");
+    assert_eq!(v["new_longitude"], json!(120.686), "{v}");
+    assert!(v.get("edit_id").is_none(), "plan carries no edit_id: {v}");
+
+    let after = get_json(&app, &format!("/api/stations/{st}")).await;
+    assert_eq!(
+        after["station"], before["station"],
+        "apply:false must not write"
+    );
+}
+
+#[tokio::test]
+async fn apply_field_move_station_default_still_applies() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stops = apply_field_route1_stops(&app).await;
+    let sv0 = stops[0]["stop_version_id"].as_i64().unwrap();
+    let d = get_json(&app, &format!("/api/stops/{sv0}")).await;
+    let st = d["station"]["station_id"].as_i64().unwrap();
+    let before = get_json(&app, &format!("/api/stations/{st}")).await;
+    let svi = before["station"]["station_version_id"].as_i64().unwrap();
+
+    let res = post_edit(
+        &app,
+        &format!("/api/edit/station/{svi}/move"),
+        Some("sekrit"),
+        json!({ "lat": 24.141, "lon": 120.686 }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert!(
+        v["new_station_version_id"].as_i64().unwrap() > svi,
+        "apply minted a new version: {v}"
+    );
+    let after = get_json(&app, &format!("/api/stations/{st}")).await;
+    assert_eq!(after["station"]["lat"], json!(24.141), "{after}");
+    assert_ne!(after["station"]["lon"], before["station"]["lon"], "{after}");
+}
+
+// --- POST /api/edit/polyline/{xno}/{direction}/line ---
+
+#[tokio::test]
+async fn apply_field_polyline_line_plan_writes_nothing() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let id1 = route_id(&app, "1").await;
+    let raw_uri = format!("/api/routes/{id1}/directions/0/raw");
+    let before = get_json(&app, &raw_uri).await;
+    assert_eq!(before["effective"]["source"], json!("src"), "{before}");
+
+    let res = post_edit(
+        &app,
+        "/api/edit/polyline/1/0/line",
+        Some("sekrit"),
+        json!({ "points": [[24.14, 120.685], [24.15, 120.686]], "apply": false }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert_eq!(v["xno"], json!("1"), "{v}");
+    assert_eq!(v["direction"], json!(0), "{v}");
+    assert_eq!(v["replaces"], json!("src"), "{v}");
+    assert_eq!(v["created"], json!(true), "{v}");
+    assert_eq!(v["points"], json!(2), "{v}");
+    assert!(v["encoded"].is_string(), "{v}");
+    assert!(v.get("edit_id").is_none(), "plan carries no edit_id: {v}");
+
+    let after = get_json(&app, &raw_uri).await;
+    assert_eq!(
+        after["effective"], before["effective"],
+        "apply:false must not write"
+    );
+}
+
+#[tokio::test]
+async fn apply_field_polyline_line_default_still_applies() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let id1 = route_id(&app, "1").await;
+    let raw_uri = format!("/api/routes/{id1}/directions/0/raw");
+
+    let res = post_edit(
+        &app,
+        "/api/edit/polyline/1/0/line",
+        Some("sekrit"),
+        json!({ "points": [[24.14, 120.685], [24.15, 120.686]] }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = body_json(res).await;
+    assert!(v["edit_id"].is_i64(), "no apply field still applies: {v}");
+    assert_eq!(v["created"], json!(true), "{v}");
+    let after = get_json(&app, &raw_uri).await;
+    assert_eq!(after["effective"]["source"], json!("override"), "{after}");
+    assert_eq!(
+        after["effective"]["points"][0],
+        json!([24.14, 120.685]),
+        "{after}"
+    );
+}
