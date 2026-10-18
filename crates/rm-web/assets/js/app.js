@@ -107,6 +107,9 @@ function setChip(id, text) {
 /// mid-session with no push channel — edit-side flows call this right
 /// after writing.
 function refreshBadge() {
+  // No token → the authed status GET would 401 (console noise each boot);
+  // the edit-toggle seed covers the moment a token exists.
+  if (!api.editToken()) return;
   api.refreshStatus().then((v) => {
     setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
   }).catch(() => { });
@@ -134,7 +137,7 @@ function syncLineBtn() {
 
 function onLineSaved(out, err) {
   if (err) { status(`線段儲存失敗: ${err.message}`); return; }
-  status(out.created ? '已建立線段覆寫；藍線待「套用」重算' : '已更新線段覆寫；藍線待「套用」重算');
+  status(out.created ? '已建立線段覆寫；藍線待「更新」重算' : '已更新線段覆寫；藍線待「更新」重算');
   if (lastRaw && document.getElementById('layer-raw').checked) loadRaw(lastRaw.routeId, lastRaw.dir);
   refreshBadge();
 }
@@ -933,11 +936,11 @@ async function boot() {
       refreshBadge();
       rbtn.addEventListener('click', async () => {
         if (refreshTimer) return; // a run is already in flight
-        if (!confirm('套用更新？將對所有過期編輯重跑比對、投影與方位。')) return;
+        if (!confirm('更新？將對所有過期編輯重跑比對、投影與方位。')) return;
         try {
           await api.refreshApply();
         } catch (e) {
-          status(`套用失敗: ${e.message}`);
+          status(`更新失敗: ${e.message}`);
           return;
         }
         rbtn.disabled = true;
@@ -952,8 +955,8 @@ async function boot() {
             refreshTimer = null;
             rbtn.disabled = false;
             setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
-            if (v.state === 'failed') status(`套用失敗: ${v.error}`);
-            else status(v.pending_marks > 0 ? `更新已套用，保留 ${v.pending_marks} 筆待標` : '更新已套用');
+            if (v.state === 'failed') status(`更新失敗: ${v.error}`);
+            else status(v.pending_marks > 0 ? `更新完成，保留 ${v.pending_marks} 筆待標` : '更新完成');
             // Derived data changed server-side (failed runs may still have
             // committed earlier steps): drop the piece-panel way-run cache
             // and redraw what's on screen.
@@ -964,7 +967,7 @@ async function boot() {
             clearInterval(refreshTimer);
             refreshTimer = null;
             rbtn.disabled = false;
-            status(`套用狀態輪詢失敗: ${e.message}`);
+            status(`更新狀態輪詢失敗: ${e.message}`);
           }
         }, 2000);
       });
@@ -998,8 +1001,8 @@ async function boot() {
             // Tagged outcome, kind "polyline": deleted = the override's
             // create was reverted (row gone, back to pure src); otherwise
             // the prior line is back. The drawn route path still reads the
-            // derived seg_geometry_draft until the next 套用 — say so.
-            done: (r) => (r.deleted ? '已刪除線段覆寫（回到原始線）' : '已還原線段覆寫') + '；藍線待「套用」重算',
+            // derived seg_geometry_draft until the next 更新 — say so.
+            done: (r) => (r.deleted ? '已刪除線段覆寫（回到原始線）' : '已還原線段覆寫') + '；藍線待「更新」重算',
             // Raw re-fetch: the effective line may have moved. Badge: the
             // undo re-marked derived datasets stale mid-session.
             tail: () => {
