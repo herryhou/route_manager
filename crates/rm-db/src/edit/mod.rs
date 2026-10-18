@@ -18,13 +18,19 @@ pub use detach::{
     apply_detach_stop, detach_stop, plan_detach_stop, undo_detach_stop, DetachCmd,
     DetachOccurrence, DetachOutcome, DetachPlan, DetachUndone,
 };
-pub use line::{edit_polyline_line, undo_polyline_line, LineEditCmd};
+pub use line::{
+    edit_polyline_line, plan_polyline_line, undo_polyline_line, LineEditCmd, LineEditPlan,
+};
 pub use matched_path::{bearing_at, matched_path, project_onto_path, OFF_PATH_MAX_M};
-pub use station_move::{move_station, StationMove};
-pub use station_rename::{rename_station, RenameLevel, StationRename};
+pub use station_move::{move_station, plan_move_station, StationMove, StationMovePlan};
+pub use station_rename::{
+    plan_rename_station, rename_station, PoleRenamePlan, RenameLevel, StationRename,
+    StationRenamePlan,
+};
 pub use station_undo::undo_station;
 pub use stop::{
-    edit_stop, preview_stop_edit, regroup_stop, undo_stop, RegroupStop, StopEdit, StopEditPreview,
+    edit_stop, plan_regroup_stop, preview_stop_edit, regroup_stop, undo_stop, RegroupStop,
+    RegroupStopPlan, StopEdit, StopEditPreview,
 };
 
 use anyhow::Result;

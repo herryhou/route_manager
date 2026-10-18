@@ -71,6 +71,55 @@ fn plan_line_edit(snap: &LineSnapshot, cmd: LineEditCmd) -> Result<LineEditOp, E
     })
 }
 
+/// What `edit_polyline_line` would do, without doing it: the snapshot's
+/// identity, what the edit replaces, the encoded result, and the currency
+/// token the apply must carry. Same guards as the apply path
+/// (`UnknownRoute`, `InvalidLine`, `LineNotCurrent`, `NoOpEdit`); zero
+/// writes.
+#[derive(Debug)]
+pub struct LineEditPlan {
+    pub route_id: i64,
+    pub route_version_id: Option<i64>,
+    pub xno: String,
+    pub direction: i64,
+    /// `"override"` when an existing override row is replaced, else `"src"`.
+    pub replaces: &'static str,
+    /// True when no override row existed — this edit creates one.
+    pub created: bool,
+    /// Point count after validation and consecutive-dedupe.
+    pub points: usize,
+    /// The encoded polyline this edit would store.
+    pub encoded: String,
+    /// Currency token the apply must carry (the current override's
+    /// `updated_at`; `None` when no override exists).
+    pub expected_updated_at: Option<String>,
+    pub op: LineEditOp,
+}
+
+/// Dry-run twin of `edit_polyline_line`: load → the same plan guards → the
+/// plan.
+pub fn plan_polyline_line(conn: &Connection, cmd: LineEditCmd) -> Result<LineEditPlan> {
+    let snap = load_polyline_line(conn, &cmd.xno, cmd.direction)?
+        .ok_or_else(|| EditError::UnknownRoute(cmd.xno.clone()))?;
+    let op = plan_line_edit(&snap, cmd)?;
+    let has_override = snap.override_row.is_some();
+    let expected = snap.override_row.as_ref().map(|o| o.updated_at.clone());
+    Ok(LineEditPlan {
+        route_id: snap.route_id,
+        route_version_id: snap.route_version_id,
+        xno: op.xno.clone(),
+        direction: op.direction,
+        replaces: if has_override { "override" } else { "src" },
+        created: !has_override,
+        points: polyline::decode(&op.encoded)
+            .map(|pts| pts.len())
+            .unwrap_or(0),
+        encoded: op.encoded.clone(),
+        expected_updated_at: expected,
+        op,
+    })
+}
+
 /// Application service: load → plan (pure) → apply (one tx).
 pub fn edit_polyline_line(
     conn: &Connection,
@@ -78,10 +127,8 @@ pub fn edit_polyline_line(
     editor: &str,
     note: &str,
 ) -> Result<super::LineApplied> {
-    let snap = load_polyline_line(conn, &cmd.xno, cmd.direction)?
-        .ok_or_else(|| EditError::UnknownRoute(cmd.xno.clone()))?;
-    let op = plan_line_edit(&snap, cmd)?;
-    apply_line_edit(conn, &op, editor, note)
+    let plan = plan_polyline_line(conn, cmd)?;
+    apply_line_edit(conn, &plan.op, editor, note)
 }
 
 /// Pure guard + inversion from the logged payload: only a non-undo
@@ -251,6 +298,69 @@ mod tests {
         .unwrap();
         let out = edit_polyline_line(&conn, cmd(), "herry", "draw").unwrap();
         assert!(out.created);
+    }
+
+    // ---------- dry-run plan ----------
+
+    #[test]
+    fn plan_polyline_line_reports_shape_and_writes_nothing() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        let count = || {
+            conn.query_row("SELECT COUNT(*) FROM polyline_override", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
+        let before = count();
+        // create case: no override yet
+        let plan = plan_polyline_line(&conn, cmd()).unwrap();
+        assert_eq!(plan.route_id, 1);
+        // the fixture never sets route.current_route_version_id
+        assert_eq!(plan.route_version_id, None);
+        assert_eq!((plan.xno.as_str(), plan.direction), ("1", 1));
+        assert_eq!(plan.replaces, "src");
+        assert!(plan.created);
+        assert_eq!(plan.points, 2);
+        assert_eq!(plan.encoded, "_p~iF~ps|U_ulLnnqC");
+        assert_eq!(plan.expected_updated_at, None);
+        assert_eq!(count(), before, "zero writes");
+
+        // overwrite case: after a real apply the plan reports the token
+        let first = edit_polyline_line(&conn, cmd(), "herry", "a").unwrap();
+        let mut second = cmd();
+        second.expected_updated_at = Some(first.updated_at.clone());
+        second.points = vec![[38.5, -120.2], [39.6, -120.575], [40.7, -120.95]];
+        let plan = plan_polyline_line(&conn, second).unwrap();
+        assert_eq!(plan.replaces, "override");
+        assert!(!plan.created);
+        assert_eq!(plan.points, 3);
+        assert_eq!(
+            plan.expected_updated_at.as_deref(),
+            Some(first.updated_at.as_str())
+        );
+    }
+
+    #[test]
+    fn plan_polyline_line_refuses_stale_token_noop_and_unknown_route() {
+        let conn = open_in_memory().unwrap();
+        fixture(&conn);
+        let first = edit_polyline_line(&conn, cmd(), "herry", "a").unwrap();
+        // wrong token
+        let mut c = cmd();
+        c.expected_updated_at = Some("2020-01-01T00:00:00Z".into());
+        let err = plan_polyline_line(&conn, c).unwrap_err();
+        assert!(err.to_string().contains("edited by someone else"), "{err}");
+        // identical re-save with the correct token
+        let mut c = cmd();
+        c.expected_updated_at = Some(first.updated_at.clone());
+        let err = plan_polyline_line(&conn, c).unwrap_err();
+        assert!(err.to_string().contains("sets no field"), "{err}");
+        // unknown route
+        let mut c = cmd();
+        c.xno = "999".into();
+        let err = plan_polyline_line(&conn, c).unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "{err}");
     }
 
     // ---------- undo planning ----------

@@ -29,6 +29,38 @@ fn plan_station_move(snapshot: &StationSnapshot, cmd: StationMove) -> StationMov
     }
 }
 
+/// What `move_station` would do, without doing it: the current station row
+/// plus the new coords. Same guard as the apply path (`StationNotCurrent`);
+/// zero writes.
+#[derive(Debug)]
+pub struct StationMovePlan {
+    pub station_id: i64,
+    pub station_version_id: i64,
+    pub station_name: String,
+    pub old_latitude: f64,
+    pub old_longitude: f64,
+    pub new_latitude: f64,
+    pub new_longitude: f64,
+    pub op: StationMoveOp,
+}
+
+/// Dry-run twin of `move_station`: load → the plan → the plan struct.
+pub fn plan_move_station(conn: &Connection, cmd: StationMove) -> Result<StationMovePlan> {
+    let snapshot = load_station_snapshot(conn, cmd.station_version_id)?
+        .ok_or(EditError::StationNotCurrent(cmd.station_version_id))?;
+    let op = plan_station_move(&snapshot, cmd);
+    Ok(StationMovePlan {
+        station_id: snapshot.station_id,
+        station_version_id: snapshot.station_version_id,
+        station_name: snapshot.station_name,
+        old_latitude: snapshot.latitude,
+        old_longitude: snapshot.longitude,
+        new_latitude: op.new_latitude,
+        new_longitude: op.new_longitude,
+        op,
+    })
+}
+
 /// Application service: load → plan (pure) → apply (one tx).
 pub fn move_station(
     conn: &Connection,
@@ -36,10 +68,8 @@ pub fn move_station(
     editor: &str,
     note: &str,
 ) -> Result<StationMoveApplied> {
-    let snapshot = load_station_snapshot(conn, cmd.station_version_id)?
-        .ok_or(EditError::StationNotCurrent(cmd.station_version_id))?;
-    let op = plan_station_move(&snapshot, cmd);
-    apply_station_move(conn, &op, editor, note)
+    let plan = plan_move_station(conn, cmd)?;
+    apply_station_move(conn, &plan.op, editor, note)
 }
 
 #[cfg(test)]
@@ -192,6 +222,76 @@ mod tests {
             },
             "herry",
             "",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not the current version"), "{err}");
+    }
+
+    // ---------- dry-run plan ----------
+
+    #[test]
+    fn plan_move_station_copies_snapshot_and_writes_nothing() {
+        let conn = crate::open_in_memory().unwrap();
+        fixture(&conn);
+        let count = || {
+            conn.query_row("SELECT COUNT(*) FROM station_version", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
+        let before = count();
+        let plan = plan_move_station(
+            &conn,
+            StationMove {
+                station_version_id: 20,
+                latitude: 24.5,
+                longitude: 120.5,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                plan.station_id,
+                plan.station_version_id,
+                plan.station_name.as_str()
+            ),
+            (1, 20, "S")
+        );
+        assert_eq!(
+            (
+                plan.old_latitude,
+                plan.old_longitude,
+                plan.new_latitude,
+                plan.new_longitude
+            ),
+            (24.0, 120.0, 24.5, 120.5)
+        );
+        assert_eq!(plan.op.old_station_version_id, 20);
+        assert_eq!(count(), before, "zero writes");
+    }
+
+    #[test]
+    fn plan_move_station_refuses_stale_version() {
+        let conn = crate::open_in_memory().unwrap();
+        let old = fixture(&conn);
+        move_station(
+            &conn,
+            StationMove {
+                station_version_id: old,
+                latitude: 24.5,
+                longitude: 120.5,
+            },
+            "herry",
+            "first",
+        )
+        .unwrap();
+        let err = plan_move_station(
+            &conn,
+            StationMove {
+                station_version_id: old,
+                latitude: 24.6,
+                longitude: 120.6,
+            },
         )
         .unwrap_err();
         assert!(err.to_string().contains("not the current version"), "{err}");

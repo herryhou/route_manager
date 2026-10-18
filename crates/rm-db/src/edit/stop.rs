@@ -4,7 +4,7 @@
 //! copy structs.
 
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use super::{
     apply_stop_edit, apply_stop_regroup, apply_stop_undo, load_stop_edit, load_stop_snapshot,
@@ -109,6 +109,58 @@ fn plan_regroup(snapshot: &StopSnapshot, cmd: RegroupStop) -> Result<StopRegroup
     })
 }
 
+/// What `regroup_stop` would do, without doing it: the current pole row
+/// plus both stations' current names and the planned op. Same guards as the
+/// apply path (`NotCurrent`, `UnknownStation`, `NoOpEdit`); zero writes.
+#[derive(Debug)]
+pub struct RegroupStopPlan {
+    pub stop_id: i64,
+    pub stop_version_id: i64,
+    pub stop_code: String,
+    pub stop_name: String,
+    pub old_station_id: i64,
+    pub old_station_name: String,
+    pub new_station_id: i64,
+    pub new_station_name: String,
+    pub op: StopRegroupOp,
+}
+
+/// Dry-run twin of `regroup_stop`: load → target check → the same plan
+/// guards → the plan.
+pub fn plan_regroup_stop(conn: &Connection, cmd: RegroupStop) -> Result<RegroupStopPlan> {
+    let snapshot = load_stop_snapshot(conn, cmd.stop_version_id)?
+        .ok_or(EditError::NotCurrent(cmd.stop_version_id))?;
+    if !station_is_current(conn, cmd.new_station_id)? {
+        return Err(EditError::UnknownStation(cmd.new_station_id).into());
+    }
+    let op = plan_regroup(&snapshot, cmd)?;
+    let station_name = |station_id: i64| -> Result<String> {
+        Ok(conn
+            .query_row(
+                "SELECT station_name FROM station_version
+                 WHERE station_id = ?1 AND valid_to IS NULL
+                 ORDER BY station_version_id LIMIT 1",
+                [station_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or_default())
+    };
+    let old_station_name = station_name(snapshot.station_id)?;
+    let new_station_name = station_name(op.new_station_id)?;
+    Ok(RegroupStopPlan {
+        stop_id: snapshot.stop_id,
+        stop_version_id: snapshot.stop_version_id,
+        stop_code: snapshot.stop_code,
+        stop_name: snapshot.stop_name,
+        old_station_id: snapshot.station_id,
+        old_station_name,
+        new_station_id: op.new_station_id,
+        new_station_name,
+        op,
+    })
+}
+
 /// Application service: load → target check → plan (pure) → apply (one tx).
 pub fn regroup_stop(
     conn: &Connection,
@@ -116,13 +168,8 @@ pub fn regroup_stop(
     editor: &str,
     note: &str,
 ) -> Result<EditOutcome> {
-    let snapshot = load_stop_snapshot(conn, cmd.stop_version_id)?
-        .ok_or(EditError::NotCurrent(cmd.stop_version_id))?;
-    if !station_is_current(conn, cmd.new_station_id)? {
-        return Err(EditError::UnknownStation(cmd.new_station_id).into());
-    }
-    let op = plan_regroup(&snapshot, cmd)?;
-    apply_stop_regroup(conn, &op, editor, note)
+    let plan = plan_regroup_stop(conn, cmd)?;
+    apply_stop_regroup(conn, &plan.op, editor, note)
 }
 
 /// Pure guard: only a non-undo stop row with both version ids is
@@ -494,6 +541,82 @@ mod tests {
         .unwrap();
         assert!(out.new_version_id > old);
         assert!(out.stale_routes.is_empty());
+    }
+
+    #[test]
+    fn plan_regroup_stop_mirrors_guards_and_writes_nothing() {
+        let conn = open_in_memory().unwrap();
+        let old = fixture(&conn);
+        second_station(&conn);
+        let count = || {
+            conn.query_row("SELECT COUNT(*) FROM stop_version", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
+        // stale / missing svi
+        let err = plan_regroup_stop(
+            &conn,
+            RegroupStop {
+                stop_version_id: 999,
+                new_station_id: 2,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not the current version"), "{err}");
+        // unknown target
+        let err = plan_regroup_stop(
+            &conn,
+            RegroupStop {
+                stop_version_id: old,
+                new_station_id: 42,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("does not exist or is not current"),
+            "{err}"
+        );
+        // same station
+        let err = plan_regroup_stop(
+            &conn,
+            RegroupStop {
+                stop_version_id: old,
+                new_station_id: 1,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("sets no field"), "{err}");
+        // happy path reports both names and writes nothing
+        let before = count();
+        let plan = plan_regroup_stop(
+            &conn,
+            RegroupStop {
+                stop_version_id: old,
+                new_station_id: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                plan.stop_id,
+                plan.stop_version_id,
+                plan.stop_code.as_str(),
+                plan.stop_name.as_str()
+            ),
+            (1, old, "001", "S")
+        );
+        assert_eq!(
+            (
+                plan.old_station_id,
+                plan.old_station_name.as_str(),
+                plan.new_station_id,
+                plan.new_station_name.as_str()
+            ),
+            (1, "S", 2, "T")
+        );
+        assert_eq!(plan.op.new_station_id, 2);
+        assert_eq!(count(), before, "zero writes");
     }
 
     #[test]

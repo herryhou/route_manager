@@ -59,6 +59,9 @@ pub struct PathOverview {
     pub encoded: Option<String>,
     /// First and last point of the decoded polyline, [lat, lon] order.
     pub endpoints: Option<Vec<[f64; 2]>>,
+    /// The current override's `updated_at` — the `set-line` concurrency
+    /// token. `None` when the effective polyline is the src capture.
+    pub updated_at: Option<String>,
 }
 
 /// Route identity: `route.ext_uid = 'tcg:' || xno` — the same resolution
@@ -232,6 +235,7 @@ pub fn show_path(
     };
     // read the source before the encoded String moves out of the snapshot
     let eff_source = source_name(&snap);
+    let updated_at = snap.override_row.as_ref().map(|o| o.updated_at.clone());
     let encoded = snap
         .override_row
         .as_ref()
@@ -256,6 +260,7 @@ pub fn show_path(
         source,
         encoded,
         endpoints,
+        updated_at,
     }))
 }
 

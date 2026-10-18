@@ -81,6 +81,64 @@ fn plan_station_rename(
     })
 }
 
+/// One pole the rename would churn, with its current name for the report.
+#[derive(Debug)]
+pub struct PoleRenamePlan {
+    pub stop_id: i64,
+    pub stop_version_id: i64,
+    pub old_name: String,
+    pub new_name: String,
+}
+
+/// What `rename_station` would do, without doing it: the current station
+/// row plus the poles each level would churn. Same guards as the apply path
+/// (`StationNotCurrent`, `EmptyNewName`, `NoOpRename`); zero writes.
+#[derive(Debug)]
+pub struct StationRenamePlan {
+    pub station_id: i64,
+    pub station_version_id: i64,
+    pub old_name: String,
+    pub new_name: String,
+    pub level: String,
+    pub poles: Vec<PoleRenamePlan>,
+    pub op: StationRenameOp,
+}
+
+/// Dry-run twin of `rename_station`: load → the same plan guards → the
+/// plan, with the pole list enriched by old names.
+pub fn plan_rename_station(conn: &Connection, cmd: StationRename) -> Result<StationRenamePlan> {
+    let snapshot = load_station_snapshot(conn, cmd.station_version_id)?
+        .ok_or(EditError::StationNotCurrent(cmd.station_version_id))?;
+    let op = plan_station_rename(&snapshot, cmd)?;
+    let poles = op
+        .poles
+        .iter()
+        .map(|p| {
+            let old_name = snapshot
+                .poles
+                .iter()
+                .find(|s| s.stop_version_id == p.old_stop_version_id)
+                .map(|s| s.stop_name.clone())
+                .unwrap_or_default();
+            PoleRenamePlan {
+                stop_id: p.stop_id,
+                stop_version_id: p.old_stop_version_id,
+                old_name,
+                new_name: p.new_stop_name.clone(),
+            }
+        })
+        .collect();
+    Ok(StationRenamePlan {
+        station_id: op.station_id,
+        station_version_id: op.old_station_version_id,
+        old_name: op.old_station_name.clone(),
+        new_name: op.new_station_name.clone(),
+        level: op.level.clone(),
+        poles,
+        op,
+    })
+}
+
 /// Application service: load → plan (pure) → apply (one tx).
 pub fn rename_station(
     conn: &Connection,
@@ -88,10 +146,8 @@ pub fn rename_station(
     editor: &str,
     note: &str,
 ) -> Result<StationRenameApplied> {
-    let snapshot = load_station_snapshot(conn, cmd.station_version_id)?
-        .ok_or(EditError::StationNotCurrent(cmd.station_version_id))?;
-    let op = plan_station_rename(&snapshot, cmd)?;
-    apply_station_rename(conn, &op, editor, note).map_err(|e| {
+    let plan = plan_rename_station(conn, cmd)?;
+    apply_station_rename(conn, &plan.op, editor, note).map_err(|e| {
         // a stale pole (per-pole guard) surfaces as the station-level error —
         // rename acts on the station as a whole
         if let Some(EditError::NotCurrent(svi)) = e.downcast_ref::<EditError>() {
@@ -347,5 +403,120 @@ mod tests {
         let err =
             rename_station(&conn, e2e_cmd("  ", RenameLevel::AllPoles), "herry", "").unwrap_err();
         assert!(err.to_string().contains("empty"), "{err}");
+    }
+
+    // ---------- dry-run plan ----------
+
+    #[test]
+    fn plan_rename_station_reports_poles_and_writes_nothing() {
+        let conn = crate::open_in_memory().unwrap();
+        fixture(&conn);
+        let count = || {
+            conn.query_row("SELECT COUNT(*) FROM stop_version", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+        };
+        let before = count();
+        // MatchingPoles: only the pole byte-equal to "S" follows
+        let plan = plan_rename_station(
+            &conn,
+            StationRename {
+                station_version_id: 20,
+                new_name: "N".into(),
+                level: RenameLevel::MatchingPoles,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                plan.station_id,
+                plan.station_version_id,
+                plan.old_name.as_str(),
+                plan.new_name.as_str(),
+                plan.level.as_str()
+            ),
+            (1, 20, "S", "N", "MatchingPoles")
+        );
+        assert_eq!(plan.poles.len(), 1);
+        assert_eq!(
+            (
+                plan.poles[0].stop_id,
+                plan.poles[0].stop_version_id,
+                plan.poles[0].old_name.as_str(),
+                plan.poles[0].new_name.as_str()
+            ),
+            (1, 10, "S", "N")
+        );
+        // AllPoles lists every pole with old names
+        let plan = plan_rename_station(
+            &conn,
+            StationRename {
+                station_version_id: 20,
+                new_name: "N".into(),
+                level: RenameLevel::AllPoles,
+            },
+        )
+        .unwrap();
+        assert_eq!(plan.poles.len(), 2);
+        assert_eq!(plan.poles[1].old_name.as_str(), "S 往");
+        assert_eq!(count(), before, "zero writes");
+    }
+
+    #[test]
+    fn plan_rename_station_refuses_stale_version_empty_and_noop() {
+        let conn = crate::open_in_memory().unwrap();
+        fixture(&conn);
+        // after a real rename, the old svi is stale
+        rename_station(
+            &conn,
+            StationRename {
+                station_version_id: 20,
+                new_name: "N".into(),
+                level: RenameLevel::AllPoles,
+            },
+            "herry",
+            "first",
+        )
+        .unwrap();
+        let err = plan_rename_station(
+            &conn,
+            StationRename {
+                station_version_id: 20,
+                new_name: "M".into(),
+                level: RenameLevel::AllPoles,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not the current version"), "{err}");
+        // empty + no-op through the plan entry (fixture is stale now; replan
+        // on the NEW current version)
+        let new_svi: i64 = conn
+            .query_row(
+                "SELECT station_version_id FROM station_version WHERE valid_to IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let err = plan_rename_station(
+            &conn,
+            StationRename {
+                station_version_id: new_svi,
+                new_name: "  ".into(),
+                level: RenameLevel::AllPoles,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("empty"), "{err}");
+        let err = plan_rename_station(
+            &conn,
+            StationRename {
+                station_version_id: new_svi,
+                new_name: "N".into(),
+                level: RenameLevel::AllPoles,
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("equals the current name"), "{err}");
     }
 }
