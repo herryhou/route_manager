@@ -363,6 +363,17 @@ fn schema_lists_all_commands_and_describes_add_stop() {
         .map(|c| c["name"].as_str().unwrap())
         .collect();
     assert!(cmds.contains(&"add-stop") && cmds.contains(&"schema"));
+    // the rm-web parity batch
+    for name in [
+        "regroup-stop",
+        "rename-station",
+        "move-station",
+        "set-line",
+        "edit-log",
+        "refresh",
+    ] {
+        assert!(cmds.contains(&name), "{name} missing from schema list");
+    }
     let (_, report) = run(Cli {
         command: Command::Schema {
             command: Some("add-stop".into()),
