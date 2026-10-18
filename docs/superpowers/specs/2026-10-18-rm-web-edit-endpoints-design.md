@@ -26,12 +26,16 @@ and re-points the agent skill/docs at the API.
 ## Non-goals
 
 - No UI work: no buttons, panels, or map flows for the three operations.
-- No changes to the eight existing edit endpoints.
+  (Existing UI callers keep working unchanged — see apply-field semantics.)
 - No new auth model: the existing `Editor` bearer-token extractor and
   `write_tokens` gating apply as-is.
 - No rework of rm_db primitives — `plan_add_stop` / `add_stop`,
   `plan_detach_stop` / `detach_stop`, and the polyline edit path are
   already correct and tested at the rm-db layer.
+- No new read endpoints: find-stop's role is served by composing existing
+  GETs (`/api/stations?q=` → `/api/stations/{id}`,
+  `/api/routes/{id}/directions/{dir}/stops`); the rewritten skill
+  documents the chains.
 
 ## Anti-goals (failure even if it works)
 
@@ -57,10 +61,38 @@ and re-points the agent skill/docs at the API.
 
 ## Decided (by herry)
 
-- Dry-run via `apply: false` in the payload; plans are the default response.
+- Dry-run via `apply: false` in the payload; plans are the default response
+  for the three NEW endpoints.
+- **All eight write operations become plan-capable** (builder-check
+  question 1, answered "B"): the five existing write handlers
+  (`edit_stop`, regroup, `rename_station`, `move_station`,
+  `edit_polyline_line`) also gain an `apply` field with a plan leg.
 - API endpoints only, no UI.
 - After endpoints ship, rm-job is deleted in full (crate, skill, docs
   re-point). History under `docs/superpowers/plans|specs` stays.
+
+## Decided (builder-check settlements)
+
+- **Migration-0013 degrade** (question 2): the moved extend module keeps
+  a small sqlite_master-probing wrapper around the line-snapshot load —
+  missing `polyline_override` degrades to "no override" instead of
+  erroring, per the /raw-incident rule. Shared `load_polyline_line`
+  semantics unchanged. Degrade test moves with the module.
+- **Response contract** (question 4): the extend plan response carries
+  the walk's `logs`; add/detach apply responses include warnings/logs
+  whenever the rm_db primitive yields them. The rewritten skill
+  surfaces these to the human.
+- **apply-field semantics** (builder's call, backward compatibility):
+  - New three endpoints: `apply` absent = `false` (dry-run default,
+    rm-job discipline).
+  - Existing five handlers: `apply` absent = apply (today's behavior —
+    the shipped UI keeps working untouched); explicit `apply: false` =
+    plan. The rewritten skill always sends `apply` explicitly.
+- Existing UI callers are NOT updated (no-UI non-goal holds); plan
+  responses for the five use each op's rm_db plan/preview function
+  (`plan_stop_edit` / `preview_stop_edit`, `plan_polyline_line`, and
+  the regroup / rename / move plan functions — verify exact names
+  during planning).
 
 ## Decided (builder's calls, flagged for review)
 
