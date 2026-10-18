@@ -415,6 +415,151 @@ pub async fn detach_stop(
 }
 
 #[derive(Deserialize)]
+pub struct ExtendBody {
+    meters: f64,
+    end: String,
+    note: Option<String>,
+    apply: Option<bool>,
+}
+
+/// Serialize mirror of `rm_osm_match::extend::Extension` — the response
+/// contract is the struct's field names verbatim.
+#[derive(Serialize)]
+pub struct ExtensionData {
+    end: String,
+    way_ids: Vec<i64>,
+    new_vertices: Vec<[f64; 2]>,
+    snap_dist_m: f64,
+}
+
+impl From<&rm_osm_match::extend::Extension> for ExtensionData {
+    fn from(e: &rm_osm_match::extend::Extension) -> Self {
+        Self {
+            end: e.end.clone(),
+            way_ids: e.way_ids.clone(),
+            new_vertices: e.new_vertices.clone(),
+            snap_dist_m: e.snap_dist_m,
+        }
+    }
+}
+
+/// Extend-plan rejections (bad meters/end, endpoint beyond the 50 m snap
+/// limit, empty osm tables) are request problems, not server faults — but
+/// `plan_extension` reports them as plain anyhow strings. This marker
+/// carries the message through the closure; the handler unwraps it to a
+/// 400 (edit errors keep the `edit_conflict` mapping).
+#[derive(Debug)]
+struct PlanError(String);
+
+impl std::fmt::Display for PlanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for PlanError {}
+
+/// POST /api/edit/polyline/{xno}/{direction}/extend — walk the OSM road
+/// graph outward from the effective polyline's chosen end(s). The default
+/// (and `apply: false`) answers the read-only plan; `apply: true` plans
+/// and writes inside one closure, so "both" with either end failing
+/// leaves nothing behind. The write is a whole-line override — the same
+/// primitive `.../line` stores — so undo works through /api/edit/undo.
+pub async fn extend_polyline(
+    Path((xno, direction)): Path<(String, i64)>,
+    State(state): State<AppState>,
+    Editor(editor): Editor,
+    ApiJson(b): ApiJson<ExtendBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let ExtendBody {
+        meters,
+        end,
+        note,
+        apply,
+    } = b;
+    if meters <= 0.0 {
+        return Err(ApiError::bad_request(&format!(
+            "meters must be > 0 (got {meters})"
+        )));
+    }
+    if !matches!(end.as_str(), "both" | "first" | "last") {
+        return Err(ApiError::bad_request(&format!(
+            "invalid end '{end}' — expected both, first or last"
+        )));
+    }
+    let map_plan_err = |e: ApiError| match e.downcast_ref::<PlanError>() {
+        Some(p) => ApiError::bad_request(&p.0),
+        None => e,
+    };
+    if !apply.unwrap_or(false) {
+        let plan = run_db(state, move |conn| {
+            let mut logs = Vec::new();
+            let (candidate, extensions, source) = rm_osm_match::extend::plan_extension(
+                conn, &xno, direction, meters, &end, &mut logs,
+            )
+            .map_err(|e| PlanError(e.to_string()))?;
+            Ok(json!({
+                "source": source,
+                "candidate": candidate
+                    .iter()
+                    .map(|p| [p.lat, p.lon])
+                    .collect::<Vec<[f64; 2]>>(),
+                "extensions": extensions
+                    .iter()
+                    .map(ExtensionData::from)
+                    .collect::<Vec<ExtensionData>>(),
+                "logs": logs,
+            }))
+        })
+        .await
+        .map_err(map_plan_err)?;
+        return Ok(Json(plan));
+    }
+    let note = note.unwrap_or_default();
+    let out = run_db_write(state, move |conn| {
+        let mut logs = Vec::new();
+        let (candidate, extensions, source) =
+            rm_osm_match::extend::plan_extension(conn, &xno, direction, meters, &end, &mut logs)
+                .map_err(|e| PlanError(e.to_string()))?;
+        let extensions = extensions
+            .iter()
+            .map(ExtensionData::from)
+            .collect::<Vec<ExtensionData>>();
+        // the override row's updated_at doubles as the concurrency token;
+        // None when the effective line is still plain src
+        let expected_updated_at = rm_db::load_polyline_line(conn, &xno, direction)?
+            .ok_or_else(|| anyhow::anyhow!("route '{xno}' does not exist"))?
+            .override_row
+            .map(|o| o.updated_at);
+        let applied = rm_db::edit_polyline_line(
+            conn,
+            rm_db::LineEditCmd {
+                xno,
+                direction,
+                points: candidate
+                    .iter()
+                    .map(|p| [p.lat, p.lon])
+                    .collect::<Vec<[f64; 2]>>(),
+                expected_updated_at,
+            },
+            &editor,
+            &note,
+        )?;
+        Ok(json!({
+            "edit_id": applied.edit_id,
+            "updated_at": applied.updated_at,
+            "created": applied.created,
+            "source": source,
+            "extensions": extensions,
+        }))
+    })
+    .await
+    .map_err(map_plan_err)
+    .map_err(edit_conflict)?;
+    Ok(Json(out))
+}
+
+#[derive(Deserialize)]
 pub struct LogParams {
     entity: String,
     entity_id: i64,
