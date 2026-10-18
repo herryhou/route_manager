@@ -78,14 +78,14 @@ pub enum EditError {
     },
     #[error("duplicate attachment for route {0} direction {1}")]
     DuplicateAttach(String, i64),
-    #[error("route {xno} direction {direction}: stop {stop_code} occurs {count} times — give --sequence or --all")]
+    #[error("route {xno} direction {direction}: stop {stop_code} occurs {count} times — give \"sequence\" or \"all\": true")]
     DuplicateStopOccurrence {
         xno: String,
         direction: i64,
         stop_code: String,
         count: i64,
     },
-    #[error("{0}; pass --delete-pole (one-way, not undoable)")]
+    #[error("{0}; pass \"delete_pole\": true (one-way, not undoable)")]
     OrphanPoleRefused(String),
 }
 

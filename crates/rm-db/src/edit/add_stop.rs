@@ -48,9 +48,9 @@ pub struct AttachCmd {
 }
 
 const ATTACH_USAGE: &str =
-    "usage: --attach XNO:DIR[@CODE] (repeatable; @CODE inserts after that stop code)";
+    "usage: attach: [\"XNO:DIR[@CODE]\", ...] (@CODE inserts after that stop code)";
 
-/// Parse one `--attach` value: split `'@'` (insert-after code) then `':'`
+/// Parse one `attach` entry: split `'@'` (insert-after code) then `':'`
 /// → `(xno, direction)`.
 pub fn parse_attach(s: &str) -> Result<AttachCmd, String> {
     let (body, after) = match s.split_once('@') {
@@ -59,19 +59,19 @@ pub fn parse_attach(s: &str) -> Result<AttachCmd, String> {
     };
     if after == Some("") {
         return Err(format!(
-            "invalid --attach '{s}': empty code after '@'; {ATTACH_USAGE}"
+            "invalid attach '{s}': empty code after '@'; {ATTACH_USAGE}"
         ));
     }
     let (xno, dir) = body
         .split_once(':')
-        .ok_or_else(|| format!("invalid --attach '{s}': expected XNO:DIR; {ATTACH_USAGE}"))?;
+        .ok_or_else(|| format!("invalid attach '{s}': expected XNO:DIR; {ATTACH_USAGE}"))?;
     if xno.is_empty() {
         return Err(format!(
-            "invalid --attach '{s}': empty route xno; {ATTACH_USAGE}"
+            "invalid attach '{s}': empty route xno; {ATTACH_USAGE}"
         ));
     }
     let direction = dir.parse::<i64>().map_err(|_| {
-        format!("invalid --attach '{s}': direction '{dir}' is not a number; {ATTACH_USAGE}")
+        format!("invalid attach '{s}': direction '{dir}' is not a number; {ATTACH_USAGE}")
     })?;
     Ok(AttachCmd {
         xno: xno.to_string(),

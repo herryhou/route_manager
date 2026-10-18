@@ -129,7 +129,7 @@ fn edit_conflict(err: ApiError) -> ApiError {
             | rm_db::EditError::OffPathStop { .. }
             | rm_db::EditError::DuplicateAttach(_, _)
             // detach verdicts: both ask the caller to adjust the request
-            // (--sequence/--all, --delete-pole), not retry later.
+            // (sequence/all, delete_pole), not retry later.
             | rm_db::EditError::DuplicateStopOccurrence { .. }
             | rm_db::EditError::OrphanPoleRefused(_) => ApiError::bad_request(&e.to_string()),
             rm_db::EditError::NotCurrent(_)

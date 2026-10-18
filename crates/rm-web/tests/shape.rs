@@ -1,13 +1,18 @@
-//! Golden wire-shape contract for every read endpoint: exact key sets +
-//! value types, asserted against the current responses. The queries
-//! modules' serde structs (candidate 2, shape authority) must keep these
-//! green byte-for-byte — a key added, removed, or retyped here is a wire
-//! break for the JS consumers in assets/js.
+//! Golden wire-shape contract for every endpoint: exact key sets + value
+//! types, asserted against the current responses. The queries modules'
+//! serde structs (candidate 2, shape authority) and the edit handlers'
+//! `<Type>Data` mirrors must keep these green byte-for-byte — a key
+//! added, removed, or retyped here is a wire break for the JS consumers
+//! in assets/js and the rm-web-jobs agent skill.
+
+use std::collections::HashMap;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use rm_core::{polyline, LatLng};
 use rm_web::router_with;
 use rm_web::state::AppState;
+use serde_json::json;
 use tower::ServiceExt;
 
 // ───────────────────────── shape-spec walker ─────────────────────────
@@ -924,5 +929,516 @@ async fn shape_station_pair_routes() {
             ])),
         )]),
         "station pair routes",
+    );
+}
+
+// ─────────────────── edit endpoints (bearer POST, wire mirrors) ───────────────────
+
+/// Edit-mode router over one fixture DB (helpers copied from api.rs):
+/// editor "herry", token "sekrit".
+fn edit_app(db: &std::path::Path) -> axum::Router {
+    let mut tokens = HashMap::new();
+    tokens.insert("herry".to_string(), "sekrit".to_string());
+    router_with(AppState::with_edit(db.to_path_buf(), None, tokens))
+}
+
+/// POST JSON with the editor bearer header (copied from api.rs).
+async fn post_edit(app: &axum::Router, uri: &str, body: serde_json::Value) -> serde_json::Value {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("authorization", "Bearer sekrit")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "POST {uri}: {}",
+        String::from_utf8_lossy(&bytes)
+    );
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// route 1 dir 0's first stop (id + station + version ids).
+async fn route1_first_stop(app: &axum::Router) -> serde_json::Value {
+    let id1 = route1_id(app).await;
+    let v = get_json(app, &format!("/api/routes/{id1}/directions/0/stops")).await;
+    v["stops"][0].clone()
+}
+
+/// The extend-walk fixture (copied from extend_api.rs): a seeded route
+/// whose src polyline ends exactly on node 1 of a straight N-S way, so
+/// the "last" end extends due north.
+fn line_db() -> (tempfile::TempDir, std::path::PathBuf) {
+    const T0: &str = "2026-01-01T00:00:00Z";
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("t.db");
+    let conn = rm_db::open(&db).unwrap();
+    let encoded = polyline::encode(&[
+        LatLng::new(24.1399, 120.6800),
+        LatLng::new(24.1400, 120.6800),
+    ]);
+    conn.execute_batch(&format!(
+        "INSERT INTO station_group (station_group_id, created_at) VALUES (1, '{T0}');
+         INSERT INTO station_group_version (station_group_version_id, station_group_id, station_group_name, source, valid_from, created_at)
+             VALUES (1, 1, 'g', 'capture', '{T0}', '{T0}');
+         INSERT INTO station (station_id, ext_uid, created_at) VALUES (1, 'tcg:node:1', '{T0}');
+         INSERT INTO station_version (station_version_id, station_id, station_group_id, station_name, latitude, longitude, valid_from, created_at)
+             VALUES (1, 1, 1, 'S', 24.0, 120.0, '{T0}', '{T0}');
+         INSERT INTO stop (stop_id, ext_uid, created_at) VALUES (1, 'tcg:stop:1', '{T0}');
+         INSERT INTO stop_version (stop_version_id, stop_id, station_id, stop_code, stop_name, direction, latitude, longitude, valid_from, created_at)
+             VALUES (10, 1, 1, '001', 'Old', 0, 24.0, 120.0, '{T0}', '{T0}');
+         INSERT INTO route (route_id, route_code, ext_uid, revision, created_at, updated_at)
+             VALUES (1, '1', 'tcg:1', 1, '{T0}', '{T0}');
+         INSERT INTO route_version (route_version_id, route_id, version_no, valid_from, status, created_at)
+             VALUES (1, 1, 1, '{T0}', 'PUBLISHED', '{T0}');
+         UPDATE route SET current_route_version_id = 1 WHERE route_id = 1;
+         INSERT INTO subroute (subroute_id, route_id, subroute_code, created_at)
+             VALUES (1, 1, '1-0', '{T0}');
+         INSERT INTO subroute_version (subroute_version_id, route_version_id, subroute_id, subroute_name, created_at)
+             VALUES (1, 1, 1, '1', '{T0}');
+         INSERT INTO route_stop_version (route_stop_version_id, subroute_version_id, stop_version_id, direction, stop_sequence, created_at)
+             VALUES (1, 1, 10, 0, 1, '{T0}');
+         INSERT INTO id_sequence (table_name, next_value) VALUES
+             ('station_group', 2), ('station_group_version', 2),
+             ('station', 2), ('station_version', 2),
+             ('stop', 2), ('stop_version', 11),
+             ('route_version', 2), ('subroute_version', 2),
+             ('route_stop_version', 2);
+         INSERT INTO import_batch (batch_id, source_dir, file_count, captured_at, valid_from, status, created_at)
+             VALUES (1, 'assets/x', 1, '{T0}', '{T0}', 'CLOSED', '{T0}');
+         INSERT INTO src_route_point (batch_id, xno, direction, encoded)
+             VALUES (1, '1', 0, '{encoded}');
+         INSERT INTO osm_way (osm_way_id, highway, oneway, name)
+             VALUES (100, 'residential', 0, '直線路');
+         INSERT INTO osm_node (osm_node_id, lat, lon) VALUES
+            (1, 24.1400, 120.6800),
+            (2, 24.1401, 120.6800),
+            (3, 24.1402, 120.6800),
+            (4, 24.1403, 120.6800);
+         INSERT INTO osm_way_node (osm_way_id, ordinal, osm_node_id) VALUES
+            (100, 1, 1), (100, 2, 2), (100, 3, 3), (100, 4, 4);"
+    ))
+    .unwrap();
+    (dir, db)
+}
+
+#[tokio::test]
+async fn shape_edit_add_plan_and_apply() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stop = route1_first_stop(&app).await;
+    let station_id = stop["station_id"].as_i64().unwrap();
+
+    // plan: `apply` absent ⇒ dry run (the new endpoints' default)
+    let v = post_edit(
+        &app,
+        "/api/edit/stop",
+        json!({
+            "name": "形狀測試桿", "lat": 24.1408, "lon": 120.6858,
+            "station": station_id, "attach": ["1:0"]
+        }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("name", Spec::Str),
+            ("lat", Spec::Num),
+            ("lon", Spec::Num),
+            // station given ⇒ the Pinned verdict, serialized as its tag
+            (
+                "station",
+                obj(vec![(
+                    "Pinned",
+                    obj(vec![("station_id", Spec::Int), ("name", Spec::Str)]),
+                )]),
+            ),
+            (
+                "attachments",
+                arr(obj(vec![
+                    ("xno", Spec::Str),
+                    ("direction", Spec::Int),
+                    ("route_id", Spec::Int),
+                    ("route_version_id", Spec::Int),
+                    ("insert_after_stop_code", opt(Spec::Str)),
+                    ("neighbor_before", opt(Spec::Str)),
+                    ("neighbor_after", opt(Spec::Str)),
+                ])),
+            ),
+            (
+                "row_counts",
+                obj(vec![
+                    ("stop", Spec::Int),
+                    ("stop_version", Spec::Int),
+                    ("station", Spec::Int),
+                    ("station_version", Spec::Int),
+                    ("station_group", Spec::Int),
+                    ("station_group_version", Spec::Int),
+                    ("route_version", Spec::Int),
+                    ("subroute_version", Spec::Int),
+                    ("route_stop_version", Spec::Int),
+                    ("stale_mark", Spec::Int),
+                ]),
+            ),
+            ("stale_routes", arr(Spec::Int)),
+            ("warnings", arr(Spec::Str)),
+        ]),
+        "add plan",
+    );
+
+    let v = post_edit(
+        &app,
+        "/api/edit/stop",
+        json!({
+            "name": "形狀測試桿", "lat": 24.1408, "lon": 120.6858,
+            "station": station_id, "attach": ["1:0"], "apply": true
+        }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("edit_id", Spec::Int),
+            ("stop_id", Spec::Int),
+            ("stop_version_ids", arr(Spec::Int)),
+            ("station_id", Spec::Int),
+            ("station_created", Spec::Bool),
+            ("stale_routes", arr(Spec::Int)),
+        ]),
+        "add apply",
+    );
+}
+
+#[tokio::test]
+async fn shape_edit_detach_plan_and_apply() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+
+    // every fixture stop is single-serving, so the detach carries
+    // delete_pole: true (plan surfaces the warning, apply tears down) —
+    // the orphan refusal itself is pinned in api.rs
+    let v = post_edit(
+        &app,
+        "/api/edit/stop/detach",
+        json!({ "xno": "1", "direction": 0, "code": "11", "delete_pole": true }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("xno", Spec::Str),
+            ("direction", Spec::Int),
+            ("route_id", Spec::Int),
+            ("route_version_id", Spec::Int),
+            ("stop_id", Spec::Int),
+            ("stop_version_id", Spec::Int),
+            ("stop_code", Spec::Str),
+            ("stop_name", Spec::Str),
+            (
+                "occurrences",
+                arr(obj(vec![
+                    ("route_stop_version_id", Spec::Int),
+                    ("sequence", Spec::Int),
+                ])),
+            ),
+            ("pole_orphan", Spec::Bool),
+            ("serving_directions", arr(Spec::Int)),
+            ("delete_pole", Spec::Bool),
+            ("stale_routes", arr(Spec::Int)),
+            ("warnings", arr(Spec::Str)),
+        ]),
+        "detach plan",
+    );
+
+    let v = post_edit(
+        &app,
+        "/api/edit/stop/detach",
+        json!({ "xno": "1", "direction": 0, "code": "11", "delete_pole": true, "apply": true }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("edit_id", Spec::Int),
+            ("old_route_version_id", Spec::Int),
+            ("new_route_version_id", Spec::Int),
+            ("pole_deleted", Spec::Bool),
+            ("stale_routes", arr(Spec::Int)),
+        ]),
+        "detach apply",
+    );
+}
+
+#[tokio::test]
+async fn shape_edit_stop_preview() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stop = route1_first_stop(&app).await;
+    let sv_id = stop["stop_version_id"].as_i64().unwrap();
+
+    let v = post_edit(
+        &app,
+        &format!("/api/edit/stop/{sv_id}"),
+        json!({ "stop_name": "改名桿", "apply": false }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("stop_id", Spec::Int),
+            ("stop_version_id", Spec::Int),
+            ("current_stop_name", Spec::Str),
+            ("current_lat", Spec::Num),
+            ("current_lon", Spec::Num),
+            (
+                "op",
+                obj(vec![
+                    ("stop_id", Spec::Int),
+                    ("stop_version_id", Spec::Int),
+                    ("stop_name", opt(Spec::Str)),
+                    ("lat", opt(Spec::Num)),
+                    ("lon", opt(Spec::Num)),
+                ]),
+            ),
+        ]),
+        "stop edit preview",
+    );
+}
+
+#[tokio::test]
+async fn shape_edit_regroup_plan() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stop = route1_first_stop(&app).await;
+    let sv_id = stop["stop_version_id"].as_i64().unwrap();
+    let current = stop["station_id"].as_i64().unwrap();
+    // fixture has two 干城站 stations (node 44 / node 46) — regroup across them
+    let v = get_json(&app, "/api/stations?q=%E5%B9%B2%E5%9F%8E").await;
+    let target = v["stations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["station_id"].as_i64().unwrap())
+        .find(|id| *id != current)
+        .unwrap();
+
+    let v = post_edit(
+        &app,
+        &format!("/api/edit/stop/{sv_id}/regroup"),
+        json!({ "new_station_id": target, "apply": false }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("stop_id", Spec::Int),
+            ("stop_version_id", Spec::Int),
+            ("stop_code", Spec::Str),
+            ("stop_name", Spec::Str),
+            ("old_station_id", Spec::Int),
+            ("old_station_name", Spec::Str),
+            ("new_station_id", Spec::Int),
+            ("new_station_name", Spec::Str),
+            (
+                "op",
+                obj(vec![
+                    ("stop_id", Spec::Int),
+                    ("stop_version_id", Spec::Int),
+                    ("new_station_id", Spec::Int),
+                ]),
+            ),
+        ]),
+        "regroup plan",
+    );
+}
+
+#[tokio::test]
+async fn shape_edit_station_rename_and_move_plan() {
+    let (_dir, db) = fixture_db();
+    let app = edit_app(&db);
+    let stop = route1_first_stop(&app).await;
+    let st_id = stop["station_id"].as_i64().unwrap();
+    let svi = get_json(&app, &format!("/api/stations/{st_id}")).await["station"]
+        ["station_version_id"]
+        .as_i64()
+        .unwrap();
+
+    let v = post_edit(
+        &app,
+        &format!("/api/edit/station/{svi}"),
+        json!({ "new_name": "干城新站", "level": "station", "apply": false }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("station_id", Spec::Int),
+            ("station_version_id", Spec::Int),
+            ("old_name", Spec::Str),
+            ("new_name", Spec::Str),
+            ("level", Spec::Str),
+            (
+                "poles",
+                arr(obj(vec![
+                    ("stop_id", Spec::Int),
+                    ("stop_version_id", Spec::Int),
+                    ("old_name", Spec::Str),
+                    ("new_name", Spec::Str),
+                ])),
+            ),
+            (
+                "op",
+                obj(vec![
+                    ("station_id", Spec::Int),
+                    ("old_station_version_id", Spec::Int),
+                    ("old_station_name", Spec::Str),
+                    ("new_station_name", Spec::Str),
+                    ("level", Spec::Str),
+                    (
+                        "poles",
+                        arr(obj(vec![
+                            ("stop_id", Spec::Int),
+                            ("old_stop_version_id", Spec::Int),
+                            ("new_stop_name", Spec::Str),
+                        ])),
+                    ),
+                ]),
+            ),
+        ]),
+        "station rename plan",
+    );
+
+    let v = post_edit(
+        &app,
+        &format!("/api/edit/station/{svi}/move"),
+        json!({ "lat": 24.1409, "lon": 120.6857, "apply": false }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("station_id", Spec::Int),
+            ("station_version_id", Spec::Int),
+            ("station_name", Spec::Str),
+            ("old_latitude", Spec::Num),
+            ("old_longitude", Spec::Num),
+            ("new_latitude", Spec::Num),
+            ("new_longitude", Spec::Num),
+            (
+                "op",
+                obj(vec![
+                    ("station_id", Spec::Int),
+                    ("old_station_version_id", Spec::Int),
+                    ("new_latitude", Spec::Num),
+                    ("new_longitude", Spec::Num),
+                ]),
+            ),
+        ]),
+        "station move plan",
+    );
+}
+
+#[tokio::test]
+async fn shape_edit_line_plan() {
+    // matched fixture: its src polylines are encoded, so /raw has points
+    let (_dir, db) = fixture_db_matched();
+    let app = edit_app(&db);
+    let id1 = route1_id(&app).await;
+    let raw = get_json(&app, &format!("/api/routes/{id1}/directions/0/raw")).await;
+    let points = raw["effective"]["points"].clone();
+
+    let v = post_edit(
+        &app,
+        "/api/edit/polyline/1/0/line",
+        json!({ "points": points, "apply": false }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("route_id", Spec::Int),
+            ("route_version_id", opt(Spec::Int)),
+            ("xno", Spec::Str),
+            ("direction", Spec::Int),
+            ("replaces", Spec::Str),
+            ("created", Spec::Bool),
+            ("points", Spec::Int),
+            ("encoded", Spec::Str),
+            ("expected_updated_at", opt(Spec::Str)),
+            (
+                "op",
+                obj(vec![
+                    ("xno", Spec::Str),
+                    ("direction", Spec::Int),
+                    ("encoded", Spec::Str),
+                    ("expected_updated_at", opt(Spec::Str)),
+                ]),
+            ),
+        ]),
+        "line plan",
+    );
+}
+
+#[tokio::test]
+async fn shape_edit_extend_plan_and_apply() {
+    // plan over one copy of the extend fixture
+    let (_dir, db) = line_db();
+    let app = edit_app(&db);
+    let v = post_edit(
+        &app,
+        "/api/edit/polyline/1/0/extend",
+        json!({ "meters": 10.0, "end": "last" }),
+    )
+    .await;
+    let extension = || {
+        obj(vec![
+            ("end", Spec::Str),
+            ("way_ids", arr(Spec::Int)),
+            ("new_vertices", arr(pair(Spec::Num))),
+            ("snap_dist_m", Spec::Num),
+        ])
+    };
+    check(
+        &v,
+        &obj(vec![
+            ("source", Spec::Str),
+            ("candidate", arr(pair(Spec::Num))),
+            ("extensions", arr(extension())),
+            ("logs", arr(Spec::Str)),
+        ]),
+        "extend plan",
+    );
+
+    // apply over a fresh copy (the write replaces the whole line)
+    let (_dir2, db2) = line_db();
+    let app = edit_app(&db2);
+    let v = post_edit(
+        &app,
+        "/api/edit/polyline/1/0/extend",
+        json!({ "meters": 10.0, "end": "last", "apply": true }),
+    )
+    .await;
+    check(
+        &v,
+        &obj(vec![
+            ("edit_id", Spec::Int),
+            ("updated_at", Spec::Str),
+            ("created", Spec::Bool),
+            ("source", Spec::Str),
+            ("extensions", arr(extension())),
+        ]),
+        "extend apply",
     );
 }

@@ -598,6 +598,23 @@ fn delete_pole_rows(tx: &Connection, plan: &DetachPlan) -> Result<()> {
         [plan.stop_version_id],
         |r| r.get(0),
     )?;
+    // segment-stage children of the doomed route_stop_version rows — both
+    // FK into them, and real DBs carry them once rm_segments has run
+    tx.execute(
+        "DELETE FROM path_stop_projection WHERE route_stop_version_id IN
+             (SELECT route_stop_version_id FROM route_stop_version WHERE stop_version_id IN
+                  (SELECT stop_version_id FROM stop WHERE stop_id = ?1))",
+        [plan.stop_id],
+    )?;
+    tx.execute(
+        "DELETE FROM seg_geometry_draft WHERE from_route_stop_version_id IN
+             (SELECT route_stop_version_id FROM route_stop_version WHERE stop_version_id IN
+                  (SELECT stop_version_id FROM stop WHERE stop_id = ?1))
+          OR to_route_stop_version_id IN
+             (SELECT route_stop_version_id FROM route_stop_version WHERE stop_version_id IN
+                  (SELECT stop_version_id FROM stop WHERE stop_id = ?1))",
+        [plan.stop_id],
+    )?;
     tx.execute(
         "DELETE FROM route_stop_version WHERE stop_version_id IN
              (SELECT stop_version_id FROM stop_version WHERE stop_id = ?1)",
@@ -1401,7 +1418,7 @@ mod tests {
             ),
             "{err}"
         );
-        assert!(msg.contains("--delete-pole"), "{msg}");
+        assert!(msg.contains("\"delete_pole\""), "{msg}");
         assert!(msg.contains("one-way"), "{msg}");
         assert_eq!(
             dump_with(&conn, ROUNDTRIP_SKIP),
@@ -1553,6 +1570,55 @@ mod tests {
             ),
             (
                 "SELECT COUNT(*) FROM stop_version WHERE stop_version_id = 13",
+                0,
+            ),
+        ] {
+            let n: i64 = conn.query_row(sql, [], |r| r.get(0)).unwrap();
+            assert_eq!(n, want, "{sql}");
+        }
+    }
+
+    #[test]
+    fn delete_pole_apply_sweeps_projection_and_draft_children() {
+        let conn = open_in_memory().unwrap();
+        base_fixture(&conn);
+        // segment-stage children of the doomed rsv rows: a projection on
+        // the pole's rsv 4 and a draft edge ending at it — real DBs carry
+        // these (rm_segments runs after publish), and both FK into
+        // route_stop_version, so the teardown must sweep them first
+        conn.execute_batch(
+            "INSERT INTO path_stop_projection
+                 (route_stop_version_id, route_version_id, direction, stop_sequence,
+                  chainage_m, snap_dist_m, method, monotonic_clamped, projected_lat, projected_lon)
+             VALUES (4, 11, 0, 4, 100.0, 1.0, 'PROJECTED', 0, 24.1415, 120.6857);
+             INSERT INTO seg_geometry_draft
+                 (subroute_version_id, direction, ordinal, from_route_stop_version_id,
+                  to_route_stop_version_id, encoded_polyline, length_m, geometry_method)
+             VALUES (11, 0, 1, 3, 4, 'enc', 10.0, 'path');",
+        )
+        .unwrap();
+        let out = detach_stop(
+            &conn,
+            DetachCmd {
+                delete_pole: true,
+                ..cmd("1", 0, "004")
+            },
+            "herry",
+            "job",
+        )
+        .unwrap();
+        assert!(out.pole_deleted);
+        for (sql, want) in [
+            (
+                "SELECT COUNT(*) FROM path_stop_projection WHERE route_stop_version_id = 4",
+                0i64,
+            ),
+            (
+                "SELECT COUNT(*) FROM seg_geometry_draft WHERE to_route_stop_version_id = 4",
+                0,
+            ),
+            (
+                "SELECT COUNT(*) FROM route_stop_version WHERE route_stop_version_id = 4",
                 0,
             ),
         ] {

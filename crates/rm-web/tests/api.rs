@@ -1020,7 +1020,7 @@ async fn add_stop_rejects_empty_or_bad_attach_and_bad_coords() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let v = body_json(res).await;
     assert!(
-        v["error"].as_str().unwrap().contains("invalid --attach"),
+        v["error"].as_str().unwrap().contains("invalid attach"),
         "{v}"
     );
 
@@ -1129,8 +1129,8 @@ async fn detach_stop_orphan_apply_refused_without_delete_pole() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let v = body_json(res).await;
     assert!(
-        v["error"].as_str().unwrap().contains("--delete-pole"),
-        "refusal names the flag: {v}"
+        v["error"].as_str().unwrap().contains("\"delete_pole\""),
+        "refusal names the field: {v}"
     );
 
     // refused apply writes nothing: the stop is still listed
