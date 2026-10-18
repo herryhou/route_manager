@@ -103,8 +103,9 @@ function setChip(id, text) {
 }
 
 /// Re-seed the refresh-btn pending-count badge. Boot and edit-toggle seed
-/// it, but line saves/undos mark derived data stale mid-session with no
-/// push channel — edit-side flows call this right after writing.
+/// it, but every edit write (line, stop, station) marks derived data stale
+/// mid-session with no push channel — edit-side flows call this right
+/// after writing.
 function refreshBadge() {
   api.refreshStatus().then((v) => {
     setChip('refresh-btn', v.pending_marks > 0 ? v.pending_marks : '—');
@@ -558,7 +559,10 @@ function armPlace(from, onClick) {
 
 /// Post-edit reload: re-fetch what's on screen so the new version shows —
 /// the selected route's markers + stop list, and the viewport stops layer.
+/// Also pushes the refresh badge: stop/station writes mark bearings and
+/// positions stale just like line writes do.
 async function refreshAfterEdit() {
+  refreshBadge();
   if (selectedRoute) await selectRouteById(selectedRoute.route_id, selectedRoute.dir);
   if (document.getElementById('layer-stops').checked) refreshStopsLayer();
 }
