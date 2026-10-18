@@ -1080,6 +1080,14 @@ table.kv td:first-child {
   font-variant-numeric: tabular-nums;
 }
 
+.pp-seq {
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  margin-right: 2px;
+}
+
 .pp-meta {
   color: var(--ink-soft);
   font-size: 11px;

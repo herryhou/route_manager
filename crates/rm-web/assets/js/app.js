@@ -418,16 +418,24 @@ async function openMarkerPopup(id, marker, o) {
   }
 }
 
+/// Sequence of a stop on the currently drawn direction (null when nothing is
+/// drawn or the stop isn't on it) — popups/stop panels prefix the name with it.
+const chainSeq = (svid) =>
+  lastRouteDraw?.s?.stops?.find((x) => x.stop_version_id === svid)?.stop_sequence ?? null;
+
 /// Stop popup (marker on a drawn route or in the viewport stops layer).
-const openStopPopup = (stopVersionId, marker) => openMarkerPopup(stopVersionId, marker, {
-  fetch: api.stopDetail,
-  pane: 'stop',
-  reopen: selectStop,
-  popupEl: stopPopupEl,
-  extra: highlightChainStop, // lift + scroll the panel row when this stop is on the shown route
-  panel: (d, cb) => stopPanel(d, { ...cb, onEditStop }),
-  err: '站牌',
-});
+const openStopPopup = (stopVersionId, marker) => {
+  const seq = chainSeq(stopVersionId);
+  return openMarkerPopup(stopVersionId, marker, {
+    fetch: api.stopDetail,
+    pane: 'stop',
+    reopen: selectStop,
+    popupEl: (d, cb) => stopPopupEl(d, { ...cb, seq }),
+    extra: highlightChainStop, // lift + scroll the panel row when this stop is on the shown route
+    panel: (d, cb) => stopPanel(d, { ...cb, onEditStop, seq }),
+    err: '站牌',
+  });
+};
 
 /// Station popup (viewport station marker).
 const openStationPopup = (stationId, marker) => openMarkerPopup(stationId, marker, {
@@ -469,16 +477,17 @@ async function popupStop(stopVersionId) {
   try {
     const d = await api.stopDetail(stopVersionId);
     const s = d.stop;
+    const seq = chainSeq(stopVersionId);
     const onPickRoute = (rid, dir) => selectRouteById(rid, dir ?? 0);
     paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     clearHighlight();
     const m = L.circleMarker([s.lat, s.lon], {
       radius: 10, color: '#0857a2', weight: 2, fillColor: '#0857a2', fillOpacity: 0.15,
     }).addTo(layers.highlight);
-    m.bindPopup(stopPopupEl(d, { onPickRoute }), { maxWidth: 300 }).openPopup();
+    m.bindPopup(stopPopupEl(d, { onPickRoute, seq }), { maxWidth: 300 }).openPopup();
     m.on('popupclose', () => m.remove());
     map.panTo([s.lat, s.lon], { animate: true });
-    stopPanel(d, { onPickRoute, onPickStation: selectStation, onEditStop });
+    stopPanel(d, { onPickRoute, onPickStation: selectStation, onEditStop, seq });
   } catch (e) {
     status(`站牌載入失敗: ${e.message}`);
   }
@@ -490,7 +499,7 @@ async function selectStop(stopVersionId) {
     const d = await api.stopDetail(stopVersionId);
     paneOpen('point', `stop:${stopVersionId}`, () => selectStop(stopVersionId));
     highlightGroup(d.group_members);
-    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickStation: selectStation, onEditStop });
+    stopPanel(d, { onPickRoute: (rid, dir) => selectRouteById(rid, dir ?? 0), onPickStation: selectStation, onEditStop, seq: chainSeq(stopVersionId) });
     map.panTo([d.stop.lat, d.stop.lon], {
       animate: true,
     });

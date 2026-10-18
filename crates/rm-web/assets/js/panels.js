@@ -503,17 +503,18 @@ function stationCard({ station, bearing, routes, stops }, { onPickRoute }) {
   return el;
 }
 
-/// Compact stop popup (map marker click / route-panel click): dial + name,
+/// Compact stop popup (map marker click / route-panel click): dial + name
+/// (prefixed with the route-chain 站序 when the caller resolved one),
 /// station route chips under 經過路線 (stop-serving routes are a subset) —
 /// full detail lives in the point pane.
-export function stopPopupEl(d, { onPickRoute }) {
+export function stopPopupEl(d, { onPickRoute, seq }) {
   const wrap = document.createElement('div');
   wrap.className = 'stop-popup';
   wrap.innerHTML = `
     <div class="pp-head">
       ${dialSvg(d.bearing?.bearing_deg, { color: 'var(--accent)' })}
       <div>
-        <div class="pp-title">${esc(d.stop.stop_name)} <span class="pp-code">#${d.stop.stop_code}</span></div>
+        <div class="pp-title">${seq != null ? `<span class="pp-seq">${seq}</span> ` : ''}${esc(d.stop.stop_name)} <span class="pp-code">#${d.stop.stop_code}</span></div>
       </div>
     </div>
     <div class="pp-label"><h3>經過路線</h3></div>
@@ -595,8 +596,9 @@ export function stationPanel(d, { onPickRoute, onPickStation, onEditStation }) {
   return pane;
 }
 
-/// Stop drill-down panel: stop → station → group + serving routes.
-export function stopPanel(d, { onPickRoute, onPickStation, onEditStop }) {
+/// Stop drill-down panel: stop → station → group + serving routes. `seq`
+/// (the route-chain 站序) prefixes the stop name when the caller resolved one.
+export function stopPanel(d, { onPickRoute, onPickStation, onEditStop, seq }) {
   const stCell = (st) =>
     `<td class="st-pick" data-sid="${st.station_id}" title="開啟站點詳情">${st.station_name ?? st.station_id}</td>`;
   const pane = showPane('point', `
@@ -607,8 +609,8 @@ export function stopPanel(d, { onPickRoute, onPickStation, onEditStop }) {
         ${editable ? '<button class="mini-btn" data-act="regroup" title="改歸另一站點">換站</button>' : ''}
         ${editable ? `<button class="mini-btn" data-act="log" title="編輯歷史與復原">${I.undo} 歷史</button>` : ''}</td></tr>
       ${d.stale && (d.stale.projections?.length || d.stale.bearings)
-        ? `<tr><td>過期</td><td><span class="pp-hot">${I.warn} ${d.stale.projections?.length ?? 0} 條路線投影 · 方位${d.stale.bearings ? '過期' : '正常'}</span></td></tr>`
-        : ''}
+      ? `<tr><td>過期</td><td><span class="pp-hot">${I.warn} ${d.stale.projections?.length ?? 0} 條路線投影 · 方位${d.stale.bearings ? '過期' : '正常'}</span></td></tr>`
+      : ''}
       <tr><td>方位</td><td>${d.bearing ? `${Math.round(d.bearing.bearing_deg)}° · ${d.bearing.source}` : '—'}</td></tr>
       <tr><td>站點</td>${stCell(d.station)}</tr>
     <tr><td>站點方位</td><td>${d.station_bearing
@@ -623,7 +625,7 @@ export function stopPanel(d, { onPickRoute, onPickStation, onEditStop }) {
     <h3>站點路線 (${uniqRoutes(d.routes_by_station).length})</h3>
     <div class="routes-station-chips"></div>
 
-  `, `${d.stop.stop_name} #${d.stop.stop_code}`, I.stop);
+  `, `${seq != null ? `${seq}·` : ''}${d.stop.stop_name} #${d.stop.stop_code}`, I.stop);
   pane.querySelectorAll('.st-pick').forEach((el) =>
     el.addEventListener('click', () => onPickStation(Number(el.dataset.sid)))
   );
