@@ -62,7 +62,8 @@ python3 .claude/skills/rm-web-jobs/scripts/route_diagram.py \
 
 - `--query N` resolves the route by `route_code` (exact match preferred);
   `--route-id N` skips the search. `--num/--start/--end/--operator/--db`
-  override the title block; the title line beside the route number is the
+  override the title block (`--city` sets 臺中市/臺北市 for the eyebrow and
+  caption); the title line beside the route number is the
   API's `subroute_name` verbatim, captions use the drawn first/last stops.
 - Writes `route<N>-diagram.html` in the cwd (`--out` to move it) plus
   `<out>.d/<route_id>/` — cached API dumps and `check.txt` with per-stop

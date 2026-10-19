@@ -193,8 +193,8 @@ def vname(x, y0, name, size, marker, down, unique=False):
 # stop dots and the name, name centred on its span.
 ROAD_FONT = 9.5
 GUIDE = "#A8A29E"
-ROAD_BELOW = (6.0, 20.0)    # (guide_dy, text_baseline_dy), gap below the line
-ROAD_ABOVE = (-6.0, -14.0)  # gap above the line
+ROAD_BELOW = (8.0, 20.0)    # (guide_dy, text_baseline_dy), gap below the line
+ROAD_ABOVE = (-8.0, -14.0)  # gap above the line
 
 
 def road_marks(spans, x_of, below, y):
@@ -283,11 +283,11 @@ def legend_svg(dirs, sizes, y, unique_marker_size):
     return "".join(leg)
 
 
-def title_svg(num, title_name, operator, n0, n1, shared, u0, u1):
+def title_svg(num, title_name, operator, n0, n1, shared, u0, u1, city):
     num_x = 150 if len(num) == 1 else 210
     svg = []
     svg.append(f'<text x="48" y="92" class="num">{esc(num)}</text>')
-    svg.append(f'<text x="{num_x}" y="46" class="eyebrow">臺中市公車</text>')
+    svg.append(f'<text x="{num_x}" y="46" class="eyebrow">{esc(city)}公車</text>')
     svg.append(f'<text x="{num_x}" y="88" class="title">{esc(title_name)}</text>')
     svg.append(f'<text x="{W - 48}" y="46" text-anchor="end" class="sub">{esc(operator)}｜去程 {n0} 站 · 返程 {n1} 站</text>')
     svg.append(f'<text x="{W - 48}" y="64" text-anchor="end" class="sub">共用站名 {shared} · 僅去程 {u0} · 僅返程 {u1}</text>')
@@ -350,11 +350,11 @@ def draw_route(dirs, meta):
         return "".join(out), "".join(names)
 
     svg = []
-    svg.append(f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="台中市公車{esc(meta["num"])}路線簡圖：{esc(meta["title_name"])}，去回程站序與道路名">')
+    svg.append(f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{esc(meta["city"])}公車{esc(meta["num"])}路線簡圖：{esc(meta["title_name"])}，去回程站序與道路名">')
     svg.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
     svg += title_svg(meta["num"], meta["title_name"], meta["operator"],
                      len(dirs[0]["rows"]), len(dirs[1]["rows"]),
-                     meta["shared"], meta["u0"], meta["u1"])
+                     meta["shared"], meta["u0"], meta["u1"], meta["city"])
     ly = 124
     svg.append(legend_svg(dirs, SIZES, ly, unique_marker_size=10))
     svg.append(f'<line x1="48" y1="{ly + 20}" x2="{W - 48}" y2="{ly + 20}" stroke="#E7E5E4" stroke-width="1"/>')
@@ -398,7 +398,7 @@ def draw_route(dirs, meta):
     svg.append("</svg>")
 
     loop_note = '；向內首尾同站者以左端虛線迴轉表示' if any(loops) else ''
-    caption = (f'<b>臺中市公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：去程 {len(dirs[0]["rows"])} 站（{esc(meta["start"])} → {esc(meta["end"])}）、'
+    caption = (f'<b>{esc(meta["city"])}公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：去程 {len(dirs[0]["rows"])} 站（{esc(meta["start"])} → {esc(meta["end"])}）、'
                f'返程 {len(dirs[1]["rows"])} 站（{esc(meta["end"])} → {esc(meta["start"])}）{loop_note}。'
                f'去回各自一條 ⊃ 形路徑：首站在上路左端往右，右側平滑轉折後往左，尾站在下路左端。'
                f'站名字級依該站服務路線數分三級；紅字＋▲／▽ 為僅單向停靠之站名。'
@@ -417,6 +417,7 @@ def main():
     ap.add_argument("--start", help="outbound terminus (default: from subroute_name)")
     ap.add_argument("--end", help="outbound terminus (default: from subroute_name)")
     ap.add_argument("--operator", help="operator name (default: first provider)")
+    ap.add_argument("--city", default="臺中市", help="city for the eyebrow/caption (e.g. 臺中市, 臺北市)")
     ap.add_argument("--db", help="city db name for the caption (default: rm-web)")
     ap.add_argument("--out", help="output HTML path (default: route<num>-diagram.html in cwd)")
     ap.add_argument("--url", default=None, help="rm-web base URL (default $RM_WEB_URL or http://127.0.0.1:8791)")
@@ -483,6 +484,7 @@ def main():
 
     meta = {
         "num": num,
+        "city": a.city,
         "start": a.start, "end": a.end,
         "operator": a.operator or provider or "市區客運",
         "shared": len(shared_names),
