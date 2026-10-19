@@ -50,7 +50,7 @@ export const routes = (q = '') => fetchJson(`/api/routes?q=${encodeURIComponent(
 export const routeDetail = (id) => fetchJson(`/api/routes/${id}`);
 /** @returns {Promise<any>} GeoJSON FeatureCollection; piece props: ordinal, length_m, geometry_method, from_seq, to_seq, from/to_station_id, from/to_station_name */
 export const routePath = (id, dir) => fetchJson(`/api/routes/${id}/directions/${dir}/path`);
-/** @returns {Promise<{stops: Array<{stop_sequence: number, source_order_no: ?number, stop_version_id: number, stop_code: string, stop_name: string, lat: number, lon: number, station_id: number, chainage_m: ?number, snap_dist_m: ?number, method: ?string, monotonic_clamped: ?number, projected: ?number[], bearing: ?number}>}>} */
+/** @returns {Promise<{stops: Array<{stop_sequence: number, source_order_no: ?number, stop_version_id: number, stop_code: string, stop_name: string, lat: number, lon: number, station_id: number, chainage_m: ?number, snap_dist_m: ?number, method: ?string, monotonic_clamped: ?number, projected: ?number[], bearing: ?number, route_codes: string[]}>}>} */
 export const routeStops = (id, dir) => fetchJson(`/api/routes/${id}/directions/${dir}/stops`);
 /** @returns {Promise<any>} GeoJSON FeatureCollection; way props: ordinal, osm_way_id, name, entry/exit_node_id, entry/exit_coords, cum_start_m, cum_end_m */
 export const routeWays = (id, dir) => fetchJson(`/api/routes/${id}/directions/${dir}/ways`);

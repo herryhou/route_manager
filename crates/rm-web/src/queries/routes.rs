@@ -1,5 +1,7 @@
 //! Route list/detail queries.
 
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use rm_core::polyline;
 use rm_core::LatLng;
@@ -411,11 +413,52 @@ struct RouteStopRow {
     /// [lon, lat], null when not projected
     projected: Option<[f64; 2]>,
     bearing: Option<f64>,
+    /// distinct route_code list across the stop's station's current poles,
+    /// sorted — lets consumers tier stops without per-station detail calls
+    route_codes: Vec<String>,
 }
 
 #[derive(Serialize)]
 struct RouteStopsResponse {
     stops: Vec<RouteStopRow>,
+}
+
+/// station_id → sorted distinct route_code list across the station's poles.
+/// Mirrors `queries::stops::serving_routes_where` (same relation set, no
+/// current-version filter) so counts agree with station detail; one query
+/// for the whole direction's stations, not one per stop.
+fn serving_route_codes_by_station(
+    conn: &Connection,
+    stops: &[RouteStopRow],
+) -> Result<HashMap<i64, Vec<String>>> {
+    let mut ids: Vec<i64> = stops.iter().map(|s| s.station_id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let ph = vec!["?"; ids.len()].join(",");
+    let sql = format!(
+        "SELECT DISTINCT stv.station_id, r.route_code
+         FROM route_stop_version rsv
+         JOIN stop_version stv ON stv.stop_version_id = rsv.stop_version_id
+         JOIN subroute_version sv ON sv.subroute_version_id = rsv.subroute_version_id
+         JOIN route_version rv ON rv.route_version_id = sv.route_version_id
+         JOIN route r ON r.route_id = rv.route_id
+         WHERE stv.station_id IN ({ph})
+         ORDER BY stv.station_id, r.route_code"
+    );
+    let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let mut map: HashMap<i64, Vec<String>> = HashMap::new();
+    let it = stmt.query_map(params.as_slice(), |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+    })?;
+    for row in it {
+        let (station_id, code) = row?;
+        map.entry(station_id).or_default().push(code);
+    }
+    Ok(map)
 }
 
 /// `GET /api/routes/{id}/directions/{dir}/stops` — ordered stops + projection QA.
@@ -438,7 +481,7 @@ pub fn stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> 
            AND rsv.direction = ?2
          ORDER BY rsv.stop_sequence",
     )?;
-    let stops = stmt
+    let mut stops = stmt
         .query_map(rusqlite::params![route_id, direction], |r| {
             Ok(RouteStopRow {
                 stop_sequence: r.get("stop_sequence")?,
@@ -461,9 +504,14 @@ pub fn stops(conn: &Connection, route_id: i64, direction: i64) -> Result<Value> 
                     _ => None,
                 },
                 bearing: r.get("bearing_deg")?,
+                route_codes: Vec::new(),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    let codes = serving_route_codes_by_station(conn, &stops)?;
+    for s in &mut stops {
+        s.route_codes = codes.get(&s.station_id).cloned().unwrap_or_default();
+    }
     Ok(serde_json::to_value(RouteStopsResponse { stops })?)
 }
 

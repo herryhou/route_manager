@@ -450,6 +450,7 @@ async fn shape_route_stops() {
                 ("monotonic_clamped", opt(Spec::Int)),
                 ("projected", opt(pair(Spec::Num))),
                 ("bearing", opt(Spec::Num)),
+                ("route_codes", arr(Spec::Str)),
             ])),
         )]),
         "route stops",
