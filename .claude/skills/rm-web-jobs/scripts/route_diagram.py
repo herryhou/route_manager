@@ -320,13 +320,13 @@ def wrap_html(svg, num, start, end, operator, W_H, caption):
 BAND = 70.0                         # gap between a hairpin's two lines
 SIZES = {1: 12.0, 2: 10.0, 3: 8.5}  # tier type sizes at scale 1.0
 REF_PITCH = 22.0                    # row pitch (px per stop) at scale 1.0
-MAX_SCALE = 1.8                     # sparse-row cap (2026-10-19: ~25/side)
+MAX_SCALE = 2.2                     # sparse-row cap (2026-10-19: 25/side -> 1.8x, 23/side -> ~2.1x)
 
 
 def row_scale(k):
     """Type scale for a row of k stops: pitch/REF_PITCH clamped to
-    [1.0, MAX_SCALE] — sparse rows (25 stops/side = 40px pitch) reach the
-    1.8x cap, dense rows (>=45/side) stay at 1.0."""
+    [1.0, MAX_SCALE] — sparser rows get proportionally bigger type
+    (25 stops/side = 40px pitch -> 1.8x, 23 stops -> ~2.1x)."""
     if k <= 1:
         return MAX_SCALE
     return max(1.0, min(MAX_SCALE, ((X1 - X0) / (k - 1)) / REF_PITCH))
@@ -426,7 +426,8 @@ def draw_route(dirs, meta):
         for i, part in enumerate(g["parts"]):
             if not part:
                 continue
-            body, names = row_svg(part, dirs[d]["spans"], ya, part[0]["seq"],
+            y_row = yb if g["hairpin"] and i == 1 else ya
+            body, names = row_svg(part, dirs[d]["spans"], y_row, part[0]["seq"],
                                   rtl=(g["hairpin"] and i == 1),
                                   names_above=(not g["hairpin"]) or i == 0,
                                   marker=marker, scale=g["scales"][i])
@@ -453,7 +454,7 @@ def draw_route(dirs, meta):
     caption = (f'<b>{esc(meta["city"])}公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：去程 {len(dirs[0]["rows"])} 站（{esc(meta["start"])} → {esc(meta["end"])}）、'
                f'返程 {len(dirs[1]["rows"])} 站（{esc(meta["end"])} → {esc(meta["start"])}）{loop_note}。'
                f'少於 30 站的方向畫一條由左至右的直線，其餘各畫一條 ⊃ 形路徑：首站在上路左端往右，右側平滑轉折後往左，尾站在下路左端。'
-               f'站名字級依該站服務路線數分三級，站距越疏字級越大（每側約 25 站時放大到 1.8 倍）；紅字＋▲／▽ 為僅單向停靠之站名。'
+               f'站名字級依該站服務路線數分三級，站距越疏字級越大（25 站/行約 1.8 倍、23 站約 2.1 倍，上限 2.2 倍）；紅字＋▲／▽ 為僅單向停靠之站名。'
                f'道路名去除「段／街／巷」後綴合併，僅標示跨三站以上之路名，淡化直線連起其對應站點、路名置中。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
                f'畫布 1123×{H}，列印 A4 橫向＋「縮放至符合紙張」。')
     return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H

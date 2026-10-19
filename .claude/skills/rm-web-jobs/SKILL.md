@@ -53,8 +53,8 @@ stops onto matched way runs, lay out each direction by density — <30 stops
 draws one left→right line, otherwise a ⊃ hairpin (first half of the stops
 left→right on the top line, one smooth turn at the right, second half back
 right→left; first stop top-left, last stop bottom-left); 去程 above 返程.
-Name columns scale with row pitch up to 1.8× (~25 stops/side hits the cap),
-so the canvas height follows the content (1123 wide × dynamic).
+Name columns scale with row pitch up to 2.2× (25 stops/side ≈1.8×,
+23 ≈2.1×), so the canvas height follows the content (1123 wide × dynamic).
 Needs only the GET API (no `--edit`, no token):
 
 ```bash
