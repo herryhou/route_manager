@@ -250,7 +250,7 @@ figcaption b { color: var(--fg); font-weight: 500; }
 .vn.t1 { font-weight: 700; }
 .v { writing-mode: vertical-rl; text-orientation: upright; }
 .road { letter-spacing: 0.5px; fill: %s; }
-""" % (PAPER, INK, ROAD, "%%TITLE%%", INK, ROAD, ACCENT, INK, ROAD)
+""" % (PAPER, INK, ROAD, "%TITLE%", INK, ROAD, ACCENT, INK, ROAD)
 
 
 def legend_svg(dirs, sizes, y, unique_marker_size):
@@ -282,22 +282,20 @@ def legend_svg(dirs, sizes, y, unique_marker_size):
     return "".join(leg)
 
 
-def title_svg(num, start, end, operator, n0, n1, shared, u0, u1, serp):
-    num_size = 84 if len(num) == 1 else 64
+def title_svg(num, title_name, operator, n0, n1, shared, u0, u1, serp):
     num_x = 150 if len(num) == 1 else 210
-    title_size = "28px" if serp else "30px"
     svg = []
     svg.append(f'<text x="48" y="{92 if serp else 96}" class="num">{esc(num)}</text>')
     svg.append(f'<text x="{num_x}" y="{46 if serp else 52}" class="eyebrow">臺中市公車</text>')
-    svg.append(f'<text x="{num_x}" y="{88 if serp else 94}" class="title">{esc(start)} — {esc(end)}</text>')
+    svg.append(f'<text x="{num_x}" y="{88 if serp else 94}" class="title">{esc(title_name)}</text>')
     svg.append(f'<text x="{W - 48}" y="{46 if serp else 52}" text-anchor="end" class="sub">{esc(operator)}｜去程 {n0} 站 · 返程 {n1} 站</text>')
     svg.append(f'<text x="{W - 48}" y="{64 if serp else 70}" text-anchor="end" class="sub">共用站名 {shared} · 僅去程 {u0} · 僅返程 {u1}</text>')
-    return svg, num_size, title_size
+    return svg
 
 
 def wrap_html(svg, num, start, end, operator, W_H, caption):
     w, h = W_H
-    css = css_block().replace("%%NUM%%", "84" if len(num) == 1 else "64").replace("%%TITLE%%", "28px" if h > 900 else "30px")
+    css = css_block().replace("%NUM%", "84" if len(num) == 1 else "64").replace("%TITLE%", "28px" if h > 900 else "30px")
     return f"""<meta charset="utf-8">
 <title>台中公車{esc(num)}路線圖</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -344,12 +342,11 @@ def draw_single(dirs, meta):
     body1, names1 = line_svg(dirs[1]["rows"], dirs[1]["spans"], Y1, rtl=True, names_above=False, marker="▽")
 
     svg = []
-    svg.append(f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="台中市公車{esc(meta["num"])}路線簡圖：{esc(meta["start"])}—{esc(meta["end"])}，去回程站序與道路名">')
+    svg.append(f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="台中市公車{esc(meta["num"])}路線簡圖：{esc(meta["title_name"])}，去回程站序與道路名">')
     svg.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
-    t, num_size, _ = title_svg(meta["num"], meta["start"], meta["end"], meta["operator"],
-                               len(dirs[0]["rows"]), len(dirs[1]["rows"]),
-                               meta["shared"], meta["u0"], meta["u1"], serp=False)
-    svg += t
+    svg += title_svg(meta["num"], meta["title_name"], meta["operator"],
+                     len(dirs[0]["rows"]), len(dirs[1]["rows"]),
+                     meta["shared"], meta["u0"], meta["u1"], serp=False)
     ly = 140
     svg.append(legend_svg(dirs, SIZES, ly, unique_marker_size=11.5))
     svg.append(f'<line x1="48" y1="{ly + 22}" x2="{W - 48}" y2="{ly + 22}" stroke="#E7E5E4" stroke-width="1"/>')
@@ -417,12 +414,11 @@ def draw_serp(dirs, meta):
         return "".join(out), "".join(names)
 
     svg = []
-    svg.append(f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="台中市公車{esc(meta["num"])}路線簡圖：{esc(meta["start"])}—{esc(meta["end"])}，去回程站序與道路名">')
+    svg.append(f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="台中市公車{esc(meta["num"])}路線簡圖：{esc(meta["title_name"])}，去回程站序與道路名">')
     svg.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
-    t, _, _ = title_svg(meta["num"], meta["start"], meta["end"], meta["operator"],
-                        len(dirs[0]["rows"]), len(dirs[1]["rows"]),
-                        meta["shared"], meta["u0"], meta["u1"], serp=True)
-    svg += t
+    svg += title_svg(meta["num"], meta["title_name"], meta["operator"],
+                     len(dirs[0]["rows"]), len(dirs[1]["rows"]),
+                     meta["shared"], meta["u0"], meta["u1"], serp=True)
     ly = 124
     svg.append(legend_svg(dirs, SIZES, ly, unique_marker_size=10))
     svg.append(f'<line x1="48" y1="{ly + 20}" x2="{W - 48}" y2="{ly + 20}" stroke="#E7E5E4" stroke-width="1"/>')
@@ -555,17 +551,17 @@ def main():
         "u1": sum(r["unique"] for r in dirs[1]["rows"]),
         "db": a.db or "rm-web",
     }
-    # Title termini: explicit args win; else subroute_name when it is a plain
-    # two-part span ("A - B" — 3+ parts means a via-terminus, e.g. 270's
-    # "豐富公園 - 大南 - 東勢", whose ends are not what the diagram draws);
-    # else the direction's own first/last stop names.
-    if subroute and " - " in subroute:
-        parts = [p.strip() for p in subroute.split(" - ")]
-        if len(parts) == 2:
-            meta["start"] = meta["start"] or parts[0]
-            meta["end"] = meta["end"] or parts[1]
-    meta["start"] = meta["start"] or dirs[0]["rows"][0]["name"]
-    meta["end"] = meta["end"] or dirs[0]["rows"][-1]["name"]
+    meta["start"] = a.start or dirs[0]["rows"][0]["name"]
+    meta["end"] = a.end or dirs[0]["rows"][-1]["name"]
+    # Title (the line beside the route number) carries the official
+    # subroute_name verbatim — its span may include a via terminus (270:
+    # 豐富公園 — 大南 — 東勢). Captions keep the drawn first/last stops.
+    if a.start and a.end:
+        meta["title_name"] = f"{a.start} — {a.end}"
+    elif subroute:
+        meta["title_name"] = subroute.replace(" - ", " — ")
+    else:
+        meta["title_name"] = f'{meta["start"]} — {meta["end"]}'
     ends_shared = (dirs[0]["rows"][0]["name"] in shared_names
                    and dirs[0]["rows"][-1]["name"] in shared_names
                    and dirs[1]["rows"][0]["name"] in shared_names
