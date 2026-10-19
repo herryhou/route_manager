@@ -1,6 +1,6 @@
 ---
 name: rm-web-jobs
-description: Bus route/stop correction jobs through the rm-web edit HTTP API — add a stop, move or rename a stop, remove a stop from a direction, extend or replace a route path, regroup/rename/move a station, run the stale-mark refresh, undo a previous edit. This skill should be used when the user asks to fix bus data in a route_manger city database (a pole is misplaced, a stop was deleted from the source, a route's drawn path is too short or drawn wrong, a station moved or got a new name, the map is stale after an edit).
+description: Bus route/stop correction jobs through the rm-web edit HTTP API — add a stop, move or rename a stop, remove a stop from a direction, extend or replace a route path, regroup/rename/move a station, run the stale-mark refresh, undo a previous edit — and read-only route schematic diagrams (路線簡圖) generated from the same API via scripts/route_diagram.py. This skill should be used when the user asks to fix bus data in a route_manger city database (a pole is misplaced, a stop was deleted from the source, a route's drawn path is too short or drawn wrong, a station moved or got a new name, the map is stale after an edit) or to produce a route diagram / 站序圖 / 路線簡圖.
 ---
 
 # rm-web-jobs
@@ -44,6 +44,34 @@ station/pole), `/api/routes` + `/api/routes/{id}/directions/{dir}/stops`
 (poles in sequence, with `stop_version_id`s),
 `/api/routes/{id}/directions/{dir}/raw` (effective polyline),
 `/api/edit/log?entity=stop&entity_id=N` (audit trail).
+
+## Route schematic diagrams (路線簡圖)
+
+`scripts/route_diagram.py` renders one route as a print-ready HTML/SVG
+schematic: fetch via the rm-web API **only** (never direct sqlite), DP-align
+stops onto matched way runs, auto-layout — both directions ≤50 stops →
+single racetrack line (A4 landscape); >50 → serpentine, 2 rows × 50 stops.
+Needs only the GET API (no `--edit`, no token):
+
+```bash
+python3 .claude/skills/rm-web-jobs/scripts/route_diagram.py \
+  --query 5 --operator 全航客運 --db taichung.db
+```
+
+- `--query N` resolves the route by `route_code` (exact match preferred);
+  `--route-id N` skips the search. `--num/--start/--end/--operator/--db`
+  override the title block; defaults come from the API (`subroute_name`
+  is used only when it is a plain two-part span).
+- Writes `route<N>-diagram.html` in the cwd (`--out` to move it) plus
+  `<out>.d/<route_id>/` — cached API dumps and `check.txt` with per-stop
+  road assignment and snap distances.
+- Built-in checks: monotonic stop sequence, per-direction counts; check.txt
+  flags any snap >150 m — inspect those stops before trusting the road
+  names shown.
+- Verify visually in a browser (fonts load from Google Fonts; offline the
+  names still render via fallback fonts but paren arcs may sit slightly
+  off). Hand the HTML to the human; printing is A4 landscape (server-side
+  print is not part of the skill).
 
 ## The loop
 
