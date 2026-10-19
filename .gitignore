@@ -6,3 +6,4 @@ qa/
 .codegraph/
 *.osm.pbf
 .impeccable/
+__pycache__/
