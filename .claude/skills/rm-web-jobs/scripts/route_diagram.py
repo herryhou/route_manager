@@ -168,25 +168,27 @@ def tier_of(n):
     return 1 if n >= 15 else (2 if n >= 4 else 3)
 
 
-def vname(x, y0, name, size, marker, down, unique=False):
+def vname(x, y0, name, size, marker, down, unique=False, hub=False):
     """Vertical name column (CSS vertical-rl + upright): fullwidth （） get
     true vertical forms, every char advances exactly 1em, ink bottom lands on
     the em bottom. down=False hangs UP from flush edge y0 (start = y0-n*size);
     down=True drops DOWN with first-char ink tops at y0 (start 0.14em higher —
     CJK ink fills the lower 86% of the cell). Paren-ending/starting columns
     shift by the measured arc gaps. Explicit per-char tspans pin the same
-    positions in engines without vertical SVG text."""
+    positions in engines without vertical SVG text. Hub stops (>=15 routes)
+    render bold via the .vn.t1 class."""
     name = name.replace("(", "（").replace(")", "）")  # fullwidth: vert forms + 1em advance
     chars = (marker if unique else "") + name
     n = len(chars)
     fill = f' fill="{ACCENT}"' if unique else ""
+    cls = "vn t1 v" if hub else "vn v"
     start = (y0 - n * size) if not down else (y0 - 0.14 * size)
     if not down and name.endswith("）"):
         start += PAREN_END_GAP * size     # push down: arc bottom lands on edge
     if down and name.startswith("（"):
         start -= PAREN_START_GAP * size   # pull up: arc top lands on edge
     body = "".join(f'<tspan x="{x:.1f}" y="{start + i * size:.1f}">{c}</tspan>' for i, c in enumerate(chars))
-    return (f'<text x="{x:.1f}" y="{start:.1f}" class="vn v" '
+    return (f'<text x="{x:.1f}" y="{start:.1f}" class="{cls}" '
             f'font-size="{size:.1f}"{fill}>{body}</text>')
 
 
@@ -256,21 +258,22 @@ figcaption b { color: var(--fg); font-weight: 500; }
 """ % (PAPER, INK, ROAD, "%TITLE%", INK, ROAD, ACCENT, INK, ROAD)
 
 
-def legend_svg(dirs, sizes, y, unique_marker_size):
-    """Tier legend + one-way markers. Samples come from this route's data —
-    shortest name per tier (a sample only has to show the type size); width
-    math follows the drawn sample so long names can't overlap."""
-    tier_names = {}
+def legend_svg(dirs, base, y, unique_marker_size):
+    """Type legend: one size for all names, bold = hub stop (>=15 routes).
+    Samples come from this route's data — shortest name per class (a sample
+    only has to show the weight); width math follows the drawn sample so
+    long names can't overlap."""
+    names_by_tier = {}
     for d in (0, 1):
         for r in dirs[d]["rows"]:
-            tier_names.setdefault(r["tier"], []).append(r["name"])
+            names_by_tier.setdefault(r["tier"], []).append(r["name"])
     lx = 48.0
     leg = []
-    for t, label in [(1, "≥15 路"), (2, "4–14 路"), (3, "≤3 路")]:
-        names = tier_names.get(t)
+    for cls, names, label in [("vn t1", names_by_tier.get(1), "≥15 路"),
+                              ("vn", names_by_tier.get(2) or names_by_tier.get(3), "其餘站名")]:
         sample = min(names, key=len) if names else "站名"
-        w = len(sample) * sizes[t]
-        leg.append(f'<text x="{lx}" y="{y + 4}" class="vn t{t}" font-size="{sizes[t]}">{esc(sample)}</text>')
+        w = len(sample) * base
+        leg.append(f'<text x="{lx}" y="{y + 4}" class="{cls}" font-size="{base}">{esc(sample)}</text>')
         leg.append(f'<text x="{lx + w + 8}" y="{y + 3}" class="sub">{label}</text>')
         lx += w + 8 + len(label) * 11 + 26
     for d, marker, label in [(0, "▲", "僅去程"), (1, "▽", "僅返程")]:
@@ -281,7 +284,7 @@ def legend_svg(dirs, sizes, y, unique_marker_size):
         leg.append(f'<text x="{lx}" y="{y + 4}" class="vn" font-size="{unique_marker_size}" fill="{ACCENT}">{marker}{esc(u)}</text>')
         leg.append(f'<text x="{lx + w + 8}" y="{y + 3}" class="sub">{label}</text>')
         lx += w + 8 + len(label) * 11 + 30
-    leg.append(f'<text x="{lx}" y="{y + 3}" class="sub">字級＝該站服務路線數</text>')
+    leg.append(f'<text x="{lx}" y="{y + 3}" class="sub">粗體＝服務 ≥15 條路線的重點站</text>')
     return "".join(leg)
 
 
@@ -318,7 +321,9 @@ def wrap_html(svg, num, start, end, operator, W_H, caption):
 # -------------------------------------------------- layout by density ----
 
 BAND = 70.0                         # gap between a hairpin's two lines
-SIZES = {1: 12.0, 2: 10.0, 3: 8.5}  # tier type sizes at scale 1.0
+BASE_SIZE = 10.0                    # one size for every stop name; hub stops
+                                    # (>=15 routes) carry bold instead of a
+                                    # bigger size (2026-10-20 user ruling)
 REF_PITCH = 22.0                    # row pitch (px per stop) at scale 1.0
 MAX_SCALE = 2.2                     # sparse-row cap (2026-10-19: 25/side -> 1.8x, 23/side -> ~2.1x)
 
@@ -333,9 +338,9 @@ def row_scale(k):
 
 
 def col_max(rows, scale):
-    """Tallest name column in a row at this scale (chars x tier size); a
+    """Tallest name column in a row at this scale (chars x size); a
     unique stop's column carries its ▲/▽ marker as one extra char."""
-    return max((len(r["name"]) + (1 if r["unique"] else 0)) * SIZES[r["tier"]] * scale
+    return max((len(r["name"]) + (1 if r["unique"] else 0)) * BASE_SIZE * scale
                for r in rows)
 
 
@@ -384,10 +389,10 @@ def draw_route(dirs, meta):
         names = []
         for r in rows:
             x = x_of(r["seq"])
-            t = r["tier"]
             out.append(f'<circle cx="{x:.1f}" cy="{y}" r="3" fill="{PAPER}" stroke="{ACCENT}" stroke-width="1.6"/>')
             names.append(vname(x, y - 12 if names_above else y + 16, r["name"],
-                               SIZES[t] * scale, marker, down=not names_above, unique=r["unique"]))
+                               BASE_SIZE * scale, marker, down=not names_above,
+                               unique=r["unique"], hub=r["tier"] == 1))
         return "".join(out), "".join(names)
 
     svg = []
@@ -397,7 +402,7 @@ def draw_route(dirs, meta):
                      len(dirs[0]["rows"]), len(dirs[1]["rows"]),
                      meta["shared"], meta["u0"], meta["u1"], meta["city"])
     ly = 124
-    svg.append(legend_svg(dirs, SIZES, ly, unique_marker_size=10))
+    svg.append(legend_svg(dirs, BASE_SIZE, ly, unique_marker_size=10))
     svg.append(f'<line x1="48" y1="{ly + 20}" x2="{W - 48}" y2="{ly + 20}" stroke="#E7E5E4" stroke-width="1"/>')
 
     svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
@@ -454,7 +459,7 @@ def draw_route(dirs, meta):
     caption = (f'<b>{esc(meta["city"])}公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：去程 {len(dirs[0]["rows"])} 站（{esc(meta["start"])} → {esc(meta["end"])}）、'
                f'返程 {len(dirs[1]["rows"])} 站（{esc(meta["end"])} → {esc(meta["start"])}）{loop_note}。'
                f'少於 30 站的方向畫一條由左至右的直線，其餘各畫一條 ⊃ 形路徑：首站在上路左端往右，右側平滑轉折後往左，尾站在下路左端。'
-               f'站名字級依該站服務路線數分三級，站距越疏字級越大（25 站/行約 1.8 倍、23 站約 2.1 倍，上限 2.2 倍）；紅字＋▲／▽ 為僅單向停靠之站名。'
+               f'站名同一字級，站距越疏整體越大（25 站/行約 1.8 倍、23 站約 2.1 倍，上限 2.2 倍）；粗體為服務 ≥15 條路線的重點站；紅字＋▲／▽ 為僅單向停靠之站名。'
                f'道路名去除「段／街／巷」後綴合併，僅標示跨三站以上之路名，淡化直線連起其對應站點、路名置中。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
                f'畫布 1123×{H}，列印 A4 橫向＋「縮放至符合紙張」。')
     return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H
