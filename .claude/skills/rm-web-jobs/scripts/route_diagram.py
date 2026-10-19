@@ -193,8 +193,8 @@ def vname(x, y0, name, size, marker, down, unique=False):
 # stop dots and the name, name centred on its span.
 ROAD_FONT = 9.5
 GUIDE = "#A8A29E"
-ROAD_BELOW = (6.0, 17.0)    # (guide_dy, text_baseline_dy), gap below the line
-ROAD_ABOVE = (-6.0, -17.0)  # gap above the line
+ROAD_BELOW = (6.0, 20.0)    # (guide_dy, text_baseline_dy), gap below the line
+ROAD_ABOVE = (-6.0, -14.0)  # gap above the line
 
 
 def road_marks(spans, x_of, below, y):
