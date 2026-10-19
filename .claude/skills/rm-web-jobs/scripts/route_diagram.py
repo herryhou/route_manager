@@ -37,6 +37,7 @@ import argparse
 import json
 import math
 import os
+import re
 import urllib.parse
 import urllib.request
 from datetime import date
@@ -55,7 +56,7 @@ PAPER = "#FFFFFF"
 # cell bottom, （ink top 0.73em below its cell top (measured at 56px). The
 # chosen offsets (user-tuned: exact-flush values are 0.49/0.73) shift whole
 # columns so arcs visually align with CJK neighbours.
-PAREN_END_GAP = 0.8
+PAREN_END_GAP = 0.7
 PAREN_START_GAP = 0.73
 
 
@@ -80,6 +81,17 @@ def fetch(base, route_id, workdir):
 
 # -------------------------------------------------------------- organize ----
 
+SUFFIX_RE = re.compile(r"[一二三四五六七八九十]+[段街巷]$")
+
+
+def normalize_road(name):
+    """Strip ordinal suffixes (一段/二段/三段/一街/一巷…) so spans merge
+    across them; only roads covering ≥3 stops are drawn (spec 2026-10-19)."""
+    if not name:
+        return name
+    return SUFFIX_RE.sub("", name) or name
+
+
 def dist_point_seg(px, py, ax, ay, bx, by):
     """Distance from point P to segment AB (planar degrees scaled to metres)."""
     LAT_M = 111_320.0
@@ -101,7 +113,7 @@ def runs_from_features(feats):
         p = f["properties"]
         (elon, elat) = p["entry_coords"]  # GeoJSON order [lon, lat]
         (xlon, xlat) = p["exit_coords"]
-        runs.append({"ordinal": p["ordinal"], "name": p.get("name") or "",
+        runs.append({"ordinal": p["ordinal"], "name": normalize_road(p.get("name") or ""),
                      "elat": elat, "elon": elon, "xlat": xlat, "xlon": xlon})
     return runs
 
@@ -175,46 +187,28 @@ def vname(x, y0, name, size, marker, down, unique=False):
             f'font-size="{size:.1f}"{fill}>{body}</text>')
 
 
-def relax(chips, gap=6.0, rtl=False):
-    """Deterministic chain placement along reading direction: clamp,
-    push along the direction, pull back against the far bound."""
-    lo, hi = 37.5, W - 37.5
-    for c in chips:
-        c["x"] = min(max(c["cx"] - c["w"] / 2, lo), hi - c["w"])
-    if not rtl:
-        for i, c in enumerate(chips):
-            if i and c["x"] < chips[i - 1]["x"] + chips[i - 1]["w"] + gap:
-                c["x"] = chips[i - 1]["x"] + chips[i - 1]["w"] + gap
-        for i in range(len(chips) - 1, -1, -1):
-            c = chips[i]
-            if i + 1 < len(chips) and c["x"] > chips[i + 1]["x"] - c["w"] - gap:
-                c["x"] = chips[i + 1]["x"] - c["w"] - gap
-            c["x"] = min(max(c["x"], lo), hi - c["w"])
-    else:
-        for i, c in enumerate(chips):
-            if i and c["x"] > chips[i - 1]["x"] - c["w"] - gap:
-                c["x"] = chips[i - 1]["x"] - c["w"] - gap
-        for i in range(len(chips) - 1, -1, -1):
-            c = chips[i]
-            if i + 1 < len(chips) and c["x"] < chips[i + 1]["x"] + c["w"] + gap:
-                c["x"] = chips[i + 1]["x"] + c["w"] + gap
-            c["x"] = min(max(c["x"], lo), hi - c["w"])
+# Road names: strip-merge leaves only ≥3-stop spans; each is drawn as a
+# faded guide line between the stop dots and the name, name centred on it.
+# Two lanes alternate so neighbouring names can't collide (same-lane
+# neighbours are ≥6 pitches apart, wider than any name).
+ROAD_FONT = 9.5
+GUIDE = "#A8A29E"
+LANE_BELOW = [(6.0, 17.0), (22.0, 33.0)]    # (guide_dy, text_baseline_dy), gap below the line
+LANE_ABOVE = [(-6.0, -17.0), (-22.0, -33.0)]  # gap above the line
 
 
-def fit_chips(raw, rtl, two_lanes):
-    """Pick the largest road-chip font whose lanes fit the canvas width."""
-    def build(font, group):
-        for c in group:
-            c["w"] = len(c["label"]) * font + 8
-            c["font"] = font
-        relax(group, gap=6.0, rtl=rtl)
-        return all(37.5 <= c["x"] and c["x"] + c["w"] <= W - 37.5 for c in group)
-
-    lanes = [raw[0::2], raw[1::2]] if two_lanes else [raw]
-    for font in (9.5, 9.0, 8.5, 8.0, 7.5, 7.0):
-        if all(build(font, g) for g in lanes):
-            return lanes
-    return lanes  # last font wins; verify visually via check.txt/screenshots
+def road_marks(spans, x_of, below, y):
+    raw = [{"label": s["road"], "xa": x_of(s["from_seq"]), "xb": x_of(s["to_seq"])}
+           for s in spans if s["road"] and s["count"] >= 3]
+    lanes = [raw[0::2], raw[1::2]] if len(raw) > 1 else [raw]
+    out = []
+    for g, (dy, ty) in zip(lanes, LANE_BELOW if below else LANE_ABOVE):
+        for c in g:
+            half = len(c["label"]) * ROAD_FONT / 2 + 4
+            tx = min(max((c["xa"] + c["xb"]) / 2, 37.5 + half), W - 37.5 - half)
+            out.append(f'<line x1="{c["xa"]:.1f}" y1="{y + dy:.1f}" x2="{c["xb"]:.1f}" y2="{y + dy:.1f}" stroke="{GUIDE}" stroke-width="1"/>'
+                       f'<text x="{tx:.1f}" y="{y + ty:.1f}" text-anchor="middle" class="road" font-size="{ROAD_FONT}">{esc(c["label"])}</text>')
+    return "".join(out)
 
 
 def esc(s):
@@ -336,20 +330,13 @@ def draw_single(dirs, meta):
 
     def line_svg(rows, spans, line_y, rtl, names_above, marker):
         x_of = (lambda seq: X1 - (seq - 1) * STEP) if rtl else (lambda seq: X0 + (seq - 1) * STEP)
-        raw = [{"label": s["road"], "cx": (x_of(s["from_seq"]) + x_of(s["to_seq"])) / 2}
-               for s in spans if s["road"]]
-        lanes = fit_chips(raw, rtl, two_lanes=True)
-        lanes_y = ([(line_y + 7, line_y + 17.5), (line_y + 23, line_y + 33.5)] if names_above
-                   else [(line_y - 21, line_y - 10.5), (line_y - 37, line_y - 26.5)])
-        out = []
-        for g, (_, ty) in zip(lanes, lanes_y):
-            for c in g:
-                out.append(f'<text x="{c["x"] + c["w"] / 2:.1f}" y="{ty:.1f}" text-anchor="middle" class="road" font-size="{c["font"]}">{esc(c["label"])}</text>')
+        # road lanes sit on the centre-strip side, opposite the stop names
+        out = [road_marks(spans, x_of, below=names_above, y=line_y)]
         names = []
         for r in rows:
             x = x_of(r["seq"])
             t = r["tier"]
-            out.append(f'<circle cx="{x:.1f}" cy="{line_y}" r="{3.4 if t == 1 else 2.6 if t == 2 else 2.1}" fill="{ACCENT}"/>')
+            out.append(f'<circle cx="{x:.1f}" cy="{line_y}" r="3" fill="{PAPER}" stroke="{ACCENT}" stroke-width="1.6"/>')
             names.append(vname(x, line_y - 14 if names_above else line_y + 14, r["name"],
                                SIZES[t], marker, down=not names_above, unique=r["unique"]))
         return "".join(out), "".join(names)
@@ -388,7 +375,7 @@ def draw_single(dirs, meta):
                f'下線為返程（右至左），首尾站靠左，右側為同一管線的平滑迴轉'
                + ('，左端虛線為端點同站迴轉' if meta["ends_shared"] else '') + '。'
                f'站名字級依該站服務路線數分三級，上排站名下緣切齊、下排站名上緣切齊；紅字＋▲／▽ 為僅單向停靠之站名。'
-               f'道路名置於線外側（不與線交疊），連續同名路段已合併為一。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
+               f'道路名去除「段／街／巷」後綴合併，僅標示跨三站以上之路名，淡化直線連起其對應站點、路名置中。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
                f'列印：Cmd+P、A4 橫向、邊界「無」。')
     return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H
 
@@ -414,25 +401,18 @@ def draw_serp(dirs, meta):
         def x_of(seq):
             return (X1 - (seq - first_seq) * P) if rtl else (X0 + (seq - first_seq) * P)
 
-        raw = []
+        shown = []
         for s in spans:
             a, b = max(s["from_seq"], lo), min(s["to_seq"], hi)
-            if a <= b and s["road"]:
-                raw.append({"label": s["road"], "cx": (x_of(a) + x_of(b)) / 2})
+            if a <= b:
+                shown.append({"road": s["road"], "from_seq": a, "to_seq": b, "count": s["count"]})
         lane_below = slot in (0, 2)  # row A/C: gap below; row B/D: gap above
-        lanes = fit_chips(raw, rtl, two_lanes=len(raw) > 14)
-        offs = [(3.2, 3.2), (13.5, 20.5)] if lane_below else [(3.2, 3.2), (-24, -13.5)]
-        lane_offs = offs[:len(lanes)]
-        out = []
-        for g, (dy, ty) in zip(lanes, lane_offs):
-            for c in g:
-                out.append(f'<rect x="{c["x"]:.1f}" y="{y + dy:.1f}" width="{c["w"]:.1f}" height="14" fill="{PAPER}"/>'
-                           f'<text x="{c["x"] + c["w"] / 2:.1f}" y="{y + ty:.1f}" text-anchor="middle" class="road" font-size="{c["font"]}">{esc(c["label"])}</text>')
+        out = [road_marks(shown, x_of, below=lane_below, y=y)]
         names = []
         for r in rows:
             x = x_of(r["seq"])
             t = r["tier"]
-            out.append(f'<circle cx="{x:.1f}" cy="{y}" r="{3.0 if t == 1 else 2.4 if t == 2 else 2.0}" fill="{ACCENT}"/>')
+            out.append(f'<circle cx="{x:.1f}" cy="{y}" r="3" fill="{PAPER}" stroke="{ACCENT}" stroke-width="1.6"/>')
             names.append(vname(x, y - 12 if names_above else y + 16, r["name"],
                                SIZES[t], marker, down=not names_above, unique=r["unique"]))
         return "".join(out), "".join(names)
@@ -488,7 +468,7 @@ def draw_serp(dirs, meta):
                + ('，去回皆兩端共用' if meta["ends_shared"] else '') + '；'
                f'路徑蛇行折行，實線弧為折行續行（非迴轉）。上組兩行為去程（右→左接左→右），下組為返程（左→右接右→左）。'
                f'站名字級依該站服務路線數分三級；紅字＋▲／▽ 為僅單向停靠之站名。'
-               f'道路名為該路段行經道路（OSM 匹配，連續同名路段已合併）。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
+               f'道路名去除「段／街／巷」後綴合併，僅標示跨三站以上之路名，淡化直線連起其對應站點、路名置中。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
                f'畫布 1123×{H}（百站直排名稱超出 A4 橫單頁高度），列印請選 A4 橫向＋「縮放至符合紙張」。')
     return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H
 
