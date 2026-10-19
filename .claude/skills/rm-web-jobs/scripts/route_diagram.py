@@ -11,10 +11,11 @@ print-ready route diagrams (路線簡圖):
                (metres-scaled point↔segment distance; never the
                path_stop_projection ↔ seg_match_way chainage join), then
                consecutive same-road consolidation.
-  3. draw    — auto layout: both directions ≤50 stops -> single racetrack
-               line (A4 landscape); >50 -> serpentine, 2 rows per direction,
-               50 stops per row (pitch ≈19.6px is what keeps the 3-tier
-               name scale legible).
+  3. draw    — one ⊃ hairpin per direction (一律拆開): first half of the
+               stops runs left->right on the top line, one smooth turn at
+               the right, second half returns right->left — first stop
+               top-left, last stop bottom-left. 去程's ⊃ sits above 返程's;
+               rows span the full canvas width.
 
 Typography: stop names are typeset with CSS vertical writing
 (writing-mode: vertical-rl + text-orientation: upright) so fullwidth （）
@@ -282,14 +283,14 @@ def legend_svg(dirs, sizes, y, unique_marker_size):
     return "".join(leg)
 
 
-def title_svg(num, title_name, operator, n0, n1, shared, u0, u1, serp):
+def title_svg(num, title_name, operator, n0, n1, shared, u0, u1):
     num_x = 150 if len(num) == 1 else 210
     svg = []
-    svg.append(f'<text x="48" y="{92 if serp else 96}" class="num">{esc(num)}</text>')
-    svg.append(f'<text x="{num_x}" y="{46 if serp else 52}" class="eyebrow">臺中市公車</text>')
-    svg.append(f'<text x="{num_x}" y="{88 if serp else 94}" class="title">{esc(title_name)}</text>')
-    svg.append(f'<text x="{W - 48}" y="{46 if serp else 52}" text-anchor="end" class="sub">{esc(operator)}｜去程 {n0} 站 · 返程 {n1} 站</text>')
-    svg.append(f'<text x="{W - 48}" y="{64 if serp else 70}" text-anchor="end" class="sub">共用站名 {shared} · 僅去程 {u0} · 僅返程 {u1}</text>')
+    svg.append(f'<text x="48" y="92" class="num">{esc(num)}</text>')
+    svg.append(f'<text x="{num_x}" y="46" class="eyebrow">臺中市公車</text>')
+    svg.append(f'<text x="{num_x}" y="88" class="title">{esc(title_name)}</text>')
+    svg.append(f'<text x="{W - 48}" y="46" text-anchor="end" class="sub">{esc(operator)}｜去程 {n0} 站 · 返程 {n1} 站</text>')
+    svg.append(f'<text x="{W - 48}" y="64" text-anchor="end" class="sub">共用站名 {shared} · 僅去程 {u0} · 僅返程 {u1}</text>')
     return svg
 
 
@@ -312,98 +313,33 @@ def wrap_html(svg, num, start, end, operator, W_H, caption):
 </div>"""
 
 
-# --------------------------------------------------- layout: single line ----
+# -------------------------------------------------- layout: two hairpins ----
 
-def draw_single(dirs, meta):
-    """Both directions on one racetrack: outbound L->R on top, return R->L on
-    bottom, one smooth pipeline turn at the right, dashed same-stop 迴轉 at
-    the left. Road names fully off the line, two lanes on the centre-strip
-    side; names hang flush (top row: bottom edges; bottom row: top edges)."""
-    H = 794
-    Y0, Y1 = 420.0, 520.0
-    n = max(len(dirs[0]["rows"]), len(dirs[1]["rows"]))
-    STEP = (X1 - X0) / (n - 1)
-    SIZES = {1: 14.0, 2: 11.5, 3: 9.5}
-
-    def line_svg(rows, spans, line_y, rtl, names_above, marker):
-        x_of = (lambda seq: X1 - (seq - 1) * STEP) if rtl else (lambda seq: X0 + (seq - 1) * STEP)
-        # road lanes sit on the centre-strip side, opposite the stop names
-        out = [road_marks(spans, x_of, below=names_above, y=line_y)]
-        names = []
-        for r in rows:
-            x = x_of(r["seq"])
-            t = r["tier"]
-            out.append(f'<circle cx="{x:.1f}" cy="{line_y}" r="3" fill="{PAPER}" stroke="{ACCENT}" stroke-width="1.6"/>')
-            names.append(vname(x, line_y - 14 if names_above else line_y + 14, r["name"],
-                               SIZES[t], marker, down=not names_above, unique=r["unique"]))
-        return "".join(out), "".join(names)
-
-    body0, names0 = line_svg(dirs[0]["rows"], dirs[0]["spans"], Y0, rtl=False, names_above=True, marker="▲")
-    body1, names1 = line_svg(dirs[1]["rows"], dirs[1]["spans"], Y1, rtl=True, names_above=False, marker="▽")
-
-    svg = []
-    svg.append(f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="台中市公車{esc(meta["num"])}路線簡圖：{esc(meta["title_name"])}，去回程站序與道路名">')
-    svg.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
-    svg += title_svg(meta["num"], meta["title_name"], meta["operator"],
-                     len(dirs[0]["rows"]), len(dirs[1]["rows"]),
-                     meta["shared"], meta["u0"], meta["u1"], serp=False)
-    ly = 140
-    svg.append(legend_svg(dirs, SIZES, ly, unique_marker_size=11.5))
-    svg.append(f'<line x1="48" y1="{ly + 22}" x2="{W - 48}" y2="{ly + 22}" stroke="#E7E5E4" stroke-width="1"/>')
-
-    svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-               f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{ACCENT}"/></marker></defs>')
-    svg.append(f'<path d="M {X0} {Y0} L {X1} {Y0} C {X1 + 42} {Y0} {X1 + 42} {Y1} {X1} {Y1} L {X0 + 6} {Y1}" '
-               f'fill="none" stroke="{ACCENT}" stroke-width="3" marker-end="url(#arw)"/>')
-    svg.append(f'<path d="M {X0} {Y1} C {X0 - 24} {Y1} {X0 - 24} {Y0} {X0} {Y0}" fill="none" stroke="{MUTED}" stroke-width="1.6" stroke-dasharray="5 4"/>')
-    svg.append(f'<rect x="{X0 - 32}" y="{(Y0 + Y1) / 2 - 8}" width="36" height="16" fill="{PAPER}"/>')
-    svg.append(f'<text x="{X0 - 14}" y="{(Y0 + Y1) / 2 + 3.4}" text-anchor="middle" class="road">迴轉</text>')
-    svg.append(f'<text x="1113" y="{Y0 - 8}" text-anchor="end" class="dir">去程 →</text>')
-    svg.append(f'<text x="14" y="{Y1 + 24}" text-anchor="start" class="dir">← 返程</text>')
-
-    svg.append(body0)
-    svg.append(body1)
-    svg.append(names0)
-    svg.append(names1)
-    svg.append("</svg>")
-
-    caption = (f'<b>臺中市公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：上線為去程（{esc(meta["start"])} → {esc(meta["end"])}，左至右），'
-               f'下線為返程（右至左），首尾站靠左，右側為同一管線的平滑迴轉'
-               + ('，左端虛線為端點同站迴轉' if meta["ends_shared"] else '') + '。'
-               f'站名字級依該站服務路線數分三級，上排站名下緣切齊、下排站名上緣切齊；紅字＋▲／▽ 為僅單向停靠之站名。'
-               f'道路名去除「段／街／巷」後綴合併，僅標示跨三站以上之路名，淡化直線連起其對應站點、路名置中。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
-               f'列印：Cmd+P、A4 橫向、邊界「無」。')
-    return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H
-
-
-# ------------------------------------------------ layout: serpentine 2x ----
-
-def draw_serp(dirs, meta):
-    """Serpentine (boustrophedon): 2 rows per direction, 50 stops per row,
-    pitch ≈19.6px. dir0 starts top-right, drops at the LEFT connector;
-    dir1 starts mid-left, drops at the RIGHT connector. Road chips straddle
-    the line on the gap side (white plates), names own the outer side."""
+def draw_route(dirs, meta):
+    """Each direction is its own ⊃ hairpin: the first half of its stops runs
+    left->right on the top line, one smooth turn at the right, the second
+    half returns right->left on the bottom line — first stop top-left, last
+    stop bottom-left (首尾站靠左). 去程's ⊃ sits above 返程's. Rows always
+    span the full canvas width; per-row pitch follows the row's stop count."""
     H = 1010
-    P = (X1 - X0) / 49.0
     SIZES = {1: 12.0, 2: 10.0, 3: 8.5}
-    # slot -> (y, rtl, names_above); dir0 uses slots 0-1, dir1 slots 2-3
-    SLOTS = [(310.0, True, True), (450.0, False, False), (720.0, False, True), (860.0, True, False)]
-    DIR_SLOTS = {0: (0, 1), 1: (2, 3)}
+    DIR_Y = {0: (310.0, 450.0), 1: (720.0, 860.0)}
 
-    def row_svg(rows, spans, slot, first_seq, marker):
-        y, rtl, names_above = SLOTS[slot]
-        lo, hi = rows[0]["seq"], rows[-1]["seq"]
+    def row_svg(rows, spans, y, first_seq, rtl, names_above, marker):
+        k = len(rows)
+        pitch = (X1 - X0) / (k - 1) if k > 1 else 0.0
 
         def x_of(seq):
-            return (X1 - (seq - first_seq) * P) if rtl else (X0 + (seq - first_seq) * P)
+            return (X1 - (seq - first_seq) * pitch) if rtl else (X0 + (seq - first_seq) * pitch)
 
+        lo, hi = rows[0]["seq"], rows[-1]["seq"]
         shown = []
         for s in spans:
-            a, b = max(s["from_seq"], lo), min(s["to_seq"], hi)
-            if a <= b:
-                shown.append({"road": s["road"], "from_seq": a, "to_seq": b, "count": s["count"]})
-        lane_below = slot in (0, 2)  # row A/C: gap below; row B/D: gap above
-        out = [road_marks(shown, x_of, below=lane_below, y=y)]
+            a2, b2 = max(s["from_seq"], lo), min(s["to_seq"], hi)
+            if a2 <= b2:
+                shown.append({"road": s["road"], "from_seq": a2, "to_seq": b2, "count": s["count"]})
+        # road marks live in the gap band, opposite the stop names
+        out = [road_marks(shown, x_of, below=names_above, y=y)]
         names = []
         for r in rows:
             x = x_of(r["seq"])
@@ -418,53 +354,56 @@ def draw_serp(dirs, meta):
     svg.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
     svg += title_svg(meta["num"], meta["title_name"], meta["operator"],
                      len(dirs[0]["rows"]), len(dirs[1]["rows"]),
-                     meta["shared"], meta["u0"], meta["u1"], serp=True)
+                     meta["shared"], meta["u0"], meta["u1"])
     ly = 124
     svg.append(legend_svg(dirs, SIZES, ly, unique_marker_size=10))
     svg.append(f'<line x1="48" y1="{ly + 20}" x2="{W - 48}" y2="{ly + 20}" stroke="#E7E5E4" stroke-width="1"/>')
 
     svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
                f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{ACCENT}"/></marker></defs>')
-    all_chips, all_names = [], []
+
+    bodies, names_all, loops = [], [], []
     for d in (0, 1):
-        s0, s1 = DIR_SLOTS[d]
-        n = len(dirs[d]["rows"])
-        # row split: seq 1..50 then 51..n (each row ≤ 50 stops)
-        cut = min(50, n)
-        parts = [dirs[d]["rows"][:cut]]
-        if n > cut:
-            parts.append(dirs[d]["rows"][cut:])
-        # connector between the direction's own two rows (drop at the side
-        # where the first row ends reading)
-        if len(parts) == 2:
-            ya, yb = SLOTS[s0][0], SLOTS[s1][0]
-            bx = X0 if SLOTS[s0][1] else X1
-            bulge = -26 if bx == X0 else 26
-            svg.append(f'<path d="M {bx} {ya} C {bx + bulge} {ya} {bx + bulge} {yb} {bx} {yb}" fill="none" stroke="{ACCENT}" stroke-width="3"/>')
-        # row lines with travel-direction arrows (each row's own reading direction)
-        for k, part in enumerate(parts):
-            slot = (s0, s1)[k]
-            y, rtl, _ = SLOTS[slot]
-            sx = X1 if rtl else X0
-            ex = (X0 + 4) if rtl else ((1020.0 - 4) if slot == 1 else (X1 - 4))
-            svg.append(f'<line x1="{sx:.1f}" y1="{y}" x2="{ex:.1f}" y2="{y}" stroke="{ACCENT}" stroke-width="3" marker-end="url(#arw)"/>')
-            marker = "▲" if d == 0 else "▽"
-            body, names = row_svg(part, dirs[d]["spans"], slot, part[0]["seq"], marker)
-            all_chips.append(body)
-            all_names.append(names)
-    svg.append(f'<text x="{W - 38}" y="{(SLOTS[0][0] + SLOTS[1][0]) / 2}" text-anchor="end" class="dir">↓ 去程</text>')
-    svg.append(f'<text x="38" y="{(SLOTS[2][0] + SLOTS[3][0]) / 2}" text-anchor="start" class="dir">返程</text>')
-    svg.append("".join(all_chips))
-    svg.append("".join(all_names))
+        rows = dirs[d]["rows"]
+        n = len(rows)
+        ya, yb = DIR_Y[d]
+        marker = "▲" if d == 0 else "▽"
+        cut = (n + 1) // 2
+        parts = [rows[:cut], rows[cut:]]
+        loops.append(bool(parts[1]) and parts[0][0]["name"] == parts[1][-1]["name"])
+        # top line L->R (continues into the turn), smooth right turn, bottom
+        # line R->L ending in the direction arrow at the terminus — one
+        # arrowhead per direction, the ⊃ is a single continuous path
+        svg.append(f'<line x1="{X0}" y1="{ya}" x2="{X1}" y2="{ya}" stroke="{ACCENT}" stroke-width="3"/>')
+        if parts[1]:
+            svg.append(f'<path d="M {X1} {ya} C {X1 + 26} {ya} {X1 + 26} {yb} {X1} {yb}" fill="none" stroke="{ACCENT}" stroke-width="3"/>')
+            svg.append(f'<line x1="{X1}" y1="{yb}" x2="{X0 + 4}" y2="{yb}" stroke="{ACCENT}" stroke-width="3" marker-end="url(#arw)"/>')
+        for i, part in enumerate(parts):
+            if not part:
+                continue
+            body, names = row_svg(part, dirs[d]["spans"], ya if i == 0 else yb, part[0]["seq"],
+                                  rtl=(i == 1), names_above=(i == 0), marker=marker)
+            bodies.append(body)
+            names_all.append(names)
+        if loops[-1]:
+            # dashed link when the direction's own first and last stops are
+            # the same stop (loop service)
+            svg.append(f'<path d="M {X0} {yb} C {X0 - 24} {yb} {X0 - 24} {ya} {X0} {ya}" fill="none" stroke="{MUTED}" stroke-width="1.6" stroke-dasharray="5 4"/>')
+            svg.append(f'<rect x="{X0 - 32}" y="{(ya + yb) / 2 - 8}" width="36" height="16" fill="{PAPER}"/>')
+            svg.append(f'<text x="{X0 - 14}" y="{(ya + yb) / 2 + 3.4}" text-anchor="middle" class="road">迴轉</text>')
+    svg.append(f'<text x="38" y="{(DIR_Y[0][0] + DIR_Y[0][1]) / 2 + 5}" class="dir">↓ 去程</text>')
+    svg.append(f'<text x="38" y="{(DIR_Y[1][0] + DIR_Y[1][1]) / 2 + 5}" class="dir">↓ 返程</text>')
+    svg.append("".join(bodies))
+    svg.append("".join(names_all))
     svg.append("</svg>")
 
+    loop_note = '；向內首尾同站者以左端虛線迴轉表示' if any(loops) else ''
     caption = (f'<b>臺中市公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：去程 {len(dirs[0]["rows"])} 站（{esc(meta["start"])} → {esc(meta["end"])}）、'
-               f'返程 {len(dirs[1]["rows"])} 站（{esc(meta["end"])} → {esc(meta["start"])}）'
-               + ('，去回皆兩端共用' if meta["ends_shared"] else '') + '；'
-               f'路徑蛇行折行，實線弧為折行續行（非迴轉）。上組兩行為去程（右→左接左→右），下組為返程（左→右接右→左）。'
+               f'返程 {len(dirs[1]["rows"])} 站（{esc(meta["end"])} → {esc(meta["start"])}）{loop_note}。'
+               f'去回各自一條 ⊃ 形路徑：首站在上路左端往右，右側平滑轉折後往左，尾站在下路左端。'
                f'站名字級依該站服務路線數分三級；紅字＋▲／▽ 為僅單向停靠之站名。'
                f'道路名去除「段／街／巷」後綴合併，僅標示跨三站以上之路名，淡化直線連起其對應站點、路名置中。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
-               f'畫布 1123×{H}（百站直排名稱超出 A4 橫單頁高度），列印請選 A4 橫向＋「縮放至符合紙張」。')
+               f'畫布 1123×{H}，列印 A4 橫向＋「縮放至符合紙張」。')
     return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H
 
 
@@ -562,12 +501,6 @@ def main():
         meta["title_name"] = subroute.replace(" - ", " — ")
     else:
         meta["title_name"] = f'{meta["start"]} — {meta["end"]}'
-    ends_shared = (dirs[0]["rows"][0]["name"] in shared_names
-                   and dirs[0]["rows"][-1]["name"] in shared_names
-                   and dirs[1]["rows"][0]["name"] in shared_names
-                   and dirs[1]["rows"][-1]["name"] in shared_names)
-    meta["ends_shared"] = ends_shared
-
     # ---- verification ----
     for d in (0, 1):
         rows = dirs[d]["rows"]
@@ -583,15 +516,14 @@ def main():
             tcount[r["tier"]] += 1
     check.append(f"tier distribution (stop rows): t1={tcount[1]} t2={tcount[2]} t3={tcount[3]}")
 
-    serp = max(len(dirs[0]["rows"]), len(dirs[1]["rows"])) > 50
-    if serp and max(len(dirs[0]["rows"]), len(dirs[1]["rows"])) > 100:
-        raise SystemExit("direction > 100 stops: serpentine supports 2 rows of 50 only")
-    html, H = (draw_serp if serp else draw_single)(dirs, meta)
+    if max(len(dirs[0]["rows"]), len(dirs[1]["rows"])) > 100:
+        raise SystemExit("direction > 100 stops: each direction draws as two half-rows of <=50")
+    html, H = draw_route(dirs, meta)
     out.write_text(html)
     workdir.joinpath("check.txt").write_text("\n".join(check), encoding="utf-8")
 
     print("\n".join(v))
-    print(f"layout: {'serpentine 2x2' if serp else 'single racetrack'}  canvas {W}x{H}")
+    print(f"layout: one ⊃ hairpin per direction  canvas {W}x{H}")
     print(f"shared={meta['shared']} unique={meta['u0']}/{meta['u1']}  tiers t1={tcount[1]} t2={tcount[2]} t3={tcount[3]}")
     print(f"written {out} ({out.stat().st_size} bytes)")
     print(f"check file: {workdir / 'check.txt'}")
