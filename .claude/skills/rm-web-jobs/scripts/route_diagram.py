@@ -383,7 +383,7 @@ def draw_route(dirs, meta):
                      len(dirs[0]["rows"]), len(dirs[1]["rows"]), meta["city"])
     svg.append(f'<line x1="48" y1="112" x2="{W - 48}" y2="112" stroke="{YELLOW}" stroke-width="3"/>')
 
-    svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+    svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse">'
                f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{GREEN}"/></marker></defs>')
 
     bodies, names_all, loops, modes = [], [], [], []
