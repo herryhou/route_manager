@@ -49,10 +49,12 @@ station/pole), `/api/routes` + `/api/routes/{id}/directions/{dir}/stops`
 
 `scripts/route_diagram.py` renders one route as a print-ready HTML/SVG
 schematic: fetch via the rm-web API **only** (never direct sqlite), DP-align
-stops onto matched way runs, draw each direction as its own ⊃ hairpin —
-first half of the stops left→right on the top line, one smooth turn at the
-right, second half back right→left (first stop top-left, last stop
-bottom-left); 去程's ⊃ above 返程's (canvas 1123×1010).
+stops onto matched way runs, lay out each direction by density — <30 stops
+draws one left→right line, otherwise a ⊃ hairpin (first half of the stops
+left→right on the top line, one smooth turn at the right, second half back
+right→left; first stop top-left, last stop bottom-left); 去程 above 返程.
+Name columns scale with row pitch up to 1.8× (~25 stops/side hits the cap),
+so the canvas height follows the content (1123 wide × dynamic).
 Needs only the GET API (no `--edit`, no token):
 
 ```bash

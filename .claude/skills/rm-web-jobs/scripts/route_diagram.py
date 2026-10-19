@@ -11,11 +11,13 @@ print-ready route diagrams (路線簡圖):
                (metres-scaled point↔segment distance; never the
                path_stop_projection ↔ seg_match_way chainage join), then
                consecutive same-road consolidation.
-  3. draw    — one ⊃ hairpin per direction (一律拆開): first half of the
-               stops runs left->right on the top line, one smooth turn at
-               the right, second half returns right->left — first stop
-               top-left, last stop bottom-left. 去程's ⊃ sits above 返程's;
-               rows span the full canvas width.
+  3. draw    — layout by density: a direction with <30 stops draws as one
+               L->R line; otherwise a ⊃ hairpin (一律拆開) — first half of
+               the stops runs left->right on the top line, one smooth turn
+               at the right, second half returns right->left — first stop
+               top-left, last stop bottom-left. 去程's sits above 返程's.
+               Name columns scale with row pitch (25 stops/side -> 1.8x),
+               so the canvas height follows the tallest column.
 
 Typography: stop names are typeset with CSS vertical writing
 (writing-mode: vertical-rl + text-orientation: upright) so fullwidth （）
@@ -313,19 +315,58 @@ def wrap_html(svg, num, start, end, operator, W_H, caption):
 </div>"""
 
 
-# -------------------------------------------------- layout: two hairpins ----
+# -------------------------------------------------- layout by density ----
+
+BAND = 70.0                         # gap between a hairpin's two lines
+SIZES = {1: 12.0, 2: 10.0, 3: 8.5}  # tier type sizes at scale 1.0
+REF_PITCH = 22.0                    # row pitch (px per stop) at scale 1.0
+MAX_SCALE = 1.8                     # sparse-row cap (2026-10-19: ~25/side)
+
+
+def row_scale(k):
+    """Type scale for a row of k stops: pitch/REF_PITCH clamped to
+    [1.0, MAX_SCALE] — sparse rows (25 stops/side = 40px pitch) reach the
+    1.8x cap, dense rows (>=45/side) stay at 1.0."""
+    if k <= 1:
+        return MAX_SCALE
+    return max(1.0, min(MAX_SCALE, ((X1 - X0) / (k - 1)) / REF_PITCH))
+
+
+def col_max(rows, scale):
+    """Tallest name column in a row at this scale (chars x tier size); a
+    unique stop's column carries its ▲/▽ marker as one extra char."""
+    return max((len(r["name"]) + (1 if r["unique"] else 0)) * SIZES[r["tier"]] * scale
+               for r in rows)
+
 
 def draw_route(dirs, meta):
-    """Each direction is its own ⊃ hairpin: the first half of its stops runs
-    left->right on the top line, one smooth turn at the right, the second
-    half returns right->left on the bottom line — first stop top-left, last
-    stop bottom-left (首尾站靠左). 去程's ⊃ sits above 返程's. Rows always
-    span the full canvas width; per-row pitch follows the row's stop count."""
-    H = 900
-    SIZES = {1: 12.0, 2: 10.0, 3: 8.5}
-    DIR_Y = {0: (310.0, 380.0), 1: (660.0, 730.0)}  # 70px band per ⊃
+    """Layout by direction size: <30 stops draws as one L->R line with the
+    names hanging above it; otherwise a ⊃ hairpin — first half of the stops
+    runs left->right on the top line, one smooth turn at the right, the
+    second half returns right->left on the bottom line — first stop
+    top-left, last stop bottom-left (首尾站靠左). 去程 sits above 返程. Rows
+    always span the full canvas width; name columns scale with row pitch,
+    so the canvas height follows the tallest column."""
+    cursor = 150.0  # below the title block (legend rule at y=144)
+    geom = {}
+    for d in (0, 1):
+        rows = dirs[d]["rows"]
+        cut = (len(rows) + 1) // 2
+        parts = [rows[:cut], rows[cut:]] if len(rows) >= 30 else [rows]
+        scales = [row_scale(len(p)) for p in parts]
+        up = 12.0 + (col_max(parts[0], scales[0]) if parts[0] else 0.0)
+        if len(parts) == 2:
+            ya = cursor + 24.0 + up
+            yb = ya + BAND
+            cursor = yb + 16.0 + (col_max(parts[1], scales[1]) if parts[1] else 0.0)
+            geom[d] = {"parts": parts, "scales": scales, "ya": ya, "yb": yb, "hairpin": True}
+        else:
+            y = cursor + 24.0 + up
+            cursor = y + 30.0  # line, then road marks below it
+            geom[d] = {"parts": parts, "scales": scales, "ya": y, "yb": None, "hairpin": False}
+    H = int(cursor + 26.0)
 
-    def row_svg(rows, spans, y, first_seq, rtl, names_above, marker):
+    def row_svg(rows, spans, y, first_seq, rtl, names_above, marker, scale):
         k = len(rows)
         pitch = (X1 - X0) / (k - 1) if k > 1 else 0.0
 
@@ -346,7 +387,7 @@ def draw_route(dirs, meta):
             t = r["tier"]
             out.append(f'<circle cx="{x:.1f}" cy="{y}" r="3" fill="{PAPER}" stroke="{ACCENT}" stroke-width="1.6"/>')
             names.append(vname(x, y - 12 if names_above else y + 16, r["name"],
-                               SIZES[t], marker, down=not names_above, unique=r["unique"]))
+                               SIZES[t] * scale, marker, down=not names_above, unique=r["unique"]))
         return "".join(out), "".join(names)
 
     svg = []
@@ -362,37 +403,48 @@ def draw_route(dirs, meta):
     svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
                f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{ACCENT}"/></marker></defs>')
 
-    bodies, names_all, loops = [], [], []
+    bodies, names_all, loops, modes = [], [], [], []
     for d in (0, 1):
-        rows = dirs[d]["rows"]
-        n = len(rows)
-        ya, yb = DIR_Y[d]
+        g = geom[d]
+        ya, yb = g["ya"], g["yb"]
         marker = "▲" if d == 0 else "▽"
-        cut = (n + 1) // 2
-        parts = [rows[:cut], rows[cut:]]
-        loops.append(bool(parts[1]) and parts[0][0]["name"] == parts[1][-1]["name"])
-        # top line L->R (continues into the turn), smooth right turn, bottom
-        # line R->L ending in the direction arrow at the terminus — one
-        # arrowhead per direction, the ⊃ is a single continuous path
-        svg.append(f'<line x1="{X0}" y1="{ya}" x2="{X1}" y2="{ya}" stroke="{ACCENT}" stroke-width="3"/>')
-        if parts[1]:
-            svg.append(f'<path d="M {X1} {ya} C {X1 + 26} {ya} {X1 + 26} {yb} {X1} {yb}" fill="none" stroke="{ACCENT}" stroke-width="3"/>')
-            svg.append(f'<line x1="{X1}" y1="{yb}" x2="{X0 + 4}" y2="{yb}" stroke="{ACCENT}" stroke-width="3" marker-end="url(#arw)"/>')
-        for i, part in enumerate(parts):
+        if g["hairpin"]:
+            modes.append("⊃ hairpin")
+            loops.append(bool(g["parts"][1]) and g["parts"][0][0]["name"] == g["parts"][1][-1]["name"])
+            # top line L->R (continues into the turn), smooth right turn,
+            # bottom line R->L ending in the direction arrow at the
+            # terminus — one arrowhead per direction, the ⊃ is a single
+            # continuous path
+            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1}" y2="{ya:.1f}" stroke="{ACCENT}" stroke-width="3"/>')
+            svg.append(f'<path d="M {X1} {ya:.1f} C {X1 + 26} {ya:.1f} {X1 + 26} {yb:.1f} {X1} {yb:.1f}" fill="none" stroke="{ACCENT}" stroke-width="3"/>')
+            svg.append(f'<line x1="{X1}" y1="{yb:.1f}" x2="{X0 + 4}" y2="{yb:.1f}" stroke="{ACCENT}" stroke-width="3" marker-end="url(#arw)"/>')
+        else:
+            modes.append("single line")
+            loops.append(False)
+            # one continuous L->R line ending in the direction arrow
+            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1}" y2="{ya:.1f}" stroke="{ACCENT}" stroke-width="3" marker-end="url(#arw)"/>')
+        for i, part in enumerate(g["parts"]):
             if not part:
                 continue
-            body, names = row_svg(part, dirs[d]["spans"], ya if i == 0 else yb, part[0]["seq"],
-                                  rtl=(i == 1), names_above=(i == 0), marker=marker)
+            body, names = row_svg(part, dirs[d]["spans"], ya, part[0]["seq"],
+                                  rtl=(g["hairpin"] and i == 1),
+                                  names_above=(not g["hairpin"]) or i == 0,
+                                  marker=marker, scale=g["scales"][i])
             bodies.append(body)
             names_all.append(names)
-        if loops[-1]:
+        if g["hairpin"] and loops[-1]:
             # dashed link when the direction's own first and last stops are
             # the same stop (loop service)
-            svg.append(f'<path d="M {X0} {yb} C {X0 - 24} {yb} {X0 - 24} {ya} {X0} {ya}" fill="none" stroke="{MUTED}" stroke-width="1.6" stroke-dasharray="5 4"/>')
-            svg.append(f'<rect x="{X0 - 32}" y="{(ya + yb) / 2 - 8}" width="36" height="16" fill="{PAPER}"/>')
-            svg.append(f'<text x="{X0 - 14}" y="{(ya + yb) / 2 + 3.4}" text-anchor="middle" class="road">迴轉</text>')
-    svg.append(f'<text x="38" y="{(DIR_Y[0][0] + DIR_Y[0][1]) / 2 + 5}" class="dir">↓ 去程</text>')
-    svg.append(f'<text x="38" y="{(DIR_Y[1][0] + DIR_Y[1][1]) / 2 + 5}" class="dir">↓ 返程</text>')
+            svg.append(f'<path d="M {X0} {yb:.1f} C {X0 - 24} {yb:.1f} {X0 - 24} {ya:.1f} {X0} {ya:.1f}" fill="none" stroke="{MUTED}" stroke-width="1.6" stroke-dasharray="5 4"/>')
+            svg.append(f'<rect x="{X0 - 32}" y="{(ya + yb) / 2 - 8:.1f}" width="36" height="16" fill="{PAPER}"/>')
+            svg.append(f'<text x="{X0 - 14}" y="{(ya + yb) / 2 + 3.4:.1f}" text-anchor="middle" class="road">迴轉</text>')
+    for d in (0, 1):
+        g = geom[d]
+        if g["hairpin"]:
+            yl, arrow = (g["ya"] + g["yb"]) / 2 + 5, "↓"
+        else:
+            yl, arrow = g["ya"] + 5, "→"
+        svg.append(f'<text x="38" y="{yl:.1f}" class="dir">{arrow} {"去程" if d == 0 else "返程"}</text>')
     svg.append("".join(bodies))
     svg.append("".join(names_all))
     svg.append("</svg>")
@@ -400,8 +452,8 @@ def draw_route(dirs, meta):
     loop_note = '；向內首尾同站者以左端虛線迴轉表示' if any(loops) else ''
     caption = (f'<b>{esc(meta["city"])}公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：去程 {len(dirs[0]["rows"])} 站（{esc(meta["start"])} → {esc(meta["end"])}）、'
                f'返程 {len(dirs[1]["rows"])} 站（{esc(meta["end"])} → {esc(meta["start"])}）{loop_note}。'
-               f'去回各自一條 ⊃ 形路徑：首站在上路左端往右，右側平滑轉折後往左，尾站在下路左端。'
-               f'站名字級依該站服務路線數分三級；紅字＋▲／▽ 為僅單向停靠之站名。'
+               f'少於 30 站的方向畫一條由左至右的直線，其餘各畫一條 ⊃ 形路徑：首站在上路左端往右，右側平滑轉折後往左，尾站在下路左端。'
+               f'站名字級依該站服務路線數分三級，站距越疏字級越大（每側約 25 站時放大到 1.8 倍）；紅字＋▲／▽ 為僅單向停靠之站名。'
                f'道路名去除「段／街／巷」後綴合併，僅標示跨三站以上之路名，淡化直線連起其對應站點、路名置中。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
                f'畫布 1123×{H}，列印 A4 橫向＋「縮放至符合紙張」。')
     return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H
@@ -525,7 +577,8 @@ def main():
     workdir.joinpath("check.txt").write_text("\n".join(check), encoding="utf-8")
 
     print("\n".join(v))
-    print(f"layout: one ⊃ hairpin per direction  canvas {W}x{H}")
+    shape = "⊃ hairpin" if len(dirs[0]["rows"]) >= 30 else "single line"
+    print(f"layout: per-direction density ({shape} shown)  canvas {W}x{H}")
     print(f"shared={meta['shared']} unique={meta['u0']}/{meta['u1']}  tiers t1={tcount[1]} t2={tcount[2]} t3={tcount[3]}")
     print(f"written {out} ({out.stat().st_size} bytes)")
     print(f"check file: {workdir / 'check.txt'}")
