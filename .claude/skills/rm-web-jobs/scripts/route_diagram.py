@@ -321,9 +321,9 @@ def draw_route(dirs, meta):
     half returns right->left on the bottom line — first stop top-left, last
     stop bottom-left (首尾站靠左). 去程's ⊃ sits above 返程's. Rows always
     span the full canvas width; per-row pitch follows the row's stop count."""
-    H = 1010
+    H = 900
     SIZES = {1: 12.0, 2: 10.0, 3: 8.5}
-    DIR_Y = {0: (310.0, 450.0), 1: (720.0, 860.0)}
+    DIR_Y = {0: (310.0, 380.0), 1: (660.0, 730.0)}  # 70px band per ⊃
 
     def row_svg(rows, spans, y, first_seq, rtl, names_above, marker):
         k = len(rows)
