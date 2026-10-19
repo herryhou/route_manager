@@ -52,8 +52,12 @@ X0, X1 = 80.0, 1040.0
 INK = "#1C1917"
 MUTED = "#78716C"
 ROAD = "#57534E"
-ACCENT = "#9A3412"
+ACCENT = "#9A3412"                  # one-way (▲/▽) names only — caption says 紅字
 PAPER = "#FFFFFF"
+GREEN = "#166534"                   # header band + route line
+YELLOW = "#FDE047"                  # number block + rule under the band
+PALE_YELLOW = "#FDE68A"             # eyebrow on the green band
+PALE_MINT = "#D1FAE5"               # operator/station-count line on the band
 
 # Paren arcs hug the bracketed content: ）ink bottom sits 0.49em above its
 # cell bottom, （ink top 0.73em below its cell top (measured at 56px). The
@@ -222,14 +226,17 @@ def esc(s):
 def css_block():
     return """
 :root {
-  --bg: #EDEAE4; --fg: #292524; --muted: #79716B; --edge: #D6D0C6;
+  --bg: #E7F3EC; --fg: #1C2B22; --muted: #5C6B62; --edge: #CFE0D6;
+  --mint: #E3F2E9; --mint-edge: #C4DFD0;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --bg: #201D1A; --fg: #E7E2DB; --muted: #A39B92; --edge: #3B362F;
+  --bg: #16221C; --fg: #E7F0EA; --muted: #9AAB9F; --edge: #2C3B32;
+  --mint: #1B2C22; --mint-edge: #2C4237;
 } }
 :root[data-theme="dark"] {
-  --bg: #201D1A; --fg: #E7E2DB; --muted: #A39B92; --edge: #3B362F;
+  --bg: #16221C; --fg: #E7F0EA; --muted: #9AAB9F; --edge: #2C3B32;
+  --mint: #1B2C22; --mint-edge: #2C4237;
 }
 * { box-sizing: border-box; }
 body {
@@ -244,7 +251,8 @@ body {
   background: %s; box-shadow: 0 10px 30px rgba(0,0,0,.10); }
 svg { display: block; width: 1123px; max-width: none; height: auto; }
 figure { margin: 0; }
-figcaption { margin-top: 12px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+figcaption { margin-top: 12px; background: var(--mint); border: 1px solid var(--mint-edge);
+  border-radius: 8px; padding: 10px 14px; color: var(--muted); font-size: 13px; line-height: 1.7; }
 figcaption b { color: var(--fg); font-weight: 500; }
 .num { font-size: %%NUM%%px; font-weight: 900; fill: %s; letter-spacing: -2px; }
 .eyebrow { font-size: 15px; font-weight: 500; fill: %s; letter-spacing: 6px; }
@@ -255,14 +263,17 @@ figcaption b { color: var(--fg); font-weight: 500; }
 .vn.t1 { font-weight: 700; }
 .v { writing-mode: vertical-rl; text-orientation: upright; }
 .road { letter-spacing: 0.5px; fill: %s; }
-""" % (PAPER, INK, ROAD, "%TITLE%", INK, ROAD, ACCENT, INK, ROAD)
+""" % (PAPER, INK, PALE_YELLOW, "%TITLE%", "#FFFFFF", PALE_MINT, GREEN, INK, ROAD)
 
 
 
 def title_svg(num, title_name, operator, n0, n1, city):
     num_x = 150 if len(num) == 1 else 210
+    block_w = int(len(num) * (84 if len(num) == 1 else 64) * 0.56 + 30)
     svg = []
-    svg.append(f'<text x="48" y="92" class="num">{esc(num)}</text>')
+    svg.append(f'<rect x="0" y="0" width="{W}" height="112" fill="{GREEN}"/>')
+    svg.append(f'<rect x="40" y="16" width="{block_w}" height="80" rx="8" fill="{YELLOW}"/>')
+    svg.append(f'<text x="{40 + block_w / 2:.1f}" y="92" text-anchor="middle" class="num">{esc(num)}</text>')
     svg.append(f'<text x="{num_x}" y="46" class="eyebrow">{esc(city)}公車</text>')
     svg.append(f'<text x="{num_x}" y="88" class="title">{esc(title_name)}</text>')
     svg.append(f'<text x="{W - 48}" y="46" text-anchor="end" class="sub">{esc(operator)}｜去程 {n0} 站 · 返程 {n1} 站</text>')
@@ -359,7 +370,7 @@ def draw_route(dirs, meta):
         names = []
         for r in rows:
             x = x_of(r["seq"])
-            out.append(f'<circle cx="{x:.1f}" cy="{y}" r="3" fill="{PAPER}" stroke="{ACCENT}" stroke-width="1.6"/>')
+            out.append(f'<circle cx="{x:.1f}" cy="{y}" r="3" fill="{PAPER}" stroke="{GREEN}" stroke-width="1.6"/>')
             names.append(vname(x, y - 12 if names_above else y + 16, r["name"],
                                BASE_SIZE * scale, marker, down=not names_above,
                                unique=r["unique"], hub=r["tier"] == 1))
@@ -370,10 +381,10 @@ def draw_route(dirs, meta):
     svg.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
     svg += title_svg(meta["num"], meta["title_name"], meta["operator"],
                      len(dirs[0]["rows"]), len(dirs[1]["rows"]), meta["city"])
-    svg.append(f'<line x1="48" y1="112" x2="{W - 48}" y2="112" stroke="#E7E5E4" stroke-width="1"/>')
+    svg.append(f'<line x1="48" y1="112" x2="{W - 48}" y2="112" stroke="{YELLOW}" stroke-width="3"/>')
 
     svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-               f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{ACCENT}"/></marker></defs>')
+               f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{GREEN}"/></marker></defs>')
 
     bodies, names_all, loops, modes = [], [], [], []
     for d in (0, 1):
@@ -387,14 +398,14 @@ def draw_route(dirs, meta):
             # bottom line R->L ending in the direction arrow at the
             # terminus — one arrowhead per direction, the ⊃ is a single
             # continuous path
-            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1}" y2="{ya:.1f}" stroke="{ACCENT}" stroke-width="3"/>')
-            svg.append(f'<path d="M {X1} {ya:.1f} C {X1 + 26} {ya:.1f} {X1 + 26} {yb:.1f} {X1} {yb:.1f}" fill="none" stroke="{ACCENT}" stroke-width="3"/>')
-            svg.append(f'<line x1="{X1}" y1="{yb:.1f}" x2="{X0 + 4}" y2="{yb:.1f}" stroke="{ACCENT}" stroke-width="3" marker-end="url(#arw)"/>')
+            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1}" y2="{ya:.1f}" stroke="{GREEN}" stroke-width="3"/>')
+            svg.append(f'<path d="M {X1} {ya:.1f} C {X1 + 26} {ya:.1f} {X1 + 26} {yb:.1f} {X1} {yb:.1f}" fill="none" stroke="{GREEN}" stroke-width="3"/>')
+            svg.append(f'<line x1="{X1}" y1="{yb:.1f}" x2="{X0 + 4}" y2="{yb:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
         else:
             modes.append("single line")
             loops.append(False)
             # one continuous L->R line ending in the direction arrow
-            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1}" y2="{ya:.1f}" stroke="{ACCENT}" stroke-width="3" marker-end="url(#arw)"/>')
+            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1}" y2="{ya:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
         for i, part in enumerate(g["parts"]):
             if not part:
                 continue
