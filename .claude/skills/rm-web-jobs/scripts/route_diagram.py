@@ -258,44 +258,14 @@ figcaption b { color: var(--fg); font-weight: 500; }
 """ % (PAPER, INK, ROAD, "%TITLE%", INK, ROAD, ACCENT, INK, ROAD)
 
 
-def legend_svg(dirs, base, y, unique_marker_size):
-    """Type legend: one size for all names, bold = hub stop (>=15 routes).
-    Samples come from this route's data — shortest name per class (a sample
-    only has to show the weight); width math follows the drawn sample so
-    long names can't overlap."""
-    names_by_tier = {}
-    for d in (0, 1):
-        for r in dirs[d]["rows"]:
-            names_by_tier.setdefault(r["tier"], []).append(r["name"])
-    lx = 48.0
-    leg = []
-    for cls, names, label in [("vn t1", names_by_tier.get(1), "≥15 路"),
-                              ("vn", names_by_tier.get(2) or names_by_tier.get(3), "其餘站名")]:
-        sample = min(names, key=len) if names else "站名"
-        w = len(sample) * base
-        leg.append(f'<text x="{lx}" y="{y + 4}" class="{cls}" font-size="{base}">{esc(sample)}</text>')
-        leg.append(f'<text x="{lx + w + 8}" y="{y + 3}" class="sub">{label}</text>')
-        lx += w + 8 + len(label) * 11 + 26
-    for d, marker, label in [(0, "▲", "僅去程"), (1, "▽", "僅返程")]:
-        u = next((r["name"] for r in sorted(dirs[d]["rows"], key=lambda r: len(r["name"])) if r["unique"]), None)
-        if u is None:
-            continue
-        w = (1 + len(u)) * unique_marker_size
-        leg.append(f'<text x="{lx}" y="{y + 4}" class="vn" font-size="{unique_marker_size}" fill="{ACCENT}">{marker}{esc(u)}</text>')
-        leg.append(f'<text x="{lx + w + 8}" y="{y + 3}" class="sub">{label}</text>')
-        lx += w + 8 + len(label) * 11 + 30
-    leg.append(f'<text x="{lx}" y="{y + 3}" class="sub">粗體＝服務 ≥15 條路線的重點站</text>')
-    return "".join(leg)
 
-
-def title_svg(num, title_name, operator, n0, n1, shared, u0, u1, city):
+def title_svg(num, title_name, operator, n0, n1, city):
     num_x = 150 if len(num) == 1 else 210
     svg = []
     svg.append(f'<text x="48" y="92" class="num">{esc(num)}</text>')
     svg.append(f'<text x="{num_x}" y="46" class="eyebrow">{esc(city)}公車</text>')
     svg.append(f'<text x="{num_x}" y="88" class="title">{esc(title_name)}</text>')
     svg.append(f'<text x="{W - 48}" y="46" text-anchor="end" class="sub">{esc(operator)}｜去程 {n0} 站 · 返程 {n1} 站</text>')
-    svg.append(f'<text x="{W - 48}" y="64" text-anchor="end" class="sub">共用站名 {shared} · 僅去程 {u0} · 僅返程 {u1}</text>')
     return svg
 
 
@@ -352,7 +322,7 @@ def draw_route(dirs, meta):
     top-left, last stop bottom-left (首尾站靠左). 去程 sits above 返程. Rows
     always span the full canvas width; name columns scale with row pitch,
     so the canvas height follows the tallest column."""
-    cursor = 150.0  # below the title block (legend rule at y=144)
+    cursor = 122.0  # below the header rule (y=112)
     geom = {}
     for d in (0, 1):
         rows = dirs[d]["rows"]
@@ -399,11 +369,8 @@ def draw_route(dirs, meta):
     svg.append(f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{esc(meta["city"])}公車{esc(meta["num"])}路線簡圖：{esc(meta["title_name"])}，去回程站序與道路名">')
     svg.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
     svg += title_svg(meta["num"], meta["title_name"], meta["operator"],
-                     len(dirs[0]["rows"]), len(dirs[1]["rows"]),
-                     meta["shared"], meta["u0"], meta["u1"], meta["city"])
-    ly = 124
-    svg.append(legend_svg(dirs, BASE_SIZE, ly, unique_marker_size=10))
-    svg.append(f'<line x1="48" y1="{ly + 20}" x2="{W - 48}" y2="{ly + 20}" stroke="#E7E5E4" stroke-width="1"/>')
+                     len(dirs[0]["rows"]), len(dirs[1]["rows"]), meta["city"])
+    svg.append(f'<line x1="48" y1="112" x2="{W - 48}" y2="112" stroke="#E7E5E4" stroke-width="1"/>')
 
     svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
                f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{ACCENT}"/></marker></defs>')
@@ -458,10 +425,8 @@ def draw_route(dirs, meta):
     loop_note = '；向內首尾同站者以左端虛線迴轉表示' if any(loops) else ''
     caption = (f'<b>{esc(meta["city"])}公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：去程 {len(dirs[0]["rows"])} 站（{esc(meta["start"])} → {esc(meta["end"])}）、'
                f'返程 {len(dirs[1]["rows"])} 站（{esc(meta["end"])} → {esc(meta["start"])}）{loop_note}。'
-               f'少於 30 站的方向畫一條由左至右的直線，其餘各畫一條 ⊃ 形路徑：首站在上路左端往右，右側平滑轉折後往左，尾站在下路左端。'
-               f'站名同一字級，站距越疏整體越大（25 站/行約 1.8 倍、23 站約 2.1 倍，上限 2.2 倍）；粗體為服務 ≥15 條路線的重點站；紅字＋▲／▽ 為僅單向停靠之站名。'
-               f'道路名去除「段／街／巷」後綴合併，僅標示跨三站以上之路名，淡化直線連起其對應站點、路名置中。資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。'
-               f'畫布 1123×{H}，列印 A4 橫向＋「縮放至符合紙張」。')
+               f'粗體為服務 ≥15 條路線的重點站；紅字＋▲／▽ 為僅單向停靠之站名。'
+               f'資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。')
     return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H
 
 
