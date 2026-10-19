@@ -54,8 +54,8 @@ MUTED = "#78716C"
 ROAD = "#57534E"
 ACCENT = "#9A3412"                  # one-way (▲/▽) names only — caption says 紅字
 PAPER = "#FFFFFF"
-GREEN = "#166534"                   # header band + route line
-YELLOW = "#FDE047"                  # number block + rule under the band
+GREEN = "#14532D"                   # header band + route line
+YELLOW = "#CA8A04"                  # dark-yellow number half of the band + rule
 PALE_YELLOW = "#FDE68A"             # eyebrow on the green band
 PALE_MINT = "#D1FAE5"               # operator/station-count line on the band
 
@@ -269,11 +269,11 @@ figcaption b { color: var(--fg); font-weight: 500; }
 
 def title_svg(num, title_name, operator, n0, n1, city):
     num_x = 150 if len(num) == 1 else 210
-    block_w = int(len(num) * (84 if len(num) == 1 else 64) * 0.56 + 30)
+    split_x = num_x - 16          # dark-yellow number half, deep-green rest
     svg = []
     svg.append(f'<rect x="0" y="0" width="{W}" height="112" fill="{GREEN}"/>')
-    svg.append(f'<rect x="40" y="16" width="{block_w}" height="80" rx="8" fill="{YELLOW}"/>')
-    svg.append(f'<text x="{40 + block_w / 2:.1f}" y="92" text-anchor="middle" class="num">{esc(num)}</text>')
+    svg.append(f'<rect x="0" y="0" width="{split_x}" height="112" fill="{YELLOW}"/>')
+    svg.append(f'<text x="{split_x / 2:.1f}" y="92" text-anchor="middle" class="num">{esc(num)}</text>')
     svg.append(f'<text x="{num_x}" y="46" class="eyebrow">{esc(city)}公車</text>')
     svg.append(f'<text x="{num_x}" y="88" class="title">{esc(title_name)}</text>')
     svg.append(f'<text x="{W - 48}" y="46" text-anchor="end" class="sub">{esc(operator)}｜去程 {n0} 站 · 返程 {n1} 站</text>')
