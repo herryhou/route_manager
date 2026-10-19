@@ -187,27 +187,26 @@ def vname(x, y0, name, size, marker, down, unique=False):
             f'font-size="{size:.1f}"{fill}>{body}</text>')
 
 
-# Road names: strip-merge leaves only ≥3-stop spans; each is drawn as a
-# faded guide line between the stop dots and the name, name centred on it.
-# Two lanes alternate so neighbouring names can't collide (same-lane
-# neighbours are ≥6 pitches apart, wider than any name).
+# Road names: strip-merge leaves only ≥3-stop spans — sparse enough that
+# one lane holds them all; each is drawn as a faded guide line between the
+# stop dots and the name, name centred on its span.
 ROAD_FONT = 9.5
 GUIDE = "#A8A29E"
-LANE_BELOW = [(6.0, 17.0), (22.0, 33.0)]    # (guide_dy, text_baseline_dy), gap below the line
-LANE_ABOVE = [(-6.0, -17.0), (-22.0, -33.0)]  # gap above the line
+ROAD_BELOW = (6.0, 17.0)    # (guide_dy, text_baseline_dy), gap below the line
+ROAD_ABOVE = (-6.0, -17.0)  # gap above the line
 
 
 def road_marks(spans, x_of, below, y):
-    raw = [{"label": s["road"], "xa": x_of(s["from_seq"]), "xb": x_of(s["to_seq"])}
-           for s in spans if s["road"] and s["count"] >= 3]
-    lanes = [raw[0::2], raw[1::2]] if len(raw) > 1 else [raw]
+    dy, ty = ROAD_BELOW if below else ROAD_ABOVE
     out = []
-    for g, (dy, ty) in zip(lanes, LANE_BELOW if below else LANE_ABOVE):
-        for c in g:
-            half = len(c["label"]) * ROAD_FONT / 2 + 4
-            tx = min(max((c["xa"] + c["xb"]) / 2, 37.5 + half), W - 37.5 - half)
-            out.append(f'<line x1="{c["xa"]:.1f}" y1="{y + dy:.1f}" x2="{c["xb"]:.1f}" y2="{y + dy:.1f}" stroke="{GUIDE}" stroke-width="1"/>'
-                       f'<text x="{tx:.1f}" y="{y + ty:.1f}" text-anchor="middle" class="road" font-size="{ROAD_FONT}">{esc(c["label"])}</text>')
+    for s in spans:
+        if not s["road"] or s["count"] < 3:
+            continue
+        xa, xb = x_of(s["from_seq"]), x_of(s["to_seq"])
+        half = len(s["road"]) * ROAD_FONT / 2 + 4
+        tx = min(max((xa + xb) / 2, 37.5 + half), W - 37.5 - half)
+        out.append(f'<line x1="{xa:.1f}" y1="{y + dy:.1f}" x2="{xb:.1f}" y2="{y + dy:.1f}" stroke="{GUIDE}" stroke-width="1"/>'
+                   f'<text x="{tx:.1f}" y="{y + ty:.1f}" text-anchor="middle" class="road" font-size="{ROAD_FONT}">{esc(s["road"])}</text>')
     return "".join(out)
 
 
