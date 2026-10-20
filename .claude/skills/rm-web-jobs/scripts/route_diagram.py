@@ -353,7 +353,7 @@ def draw_route(dirs, meta):
             geom[d] = {"parts": parts, "scales": scales, "ya": y, "yb": None, "hairpin": False}
     H = int(cursor + 26.0)
 
-    def row_svg(rows, spans, y, first_seq, rtl, names_above, scale):
+    def row_svg(rows, spans, y, first_seq, rtl, names_above, scale, end_seqs=()):
         k = len(rows)
         pitch = (X1 - X0) / (k - 1) if k > 1 else 0.0
 
@@ -371,7 +371,11 @@ def draw_route(dirs, meta):
         names = []
         for r in rows:
             x = x_of(r["seq"])
-            out.append(f'<circle cx="{x:.1f}" cy="{y}" r="3" fill="{PAPER}" stroke="{GREEN}" stroke-width="1.6"/>')
+            # termini (direction first/last) get a heavier dot than the
+            # intermediate stops (2026-10-20 ruling)
+            end = r["seq"] in end_seqs
+            out.append(f'<circle cx="{x:.1f}" cy="{y}" r="{4 if end else 3}" fill="{PAPER}" stroke="{GREEN}" '
+                       f'stroke-width="{3 if end else 2.5}"/>')
             names.append(vname(x, y - 12 if names_above else y + 16, r["name"],
                                BASE_SIZE * scale, down=not names_above))
         return "".join(out), "".join(names)
@@ -411,7 +415,8 @@ def draw_route(dirs, meta):
             body, names = row_svg(part, dirs[d]["spans"], y_row, part[0]["seq"],
                                   rtl=(g["hairpin"] and i == 1),
                                   names_above=(not g["hairpin"]) or i == 0,
-                                  scale=g["scales"][i])
+                                  scale=g["scales"][i],
+                                  end_seqs=(dirs[d]["rows"][0]["seq"], dirs[d]["rows"][-1]["seq"]))
             bodies.append(body)
             names_all.append(names)
         if g["hairpin"] and loops[-1]:
