@@ -311,8 +311,9 @@ def wrap_html(svg, num, start, end, operator, W_H, caption):
 # -------------------------------------------------- layout by density ----
 
 BAND = 70.0                         # gap between a hairpin's two lines
-BASE_SIZE = 10.0                    # one size for every stop name (2026-10-20
-                                    # ruling: no tiers, no bold)
+BASE_SIZE = 13.0                    # one size for every stop name (2026-10-20
+                                    # ruling: no tiers, no bold; 10->13 so dense
+                                    # routes like 153/270 stop reading tiny)
 REF_PITCH = 22.0                    # row pitch (px per stop) at scale 1.0
 MAX_SCALE = 2.2                     # sparse-row cap (2026-10-19: 25/side -> 1.8x, 23/side -> ~2.1x)
 
