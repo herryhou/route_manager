@@ -391,7 +391,7 @@ def draw_route(dirs, meta):
     svg += title_svg(meta["num"], meta["title_name"], meta["operator"],
                      len(dirs[0]["rows"]), len(dirs[1]["rows"]), meta["city"])
 
-    svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse">'
+    svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="2" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse">'
                f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{GREEN}"/></marker></defs>')
 
     bodies, names_all, loops, modes = [], [], [], []
@@ -417,9 +417,10 @@ def draw_route(dirs, meta):
         else:
             modes.append("single line")
             loops.append(False)
-            # one continuous L->R line ending in the direction arrow past
-            # the last dot (base at X1+7, clear of the dot's 5.5 edge)
-            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1 + 9}" y2="{ya:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
+            # one continuous L->R line ending in the direction arrow just
+            # before the last dot — the mirror of the hairpin's X0+13:
+            # tip at X1-5 touches the dot's 5.5 edge, nothing pokes past X1
+            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1 - 13}" y2="{ya:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
         for i, part in enumerate(g["parts"]):
             if not part:
                 continue
