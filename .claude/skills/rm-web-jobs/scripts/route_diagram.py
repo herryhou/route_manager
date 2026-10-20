@@ -277,8 +277,12 @@ figcaption b { color: var(--fg); font-weight: 500; }
 
 
 def title_svg(num, title_name, operator, n0, n1, city):
-    num_x = 150 if len(num) == 1 else 210
-    split_x = num_x - 16          # route-number half, band-colored rest
+    # every route runs the number at 84px (2026-10-20 ruling: 270's old
+    # 64px shrink cramped the band); the green half is sized from the digit
+    # count so the side padding stays ≈40px like the 1-digit header
+    num_w = len(num) * 52 - 2 * (len(num) - 1)  # ~0.62em digits, -2px tracking
+    split_x = num_w + 80          # route-number half, ~40px padding each side
+    num_x = split_x + 16
     svg = []
     svg.append(f'<rect x="0" y="0" width="{W}" height="112" fill="{HEADER}"/>')
     svg.append(f'<rect x="0" y="0" width="{split_x}" height="112" fill="{HALF}"/>')
@@ -291,7 +295,7 @@ def title_svg(num, title_name, operator, n0, n1, city):
 
 def wrap_html(svg, num, start, end, operator, W_H, caption):
     w, h = W_H
-    css = css_block().replace("%NUM%", "84" if len(num) == 1 else "64").replace("%TITLE%", "28px" if h > 900 else "30px")
+    css = css_block().replace("%NUM%", "84").replace("%TITLE%", "28px" if h > 900 else "30px")
     return f"""<meta charset="utf-8">
 <title>台中公車{esc(num)}路線圖</title>
 <meta name="claude:viewport-fit-sides" content="cover">
