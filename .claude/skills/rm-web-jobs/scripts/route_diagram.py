@@ -259,7 +259,7 @@ body {
 .wrap { max-width: 1180px; margin: 0 auto; }
 .scroller { overflow-x: auto; border: 1px solid var(--edge); border-radius: 10px;
   background: %s; box-shadow: 0 10px 30px rgba(0,0,0,.10); }
-svg { display: block; width: 1123px; max-width: none; height: auto; }
+svg { display: block; width: 100%%; height: auto; }
 figure { margin: 0; }
 figcaption { margin-top: 12px; background: var(--mint); border: 1px solid var(--mint-edge);
   border-radius: 8px; padding: 10px 14px; color: var(--muted); font-size: 13px; line-height: 1.7; }
