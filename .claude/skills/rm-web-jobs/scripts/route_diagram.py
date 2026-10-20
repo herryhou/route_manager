@@ -403,8 +403,9 @@ def draw_route(dirs, meta):
             loops.append(bool(g["parts"][1]) and g["parts"][0][0]["name"] == g["parts"][1][-1]["name"])
             # top line L->R (continues into the turn), squared right turn
             # with rounded corners (⊐, 2026-10-20 ruling),
-            # bottom line R->L ending in the direction arrow at the
-            # terminus — one arrowhead per direction
+            # bottom line R->L ending in the direction arrow short of the
+            # terminus dot (tip at X0+5, clear of the dot's 5.5 edge) —
+            # one arrowhead per direction
             svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1}" y2="{ya:.1f}" stroke="{GREEN}" stroke-width="3"/>')
             # the bend sits half a stop-pitch right of the last dot
             # (2026-10-20 ruling) so the turn doesn't crowd the corner dots
@@ -412,12 +413,13 @@ def draw_route(dirs, meta):
             _half = (X1 - X0) / (_k0 - 1) / 2 if _k0 > 1 else 13.0
             _off, _r = (22 + _half) / 2, 10.0
             svg.append(f'<path d="M {X1} {ya:.1f} H {X1 + _off - _r:.1f} A {_r} {_r} 0 0 1 {X1 + _off:.1f} {ya + _r:.1f} V {yb - _r:.1f} A {_r} {_r} 0 0 1 {X1 + _off - _r:.1f} {yb:.1f} H {X1}" fill="none" stroke="{GREEN}" stroke-width="3"/>')
-            svg.append(f'<line x1="{X1}" y1="{yb:.1f}" x2="{X0 + 4}" y2="{yb:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
+            svg.append(f'<line x1="{X1}" y1="{yb:.1f}" x2="{X0 + 13}" y2="{yb:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
         else:
             modes.append("single line")
             loops.append(False)
-            # one continuous L->R line ending in the direction arrow
-            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1}" y2="{ya:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
+            # one continuous L->R line ending in the direction arrow past
+            # the last dot (base at X1+7, clear of the dot's 5.5 edge)
+            svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1 + 9}" y2="{ya:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
         for i, part in enumerate(g["parts"]):
             if not part:
                 continue
