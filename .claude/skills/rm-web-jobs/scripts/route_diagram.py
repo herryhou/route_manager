@@ -266,7 +266,7 @@ figcaption { margin-top: 12px; background: var(--mint); border: 1px solid var(--
 figcaption b { color: var(--fg); font-weight: 500; }
 .num { font-size: %%NUM%%px; font-weight: 900; fill: %s; letter-spacing: -2px; }
 .eyebrow { font-size: 15px; font-weight: 500; fill: %s; letter-spacing: 6px; }
-.title { font-size: %s; font-weight: 700; fill: %s; letter-spacing: 1px; }
+.title { font-size: %s; font-weight: 500; fill: %s; letter-spacing: 1px; }
 .sub { font-size: 11.5px; fill: %s; }
 .dir { font-size: 14px; font-weight: 700; fill: %s; letter-spacing: 2px; }
 .vn { font-weight: 500; fill: %s; }
