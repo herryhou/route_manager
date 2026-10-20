@@ -282,7 +282,7 @@ def title_svg(num, title_name, operator, n0, n1, city):
     # count so the side padding stays ≈40px like the 1-digit header
     num_w = len(num) * 52 - 2 * (len(num) - 1)  # ~0.62em digits, -2px tracking
     split_x = num_w + 80          # route-number half, ~40px padding each side
-    lean = 20.0                   # 10° slant on the band edge (tan10° × 112 ≈
+    lean = 10.0                   # 10° slant on the band edge (tan10° × 112 ≈
                                   # 20 — lean is px, not degrees): forward-
                                   # leaning like an italic, less rigid than a
                                   # vertical cut (2026-10-20 ruling)
