@@ -209,7 +209,11 @@ def road_marks(spans, x_of, below, y):
     for s in spans:
         if not s["road"] or s["count"] < 3:
             continue
-        xa, xb = x_of(s["from_seq"]), x_of(s["to_seq"])
+        # RTL rows (hairpin bottom) map from_seq to the right — normalise
+        # the pair so the span survives; without this the xa >= xb guard
+        # below dropped every guide on those rows
+        x1, x2 = x_of(s["from_seq"]), x_of(s["to_seq"])
+        xa, xb = min(x1, x2), max(x1, x2)
         if xa >= xb:
             continue
         # the guide must fully contain the end dots: extend past their
