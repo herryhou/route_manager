@@ -52,11 +52,11 @@ X0, X1 = 80.0, 1040.0
 INK = "#1C1917"
 MUTED = "#78716C"
 ROAD = "#57534E"
-ACCENT = "#9A3412"                  # one-way (▲/▽) names only — caption says 紅字
+ACCENT = "#EA580C"                  # one-way (▲/▽) names only — caption says 橙字
 PAPER = "#FFFFFF"
-GREEN = "#14532D"                   # route line, dots, arrowhead, direction labels
-HEADER = "#222288"                  # header band (BAND below is hairpin gap — don't collide)
-HALF = "#22DD11"                    # route-number half of the header band
+GREEN = "#065F46"                   # route backbone: line, dots, arrowhead, direction labels
+HEADER = "#134E4A"                  # header band (BAND below is hairpin gap — don't collide)
+HALF = "#10B981"                    # route-number half of the header band
 PALE_YELLOW = "#FDE68A"             # eyebrow on the band
 PALE_MINT = "#D1FAE5"               # operator/station-count line on the band
 
@@ -264,7 +264,7 @@ figcaption b { color: var(--fg); font-weight: 500; }
 .vn.t1 { font-weight: 700; }
 .v { writing-mode: vertical-rl; text-orientation: upright; }
 .road { letter-spacing: 0.5px; fill: %s; }
-""" % (PAPER, INK, PALE_YELLOW, "%TITLE%", "#FFFFFF", PALE_MINT, GREEN, INK, ROAD)
+""" % (PAPER, "#FFFFFF", PALE_YELLOW, "%TITLE%", "#FFFFFF", PALE_MINT, GREEN, INK, ROAD)
 
 
 
@@ -436,7 +436,7 @@ def draw_route(dirs, meta):
     loop_note = '；向內首尾同站者以左端虛線迴轉表示' if any(loops) else ''
     caption = (f'<b>{esc(meta["city"])}公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：去程 {len(dirs[0]["rows"])} 站（{esc(meta["start"])} → {esc(meta["end"])}）、'
                f'返程 {len(dirs[1]["rows"])} 站（{esc(meta["end"])} → {esc(meta["start"])}）{loop_note}。'
-               f'粗體為服務 ≥15 條路線的重點站；紅字＋▲／▽ 為僅單向停靠之站名。'
+               f'粗體為服務 ≥15 條路線的重點站；橙字＋▲／▽ 為僅單向停靠之站名。'
                f'資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。')
     return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H
 
