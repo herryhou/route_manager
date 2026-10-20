@@ -311,20 +311,23 @@ def wrap_html(svg, num, start, end, operator, W_H, caption):
 # -------------------------------------------------- layout by density ----
 
 BAND = 70.0                         # gap between a hairpin's two lines
-BASE_SIZE = 13.0                    # one size for every stop name (2026-10-20
-                                    # ruling: no tiers, no bold; 10->13 so dense
-                                    # routes like 153/270 stop reading tiny)
+BASE_SIZE = 10.0                    # one size for every stop name (2026-10-20
+                                    # ruling: no tiers, no bold; back from 13 —
+                                    # the lift lives in MIN_SCALE, base stays)
+MIN_SCALE = 1.3                     # dense-row floor: >=13px names on packed
+                                    # routes like 153/270 (2026-10-20 ruling:
+                                    # lift only dense rows, not sparse ones)
 REF_PITCH = 22.0                    # row pitch (px per stop) at scale 1.0
 MAX_SCALE = 2.2                     # sparse-row cap (2026-10-19: 25/side -> 1.8x, 23/side -> ~2.1x)
 
 
 def row_scale(k):
     """Type scale for a row of k stops: pitch/REF_PITCH clamped to
-    [1.0, MAX_SCALE] — sparser rows get proportionally bigger type
-    (25 stops/side = 40px pitch -> 1.8x, 23 stops -> ~2.1x)."""
+    [MIN_SCALE, MAX_SCALE] — dense rows bottom out at 1.3 (13px names),
+    sparser rows grow proportionally (40px pitch -> 1.8x, 23 -> ~2.1x)."""
     if k <= 1:
         return MAX_SCALE
-    return max(1.0, min(MAX_SCALE, ((X1 - X0) / (k - 1)) / REF_PITCH))
+    return max(MIN_SCALE, min(MAX_SCALE, ((X1 - X0) / (k - 1)) / REF_PITCH))
 
 
 def col_max(rows, scale):
