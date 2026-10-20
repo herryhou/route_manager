@@ -31,7 +31,7 @@ text.
 Usage:
   python3 route_diagram.py --query 5 [--route-id 3] [--out route5-diagram.html]
                            [--num 5] [--start 臺中車站] [--end 僑光科技大學]
-                           [--operator 全航客運] [--url http://127.0.0.1:8791]
+                           [--operator 全航客運] [--url http://127.0.0.1:8787]
 
 Outputs the HTML plus a work dir (<out>.d/) with the cached API dumps and
 check.txt (per-stop road assignment + snap distances) for review.
@@ -217,7 +217,7 @@ def road_marks(spans, x_of, below, y):
         # (2026-10-20 ruling, reversing the earlier inset). Text stays
         # centred on the true span. Adjacent spans sit ≥1 dot apart
         # (≥3-stop spans only), so ±8 never bridges two guides.
-        la, lb = xa - 8, xb + 8
+        la, lb = xa - 4, xb + 4
         half = len(s["road"]) * ROAD_FONT / 2 + 4
         tx = min(max((xa + xb) / 2, 37.5 + half), W - 37.5 - half)
         out.append(f'<line x1="{la:.1f}" y1="{y + dy:.1f}" x2="{lb:.1f}" y2="{y + dy:.1f}" stroke="{GUIDE}" stroke-width="1"/>'
@@ -459,13 +459,13 @@ def main():
     ap.add_argument("--city", default="臺中市", help="city for the eyebrow/caption (e.g. 臺中市, 臺北市)")
     ap.add_argument("--db", help="city db name for the caption (default: rm-web)")
     ap.add_argument("--out", help="output HTML path (default: route<num>-diagram.html in cwd)")
-    ap.add_argument("--url", default=None, help="rm-web base URL (default $RM_WEB_URL or http://127.0.0.1:8791)")
+    ap.add_argument("--url", default=None, help="rm-web base URL (default $RM_WEB_URL or http://127.0.0.1:8787)")
     ap.add_argument("--workdir", help="cache dir (default: <out>.d)")
     a = ap.parse_args()
     if not a.query and not a.route_id:
         ap.error("--query or --route-id required")
 
-    base = a.url or os.environ.get("RM_WEB_URL") or "http://127.0.0.1:8791"
+    base = a.url or os.environ.get("RM_WEB_URL") or "http://127.0.0.1:8787"
     base = base.rstrip("/")
 
     # resolve route_id + metadata from the routes index
