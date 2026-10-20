@@ -282,10 +282,13 @@ def title_svg(num, title_name, operator, n0, n1, city):
     # count so the side padding stays ≈40px like the 1-digit header
     num_w = len(num) * 52 - 2 * (len(num) - 1)  # ~0.62em digits, -2px tracking
     split_x = num_w + 80          # route-number half, ~40px padding each side
-    num_x = split_x + 16
+    lean = 30.0                   # 15° slant on the band edge (tan15° × 112):
+                                  # forward-leaning like an italic, less rigid
+                                  # than a vertical cut (2026-10-20 ruling)
+    num_x = split_x + lean + 16   # clear the slant's bottom-edge extent
     svg = []
     svg.append(f'<rect x="0" y="0" width="{W}" height="112" fill="{HEADER}"/>')
-    svg.append(f'<rect x="0" y="0" width="{split_x}" height="112" fill="{HALF}"/>')
+    svg.append(f'<polygon points="0,0 {split_x + lean},0 {split_x - lean:.1f},112 0,112" fill="{HALF}"/>')
     svg.append(f'<text x="{split_x / 2:.1f}" y="92" text-anchor="middle" class="num">{esc(num)}</text>')
     svg.append(f'<text x="{num_x}" y="46" class="eyebrow">{esc(city)}公車</text>')
     svg.append(f'<text x="{num_x}" y="88" class="title">{esc(title_name)}</text>')
