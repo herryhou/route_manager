@@ -212,9 +212,14 @@ def road_marks(spans, x_of, below, y):
         xa, xb = x_of(s["from_seq"]), x_of(s["to_seq"])
         if xa >= xb:
             continue
+        # the span runs dot-centre to dot-centre; inset the guide past the
+        # end dots' outer edge (r4 + half stroke = 5.5) so the line heads
+        # don't touch the circles (2026-10-20 ruling). Text stays centred
+        # on the true span.
+        la, lb = xa + 8, xb - 8
         half = len(s["road"]) * ROAD_FONT / 2 + 4
         tx = min(max((xa + xb) / 2, 37.5 + half), W - 37.5 - half)
-        out.append(f'<line x1="{xa:.1f}" y1="{y + dy:.1f}" x2="{xb:.1f}" y2="{y + dy:.1f}" stroke="{GUIDE}" stroke-width="1"/>'
+        out.append(f'<line x1="{la:.1f}" y1="{y + dy:.1f}" x2="{lb:.1f}" y2="{y + dy:.1f}" stroke="{GUIDE}" stroke-width="1"/>'
                    f'<text x="{tx:.1f}" y="{y + ty:.1f}" text-anchor="middle" class="road" font-size="{ROAD_FONT}">{esc(s["road"])}</text>')
     return "".join(out)
 
