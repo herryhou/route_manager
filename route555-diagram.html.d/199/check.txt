@@ -1,0 +1,16 @@
+== direction 0: 4 stops, 63 way runs, 3 road spans
+    1 臺中國際機場1月台  [中航路]  snap=49.7m  routes=6
+    2 水湳轉運中心  [中科路]  snap=31.9m  routes=10
+    3 綠美圖(中科路)  [中科路]  snap=54.9m  routes=4
+    4 捷運文華高中站(文心路)  [文心路]  snap=5.1m  routes=2
+  worst snap: seq 3 綠美圖(中科路) 54.9m
+== direction 1: 6 stops, 68 way runs, 5 road spans
+    1 捷運文華高中站(文心路)  [文心路]  snap=5.1m  routes=2
+    2 市政府(專用道)  [臺灣大道]  snap=4.2m  routes=33
+    3 新光/遠百(專用道)  [臺灣大道]  snap=8.0m  routes=33
+    4 會展中心(會議中心)  [黎明路]  snap=5.3m  routes=11
+    5 水湳轉運中心  [中科路]  snap=31.9m  routes=10
+    6 臺中國際機場1月台  [中航路]  snap=38.6m  routes=6
+  worst snap: seq 6 臺中國際機場1月台 38.6m
+shared names: 3, unique dir0=1 dir1=3
+tier distribution (stop rows): t1=2 t2=6 t3=2

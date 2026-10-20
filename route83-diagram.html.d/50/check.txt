@@ -1,0 +1,51 @@
+== direction 0: 22 stops, 50 way runs, 13 road spans
+    1 捷運文心森林公園站(文心路)  [文心路]  snap=5.0m  routes=8
+    2 向上惠文路口  [向上路]  snap=2.8m  routes=3
+    3 向上郵局(林新醫院)  [向上路]  snap=6.2m  routes=3
+    4 向上河南路口  [向上路]  snap=0.5m  routes=1
+    5 大墩十一黎明路口  [大墩]  snap=10.3m  routes=1
+    6 大墩十一江和街口  [大墩]  snap=2.1m  routes=2
+    7 文心南五五權西路口  [文心南五路]  snap=9.0m  routes=1
+    8 台中魚市場(環中路)  [環中路]  snap=1.1m  routes=1
+    9 文山國小(向上路)  [向上路]  snap=3.2m  routes=2
+   10 向上嶺東路口  [向上路]  snap=7.7m  routes=2
+   11 文山游泳池  [精科路]  snap=11.4m  routes=2
+   12 新業宜家社區  [精科路]  snap=35.5m  routes=2
+   13 精科北精科一路口  [精科北路]  snap=10.3m  routes=1
+   14 精科北精科二路口  [精科北路]  snap=105.4m  routes=1
+   15 精科北精科五路口  [精科北路]  snap=7.3m  routes=1
+   16 精科八精科中路口  [精科八路]  snap=18.0m  routes=1
+   17 精科南精科南一街口  [精科南路]  snap=35.8m  routes=1
+   18 精科南精科中二路口  [精科南路]  snap=48.6m  routes=1
+   19 精科五精科中一路口  [精科五路]  snap=7.4m  routes=1
+   20 精科中精科三路口  [精科中路]  snap=48.4m  routes=1
+   21 精科中精科一路口  [精科中路]  snap=50.6m  routes=1
+   22 仁友停車場  [永春南路]  snap=2.2m  routes=13
+  worst snap: seq 14 精科北精科二路口 105.4m
+== direction 1: 23 stops, 49 way runs, 13 road spans
+    1 仁友停車場  [永春南路]  snap=4.8m  routes=12
+    2 精科中精科一路口  [精科中路]  snap=46.9m  routes=1
+    3 精科中精科三路口  [精科中路]  snap=70.3m  routes=1
+    4 精科五精科中一路口  [精科五路]  snap=2.7m  routes=1
+    5 精科南精科中二路口  [精科南路]  snap=40.7m  routes=1
+    6 精科南精科南一街口  [精科南路]  snap=43.2m  routes=1
+    7 精科八精科中路口  [精科八路]  snap=18.6m  routes=1
+    8 精科北精科五路口  [精科北路]  snap=1.5m  routes=1
+    9 精科北精科二路口  [精科北路]  snap=102.7m  routes=1
+   10 精科北精科一路口  [精科北路]  snap=13.7m  routes=1
+   11 新業宜家社區  [精科路]  snap=45.3m  routes=2
+   12 文山游泳池  [精科路]  snap=25.6m  routes=2
+   13 向上精科路口  [向上路]  snap=68.4m  routes=2
+   14 向上嶺東路口  [向上路]  snap=112.3m  routes=2
+   15 文山國小(向上路)  [向上路]  snap=17.8m  routes=2
+   16 新生里(哈魚碼頭)  [五權西路]  snap=14.3m  routes=3
+   17 文心南五五權西路口  [文心南五路]  snap=0.0m  routes=1
+   18 大墩十一江和街口  [大墩]  snap=1.3m  routes=2
+   19 大墩十一黎明路口  [大墩]  snap=7.0m  routes=1
+   20 向上河南路口  [向上路]  snap=2.9m  routes=2
+   21 向上郵局(林新醫院)  [向上路]  snap=7.3m  routes=3
+   22 向上惠文路口  [向上路]  snap=3.1m  routes=7
+   23 捷運文心森林公園站(文心路)  [文心路]  snap=5.0m  routes=8
+  worst snap: seq 14 向上嶺東路口 112.3m
+shared names: 21, unique dir0=1 dir1=2
+tier distribution (stop rows): t1=0 t2=5 t3=40
