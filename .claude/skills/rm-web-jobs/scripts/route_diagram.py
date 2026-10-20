@@ -406,7 +406,7 @@ def draw_route(dirs, meta):
             # (2026-10-20 ruling) so the turn doesn't crowd the corner dots
             _k0 = len(g["parts"][0]) if g["parts"] else 2
             _half = (X1 - X0) / (_k0 - 1) / 2 if _k0 > 1 else 13.0
-            _off, _r = 26 + _half, 14.0
+            _off, _r = (26 + _half) / 2, 14.0
             svg.append(f'<path d="M {X1} {ya:.1f} H {X1 + _off - _r:.1f} A {_r} {_r} 0 0 1 {X1 + _off:.1f} {ya + _r:.1f} V {yb - _r:.1f} A {_r} {_r} 0 0 1 {X1 + _off - _r:.1f} {yb:.1f} H {X1}" fill="none" stroke="{GREEN}" stroke-width="3"/>')
             svg.append(f'<line x1="{X1}" y1="{yb:.1f}" x2="{X0 + 4}" y2="{yb:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
         else:
