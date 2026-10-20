@@ -402,7 +402,11 @@ def draw_route(dirs, meta):
             # terminus — one arrowhead per direction, the ⊃ is a single
             # continuous path
             svg.append(f'<line x1="{X0}" y1="{ya:.1f}" x2="{X1}" y2="{ya:.1f}" stroke="{GREEN}" stroke-width="3"/>')
-            svg.append(f'<path d="M {X1} {ya:.1f} C {X1 + 26} {ya:.1f} {X1 + 26} {yb:.1f} {X1} {yb:.1f}" fill="none" stroke="{GREEN}" stroke-width="3"/>')
+            # bend apex sits half a stop-pitch right of the last dot
+            # (2026-10-20 ruling) so the turn doesn't crowd the corner dots
+            _k0 = len(g["parts"][0]) if g["parts"] else 2
+            _half = (X1 - X0) / (_k0 - 1) / 2 if _k0 > 1 else 13.0
+            svg.append(f'<path d="M {X1} {ya:.1f} C {X1 + 26 + _half:.1f} {ya:.1f} {X1 + 26 + _half:.1f} {yb:.1f} {X1} {yb:.1f}" fill="none" stroke="{GREEN}" stroke-width="3"/>')
             svg.append(f'<line x1="{X1}" y1="{yb:.1f}" x2="{X0 + 4}" y2="{yb:.1f}" stroke="{GREEN}" stroke-width="3" marker-end="url(#arw)"/>')
         else:
             modes.append("single line")
