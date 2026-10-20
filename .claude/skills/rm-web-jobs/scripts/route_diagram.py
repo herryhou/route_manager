@@ -52,9 +52,8 @@ X0, X1 = 80.0, 1040.0
 INK = "#1C1917"
 MUTED = "#78716C"
 ROAD = "#57534E"
-ACCENT = "#EA580C"                  # one-way (▲/▽) names only — caption says 橙字
 PAPER = "#FFFFFF"
-GREEN = "#065F46"                   # route backbone: line, dots, arrowhead, direction labels
+GREEN = "#047857"                   # route backbone: line, dots, arrowhead, direction labels
 HEADER = "#134E4A"                  # header band (BAND below is hairpin gap — don't collide)
 HALF = "#10B981"                    # route-number half of the header band
 PALE_YELLOW = "#FDE68A"             # eyebrow on the band
@@ -173,20 +172,18 @@ def tier_of(n):
     return 1 if n >= 15 else (2 if n >= 4 else 3)
 
 
-def vname(x, y0, name, size, marker, down, unique=False, hub=False):
+def vname(x, y0, name, size, down):
     """Vertical name column (CSS vertical-rl + upright): fullwidth （） get
     true vertical forms, every char advances exactly 1em, ink bottom lands on
     the em bottom. down=False hangs UP from flush edge y0 (start = y0-n*size);
     down=True drops DOWN with first-char ink tops at y0 (start 0.14em higher —
     CJK ink fills the lower 86% of the cell). Paren-ending/starting columns
     shift by the measured arc gaps. Explicit per-char tspans pin the same
-    positions in engines without vertical SVG text. Hub stops (>=15 routes)
-    render bold via the .vn.t1 class."""
+    positions in engines without vertical SVG text."""
     name = name.replace("(", "（").replace(")", "）")  # fullwidth: vert forms + 1em advance
-    chars = (marker if unique else "") + name
+    chars = name
     n = len(chars)
-    fill = f' fill="{ACCENT}"' if unique else ""
-    cls = "vn t1 v" if hub else "vn v"
+    cls = "vn v"
     start = (y0 - n * size) if not down else (y0 - 0.14 * size)
     if not down and name.endswith("）"):
         start += PAREN_END_GAP * size     # push down: arc bottom lands on edge
@@ -194,7 +191,7 @@ def vname(x, y0, name, size, marker, down, unique=False, hub=False):
         start -= PAREN_START_GAP * size   # pull up: arc top lands on edge
     body = "".join(f'<tspan x="{x:.1f}" y="{start + i * size:.1f}">{c}</tspan>' for i, c in enumerate(chars))
     return (f'<text x="{x:.1f}" y="{start:.1f}" class="{cls}" '
-            f'font-size="{size:.1f}"{fill}>{body}</text>')
+            f'font-size="{size:.1f}">{body}</text>')
 
 
 # Road names: strip-merge leaves only ≥3-stop spans — sparse enough that
@@ -206,13 +203,15 @@ ROAD_BELOW = (8.0, 20.0)    # (guide_dy, text_baseline_dy), gap below the line
 ROAD_ABOVE = (-8.0, -14.0)  # gap above the line
 
 
-def road_marks(spans, x_of, below, y):
+def road_marks(spans, x_of, below, y, min_x=X0):
     dy, ty = ROAD_BELOW if below else ROAD_ABOVE
     out = []
     for s in spans:
         if not s["road"] or s["count"] < 3:
             continue
-        xa, xb = x_of(s["from_seq"]), x_of(s["to_seq"])
+        xa, xb = max(x_of(s["from_seq"]), min_x), x_of(s["to_seq"])
+        if xa >= xb:
+            continue
         half = len(s["road"]) * ROAD_FONT / 2 + 4
         tx = min(max((xa + xb) / 2, 37.5 + half), W - 37.5 - half)
         out.append(f'<line x1="{xa:.1f}" y1="{y + dy:.1f}" x2="{xb:.1f}" y2="{y + dy:.1f}" stroke="{GUIDE}" stroke-width="1"/>'
@@ -261,7 +260,6 @@ figcaption b { color: var(--fg); font-weight: 500; }
 .sub { font-size: 11.5px; fill: %s; }
 .dir { font-size: 14px; font-weight: 700; fill: %s; letter-spacing: 2px; }
 .vn { font-weight: 500; fill: %s; }
-.vn.t1 { font-weight: 700; }
 .v { writing-mode: vertical-rl; text-orientation: upright; }
 .road { letter-spacing: 0.5px; fill: %s; }
 """ % (PAPER, "#FFFFFF", PALE_YELLOW, "%TITLE%", "#FFFFFF", PALE_MINT, GREEN, INK, ROAD)
@@ -303,9 +301,8 @@ def wrap_html(svg, num, start, end, operator, W_H, caption):
 # -------------------------------------------------- layout by density ----
 
 BAND = 70.0                         # gap between a hairpin's two lines
-BASE_SIZE = 10.0                    # one size for every stop name; hub stops
-                                    # (>=15 routes) carry bold instead of a
-                                    # bigger size (2026-10-20 user ruling)
+BASE_SIZE = 10.0                    # one size for every stop name (2026-10-20
+                                    # ruling: no tiers, no bold)
 REF_PITCH = 22.0                    # row pitch (px per stop) at scale 1.0
 MAX_SCALE = 2.2                     # sparse-row cap (2026-10-19: 25/side -> 1.8x, 23/side -> ~2.1x)
 
@@ -320,10 +317,8 @@ def row_scale(k):
 
 
 def col_max(rows, scale):
-    """Tallest name column in a row at this scale (chars x size); a
-    unique stop's column carries its ▲/▽ marker as one extra char."""
-    return max((len(r["name"]) + (1 if r["unique"] else 0)) * BASE_SIZE * scale
-               for r in rows)
+    """Tallest name column in a row at this scale (chars x size)."""
+    return max(len(r["name"]) * BASE_SIZE * scale for r in rows)
 
 
 def draw_route(dirs, meta):
@@ -353,7 +348,7 @@ def draw_route(dirs, meta):
             geom[d] = {"parts": parts, "scales": scales, "ya": y, "yb": None, "hairpin": False}
     H = int(cursor + 26.0)
 
-    def row_svg(rows, spans, y, first_seq, rtl, names_above, marker, scale):
+    def row_svg(rows, spans, y, first_seq, rtl, names_above, scale, road_min_x=X0):
         k = len(rows)
         pitch = (X1 - X0) / (k - 1) if k > 1 else 0.0
 
@@ -367,14 +362,13 @@ def draw_route(dirs, meta):
             if a2 <= b2:
                 shown.append({"road": s["road"], "from_seq": a2, "to_seq": b2, "count": s["count"]})
         # road marks live in the gap band, opposite the stop names
-        out = [road_marks(shown, x_of, below=names_above, y=y)]
+        out = [road_marks(shown, x_of, below=names_above, y=y, min_x=road_min_x)]
         names = []
         for r in rows:
             x = x_of(r["seq"])
             out.append(f'<circle cx="{x:.1f}" cy="{y}" r="3" fill="{PAPER}" stroke="{GREEN}" stroke-width="1.6"/>')
             names.append(vname(x, y - 12 if names_above else y + 16, r["name"],
-                               BASE_SIZE * scale, marker, down=not names_above,
-                               unique=r["unique"], hub=r["tier"] == 1))
+                               BASE_SIZE * scale, down=not names_above))
         return "".join(out), "".join(names)
 
     svg = []
@@ -390,7 +384,6 @@ def draw_route(dirs, meta):
     for d in (0, 1):
         g = geom[d]
         ya, yb = g["ya"], g["yb"]
-        marker = "▲" if d == 0 else "▽"
         if g["hairpin"]:
             modes.append("⊃ hairpin")
             loops.append(bool(g["parts"][1]) and g["parts"][0][0]["name"] == g["parts"][1][-1]["name"])
@@ -413,7 +406,11 @@ def draw_route(dirs, meta):
             body, names = row_svg(part, dirs[d]["spans"], y_row, part[0]["seq"],
                                   rtl=(g["hairpin"] and i == 1),
                                   names_above=(not g["hairpin"]) or i == 0,
-                                  marker=marker, scale=g["scales"][i])
+                                  scale=g["scales"][i],
+                                  # single-line label (→ 去程/返程) sits left of
+                                  # the line at mid-height — keep the faded
+                                  # guide clear of it
+                                  road_min_x=(X0 if g["hairpin"] else 112.0))
             bodies.append(body)
             names_all.append(names)
         if g["hairpin"] and loops[-1]:
@@ -436,7 +433,6 @@ def draw_route(dirs, meta):
     loop_note = '；向內首尾同站者以左端虛線迴轉表示' if any(loops) else ''
     caption = (f'<b>{esc(meta["city"])}公車 {esc(meta["num"])}</b>（{esc(meta["operator"])}）：去程 {len(dirs[0]["rows"])} 站（{esc(meta["start"])} → {esc(meta["end"])}）、'
                f'返程 {len(dirs[1]["rows"])} 站（{esc(meta["end"])} → {esc(meta["start"])}）{loop_note}。'
-               f'粗體為服務 ≥15 條路線的重點站；橙字＋▲／▽ 為僅單向停靠之站名。'
                f'資料：rm-web（{esc(meta["db"])}）{date.today():%Y-%m-%d}。')
     return wrap_html(svg, meta["num"], meta["start"], meta["end"], meta["operator"], (W, H), caption), H
 
