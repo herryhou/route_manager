@@ -54,9 +54,10 @@ MUTED = "#78716C"
 ROAD = "#57534E"
 ACCENT = "#9A3412"                  # one-way (▲/▽) names only — caption says 紅字
 PAPER = "#FFFFFF"
-GREEN = "#14532D"                   # header band + route line
-YELLOW = "#CA8A04"                  # dark-yellow number half of the band + rule
-PALE_YELLOW = "#FDE68A"             # eyebrow on the green band
+GREEN = "#14532D"                   # route line, dots, arrowhead, direction labels
+HEADER = "#222288"                  # header band (BAND below is hairpin gap — don't collide)
+HALF = "#22DD11"                    # route-number half of the header band
+PALE_YELLOW = "#FDE68A"             # eyebrow on the band
 PALE_MINT = "#D1FAE5"               # operator/station-count line on the band
 
 # Paren arcs hug the bracketed content: ）ink bottom sits 0.49em above its
@@ -269,10 +270,10 @@ figcaption b { color: var(--fg); font-weight: 500; }
 
 def title_svg(num, title_name, operator, n0, n1, city):
     num_x = 150 if len(num) == 1 else 210
-    split_x = num_x - 16          # dark-yellow number half, deep-green rest
+    split_x = num_x - 16          # route-number half, band-colored rest
     svg = []
-    svg.append(f'<rect x="0" y="0" width="{W}" height="112" fill="{GREEN}"/>')
-    svg.append(f'<rect x="0" y="0" width="{split_x}" height="112" fill="{YELLOW}"/>')
+    svg.append(f'<rect x="0" y="0" width="{W}" height="112" fill="{HEADER}"/>')
+    svg.append(f'<rect x="0" y="0" width="{split_x}" height="112" fill="{HALF}"/>')
     svg.append(f'<text x="{split_x / 2:.1f}" y="92" text-anchor="middle" class="num">{esc(num)}</text>')
     svg.append(f'<text x="{num_x}" y="46" class="eyebrow">{esc(city)}公車</text>')
     svg.append(f'<text x="{num_x}" y="88" class="title">{esc(title_name)}</text>')
@@ -381,7 +382,6 @@ def draw_route(dirs, meta):
     svg.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
     svg += title_svg(meta["num"], meta["title_name"], meta["operator"],
                      len(dirs[0]["rows"]), len(dirs[1]["rows"]), meta["city"])
-    svg.append(f'<line x1="48" y1="112" x2="{W - 48}" y2="112" stroke="{YELLOW}" stroke-width="3"/>')
 
     svg.append('<defs><marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse">'
                f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{GREEN}"/></marker></defs>')
