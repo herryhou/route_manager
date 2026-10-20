@@ -203,13 +203,13 @@ ROAD_BELOW = (8.0, 20.0)    # (guide_dy, text_baseline_dy), gap below the line
 ROAD_ABOVE = (-8.0, -14.0)  # gap above the line
 
 
-def road_marks(spans, x_of, below, y, min_x=X0):
+def road_marks(spans, x_of, below, y):
     dy, ty = ROAD_BELOW if below else ROAD_ABOVE
     out = []
     for s in spans:
         if not s["road"] or s["count"] < 3:
             continue
-        xa, xb = max(x_of(s["from_seq"]), min_x), x_of(s["to_seq"])
+        xa, xb = x_of(s["from_seq"]), x_of(s["to_seq"])
         if xa >= xb:
             continue
         half = len(s["road"]) * ROAD_FONT / 2 + 4
@@ -348,7 +348,7 @@ def draw_route(dirs, meta):
             geom[d] = {"parts": parts, "scales": scales, "ya": y, "yb": None, "hairpin": False}
     H = int(cursor + 26.0)
 
-    def row_svg(rows, spans, y, first_seq, rtl, names_above, scale, road_min_x=X0):
+    def row_svg(rows, spans, y, first_seq, rtl, names_above, scale):
         k = len(rows)
         pitch = (X1 - X0) / (k - 1) if k > 1 else 0.0
 
@@ -362,7 +362,7 @@ def draw_route(dirs, meta):
             if a2 <= b2:
                 shown.append({"road": s["road"], "from_seq": a2, "to_seq": b2, "count": s["count"]})
         # road marks live in the gap band, opposite the stop names
-        out = [road_marks(shown, x_of, below=names_above, y=y, min_x=road_min_x)]
+        out = [road_marks(shown, x_of, below=names_above, y=y)]
         names = []
         for r in rows:
             x = x_of(r["seq"])
@@ -406,11 +406,7 @@ def draw_route(dirs, meta):
             body, names = row_svg(part, dirs[d]["spans"], y_row, part[0]["seq"],
                                   rtl=(g["hairpin"] and i == 1),
                                   names_above=(not g["hairpin"]) or i == 0,
-                                  scale=g["scales"][i],
-                                  # single-line label (→ 去程/返程) sits left of
-                                  # the line at mid-height — keep the faded
-                                  # guide clear of it
-                                  road_min_x=(X0 if g["hairpin"] else 112.0))
+                                  scale=g["scales"][i])
             bodies.append(body)
             names_all.append(names)
         if g["hairpin"] and loops[-1]:
@@ -424,7 +420,9 @@ def draw_route(dirs, meta):
         if g["hairpin"]:
             yl, arrow = (g["ya"] + g["yb"]) / 2 + 5, "↓"
         else:
-            yl, arrow = g["ya"] + 5, "→"
+            # below the road-name row (ty = y+20) — at line height it
+            # overlapped the road guide line (2026-10-20 ruling: +30)
+            yl, arrow = g["ya"] + 30, "→"
         svg.append(f'<text x="38" y="{yl:.1f}" class="dir">{arrow} {"去程" if d == 0 else "返程"}</text>')
     svg.append("".join(bodies))
     svg.append("".join(names_all))
